@@ -9,7 +9,7 @@ FOR_RELEASE = 1
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = advanish
-advanish_FILES = Tweak.xm ASPUniversalSkip.mm ASPManualSkip.mm
+advanish_FILES = Tweak.xm ASPUniversalSkip.mm ASPManualSkip.mm ASPAdSurface.mm
 advanish_CFLAGS = -fobjc-arc
 advanish_CCFLAGS = -std=c++11 -fno-rtti -fno-exceptions -DNDEBUG
 advanish_FRAMEWORKS = UIKit QuartzCore CoreGraphics AVFoundation CoreMedia WebKit

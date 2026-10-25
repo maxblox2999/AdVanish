@@ -1,29 +1,31 @@
 #import "ASPUniversalSkip.h"
-#import <UIKit/UIKit.h>
+#import "ASPAdSurface.h"
 #import <CoreMedia/CoreMedia.h>
 #import <objc/runtime.h>
-#import <dispatch/dispatch.h>
 #include <math.h>
-#include <stdint.h>
 
 static char kStateKey;
-static NSHashTable<AVPlayer *> *gPlayers;
-static uint64_t gSequence;
 
 @interface ASPSkipRequest : NSObject
 @property (nonatomic, weak) AVPlayerItem *item;
+@property (nonatomic, weak) UIView *root;
+@property (nonatomic, weak) UIWindow *window;
 @property (nonatomic) NSUInteger generation;
-@property (nonatomic) uint64_t lastObserved;
 @property (nonatomic) NSTimeInterval deadline;
 @property (nonatomic) BOOL pending;
 @property (nonatomic) BOOL attempted;
+@property (nonatomic, copy) void (^completion)(NSString *);
+@property (nonatomic, copy) BOOL (^isCurrent)(void);
 @end
 @implementation ASPSkipRequest
 @end
 
-static void onMain(dispatch_block_t work) {
-    if ([NSThread isMainThread]) work();
-    else dispatch_async(dispatch_get_main_queue(), work);
+static void finish(ASPSkipRequest *state, NSString *message) {
+    state.pending = NO;
+    void (^completion)(NSString *) = state.completion;
+    state.completion = nil;
+    state.isCurrent = nil;
+    if (completion) completion(message);
 }
 
 static ASPSkipRequest *stateFor(AVPlayer *player) {
@@ -34,9 +36,9 @@ static ASPSkipRequest *stateFor(AVPlayer *player) {
     }
     if (state.item != player.currentItem) {
         state.generation += 1;
-        state.pending = NO;
         state.attempted = NO;
         state.item = player.currentItem;
+        finish(state, @"Media changed");
     }
     return state;
 }
@@ -70,97 +72,108 @@ static BOOL targetFor(AVPlayerItem *item, CMTime *target) {
     return NO;
 }
 
+static BOOL stillOwned(AVPlayer *player, ASPSkipRequest *state) {
+    UIView *root = state.root;
+    UIWindow *window = state.window;
+    return root && window && root.window == window && !window.hidden &&
+        state.isCurrent && state.isCurrent() &&
+        (!window.windowScene || window.windowScene.activationState == UISceneActivationStateForegroundActive) &&
+        ASPSurfaceOwnsPlayer(root, player);
+}
+
 static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation) {
     ASPSkipRequest *state = stateFor(player);
     if (!state.pending || state.generation != generation || state.item != item) return;
-    if (!playing(player) || item.status == AVPlayerItemStatusFailed ||
+    if (!playing(player) || !stillOwned(player, state)) {
+        finish(state, @"Ad changed");
+        return;
+    }
+    if (item.status == AVPlayerItemStatusFailed ||
         [NSProcessInfo processInfo].systemUptime >= state.deadline) {
-        state.pending = NO;
+        finish(state, @"Video unavailable");
+        return;
+    }
+    if (item.status == AVPlayerItemStatusReadyToPlay && item.tracks.count && !videoItem(item)) {
+        finish(state, @"No visible video");
         return;
     }
     CMTime target = kCMTimeInvalid;
-    if (item.status == AVPlayerItemStatusReadyToPlay && item.tracks.count && !videoItem(item)) {
-        state.pending = NO;
-        return;
-    }
     if (item.status != AVPlayerItemStatusReadyToPlay || !videoItem(item) ||
         player.timeControlStatus != AVPlayerTimeControlStatusPlaying || !targetFor(item, &target) ||
         !CMTIME_IS_NUMERIC(player.currentTime)) {
         __weak AVPlayer *weakPlayer = player;
         __weak AVPlayerItem *weakItem = item;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+            if (state.generation != generation || !state.pending) return;
             AVPlayer *currentPlayer = weakPlayer;
             AVPlayerItem *currentItem = weakItem;
             if (currentPlayer && currentItem) attempt(currentPlayer, currentItem, generation);
+            else finish(state, @"Media changed");
         });
         return;
     }
-    state.pending = NO;
-    if (CMTimeCompare(player.currentTime, target) >= 0) return;
+    if (CMTimeCompare(player.currentTime, target) >= 0) {
+        finish(state, @"Video at end");
+        return;
+    }
     state.attempted = YES;
     __weak AVPlayer *weakPlayer = player;
     __weak AVPlayerItem *weakItem = item;
     [player seekToTime:target toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero
         completionHandler:^(BOOL finished) {
-        if (finished) return;
-        onMain(^{
+        dispatch_async(dispatch_get_main_queue(), ^{
             AVPlayer *currentPlayer = weakPlayer;
             AVPlayerItem *currentItem = weakItem;
-            if (!currentPlayer || !currentItem) return;
-            ASPSkipRequest *currentState = stateFor(currentPlayer);
-            if (currentState.generation == generation && currentState.item == currentItem) {
-                currentState.attempted = NO;
+            if (state.generation != generation || !state.pending) return;
+            if (!currentPlayer || !currentItem || currentPlayer.currentItem != currentItem) {
+                finish(state, @"Media changed");
+                return;
             }
+            if (!finished) state.attempted = NO;
+            finish(state, finished ? @"Seek completed" : @"Seek rejected");
         });
     }];
 }
 
-void ASPUniversalSkipObservePlayer(AVPlayer *player) {
-    if (!player) return;
-    __weak AVPlayer *weakPlayer = player;
-    onMain(^{
-        AVPlayer *currentPlayer = weakPlayer;
-        if (!currentPlayer) return;
-        if (!gPlayers) gPlayers = [NSHashTable weakObjectsHashTable];
-        if (![gPlayers containsObject:currentPlayer] && gPlayers.count >= 64) {
-            AVPlayer *oldest = nil;
-            uint64_t oldestSequence = UINT64_MAX;
-            for (AVPlayer *candidate in gPlayers.allObjects) {
-                if (stateFor(candidate).lastObserved < oldestSequence) {
-                    oldest = candidate;
-                    oldestSequence = stateFor(candidate).lastObserved;
-                }
-            }
-            if (oldest) {
-                ASPSkipRequest *oldState = stateFor(oldest);
-                oldState.generation += 1;
-                oldState.pending = NO;
-                [gPlayers removeObject:oldest];
-            }
+void ASPUniversalSkipNow(NSArray<AVPlayer *> *players, UIView *root,
+                         NSMapTable<AVPlayer *, AVPlayerItem *> *items,
+                         BOOL (^isCurrent)(void), void (^completion)(NSString *)) {
+    NSCAssert([NSThread isMainThread], @"Manual actions must run on the main thread");
+    if (!isCurrent || !isCurrent()) {
+        completion(@"Ad changed");
+        return;
+    }
+    AVPlayer *selected = nil;
+    for (AVPlayer *player in players) {
+        if (!playing(player) || !player.currentItem ||
+            [items objectForKey:player] != player.currentItem || !ASPSurfaceOwnsPlayer(root, player)) continue;
+        if (player.currentItem.status == AVPlayerItemStatusReadyToPlay && player.currentItem.tracks.count &&
+            !videoItem(player.currentItem)) continue;
+        selected = player;
+        break;
+    }
+    if (!selected) {
+        completion(@"No visible video");
+        return;
+    }
+    ASPSkipRequest *state = stateFor(selected);
+    if (state.pending || state.attempted) {
+        completion(state.pending ? @"Seek pending" : @"Already requested");
+        return;
+    }
+    state.generation += 1;
+    state.pending = YES;
+    state.root = root;
+    state.window = root.window;
+    state.completion = completion;
+    state.isCurrent = isCurrent;
+    state.deadline = [NSProcessInfo processInfo].systemUptime + 5.0;
+    NSUInteger generation = state.generation;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (state.pending && state.generation == generation) {
+            state.attempted = NO;
+            finish(state, @"Request timed out");
         }
-        stateFor(currentPlayer).lastObserved = ++gSequence;
-        [gPlayers addObject:currentPlayer];
     });
-}
-
-void ASPUniversalSkipNow(void) {
-    onMain(^{
-        AVPlayer *selected = nil;
-        uint64_t latest = 0;
-        for (AVPlayer *player in gPlayers.allObjects) {
-            ASPSkipRequest *state = stateFor(player);
-            if (!playing(player) || !state.item || state.lastObserved <= latest) continue;
-            if (state.item.status == AVPlayerItemStatusReadyToPlay && state.item.tracks.count &&
-                !videoItem(state.item)) continue;
-            latest = state.lastObserved;
-            selected = player;
-        }
-        if (!selected) return;
-        ASPSkipRequest *state = stateFor(selected);
-        if (state.pending || state.attempted) return;
-        state.generation += 1;
-        state.pending = YES;
-        state.deadline = [NSProcessInfo processInfo].systemUptime + 5.0;
-        attempt(selected, state.item, state.generation);
-    });
+    attempt(selected, state.item, generation);
 }

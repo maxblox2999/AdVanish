@@ -169,7 +169,7 @@
         }
     }
 
-    function skipVideo(video, state) {
+    function skipVideo(video, state, explicit) {
         if (state.attempted) {
             return false;
         }
@@ -195,19 +195,32 @@
         if (!seekable) {
             return false;
         }
+        var looping = video.loop === true;
+        if (looping && !explicit) return false;
         state.attempted = true;
         stats.skipAttempts += 1;
         try {
+            if (looping) {
+                video.loop = false;
+                if (video.loop) throw new Error('Loop cannot be disabled');
+            }
             video.currentTime = target;
             stats.skipped += 1;
             return true;
         } catch (error) {
+            if (looping) {
+                try {
+                    video.loop = true;
+                } catch (restoreError) {
+                    stats.mediaFailures += 1;
+                }
+            }
             stats.seekFailures += 1;
             return false;
         }
     }
 
-    function scan(shouldSkip) {
+    function scan(shouldSkip, explicit) {
         if (refreshing || pageHidden()) {
             if (pageHidden()) {
                 changeMode(false);
@@ -241,7 +254,7 @@
                         video.playsInline = true;
                     }
                     applyRate(video, state);
-                    if (shouldSkip && skipVideo(video, state)) {
+                    if (shouldSkip && skipVideo(video, state, explicit)) {
                         skipped += 1;
                     }
                 } catch (error) {
@@ -376,10 +389,9 @@
         }
     }
 
-    function requestSkip() {
-        if (pageHidden()) return 0;
-        var result = scan(true);
-        if (!result && manualClose) {
+    function closeAd() {
+        var result = 0;
+        if (manualClose && !pageHidden()) {
             try {
                 var bridge = window.mraid;
                 if (bridge && typeof bridge.close === 'function'
@@ -399,6 +411,13 @@
                 stats.closeFailures += 1;
             }
         }
+        return result;
+    }
+
+    function requestSkip() {
+        if (pageHidden()) return 0;
+        var result = scan(true, true);
+        if (!result) result = closeAd();
         if (typeof skipChannel === 'string' && skipChannel.length) {
             var count = window.frames ? Math.min(window.frames.length, 64) : 0;
             for (var index = 0; index < count; index += 1) {
@@ -413,10 +432,112 @@
         return result;
     }
 
+    var requestSequence = 0;
+    var requestPrefix = String(dateNow()) + ':' + String(Math.floor(Math.random() * 0x100000000)) + ':';
+    var pendingChildren = null;
+    var activeRequest = null;
+    var receivedRequests = new Map();
+    var maximumFrameDepth = 8;
+
+    function frameCandidates() {
+        var result = {children: [], unresolved: 0};
+        try {
+            var nodes = document.querySelectorAll('iframe,frame');
+            var count = Math.min(nodes.length, 64);
+            if (nodes.length > count || (window.frames && window.frames.length > nodes.length)) {
+                result.unresolved += 1;
+            }
+            for (var index = 0; index < count; index += 1) {
+                var node = nodes[index];
+                if (!visible(node)) continue;
+                var child = node.contentWindow;
+                if (!child || typeof child.postMessage !== 'function') {
+                    result.unresolved += 1;
+                } else if (!result.children.some(function (entry) { return entry.source === child; })) {
+                    result.children.push({source: child, node: node, pending: true});
+                }
+            }
+        } catch (error) {
+            result.unresolved += window.frames && window.frames.length ? 1 : 0;
+        }
+        return result;
+    }
+
+    function relayChildren(depth) {
+        var candidates = frameCandidates();
+        if (!candidates.children.length) return Promise.resolve({handled: 0, unresolved: candidates.unresolved});
+        if (depth >= maximumFrameDepth || typeof skipChannel !== 'string' || !skipChannel.length) {
+            return Promise.resolve({handled: 0, unresolved: candidates.unresolved + candidates.children.length});
+        }
+        return new Promise(function (resolve) {
+            var record = {
+                id: requestPrefix + (++requestSequence),
+                children: candidates.children,
+                remaining: candidates.children.length,
+                handled: 0,
+                unresolved: candidates.unresolved,
+                timer: null,
+                finish: function () {
+                    if (pendingChildren !== record) return;
+                    pendingChildren = null;
+                    nativeClearTimeout.call(window, record.timer);
+                    resolve({handled: record.handled, unresolved: Math.min(4096, record.unresolved + record.remaining)});
+                }
+            };
+            pendingChildren = record;
+            record.timer = nativeTimeout.call(window, record.finish, 800 - depth * 80);
+            record.children.forEach(function (entry) {
+                try {
+                    entry.source.postMessage({adSpeedRequest: skipChannel, id: record.id, depth: depth + 1}, '*');
+                    stats.frameRequests += 1;
+                } catch (error) {
+                    entry.pending = false;
+                    record.remaining -= 1;
+                    record.unresolved += 1;
+                }
+            });
+            if (!record.remaining) record.finish();
+        });
+    }
+
+    function requestSkipAsync(depth) {
+        if (activeRequest) return activeRequest;
+        if (pageHidden()) return Promise.resolve({handled: 0, unresolved: 1});
+        var local = scan(true, true);
+        if (local) return Promise.resolve({handled: local, unresolved: 0});
+        activeRequest = relayChildren(depth).then(function (result) {
+            if (pageHidden()) result.unresolved = Math.min(4096, result.unresolved + 1);
+            if (!result.handled && !result.unresolved) result.handled = closeAd();
+            activeRequest = null;
+            return result;
+        }, function () {
+            activeRequest = null;
+            return {handled: 0, unresolved: 1};
+        });
+        return activeRequest;
+    }
+
+    function validCount(value) {
+        return typeof value === 'number' && isFinite(value) && value >= 0 && value <= 4096
+            && Math.floor(value) === value;
+    }
+
+    function replyToParent(parent, id, result) {
+        try {
+            parent.postMessage({adSpeedReply: skipChannel, id: id,
+                handled: result.handled, unresolved: result.unresolved}, '*');
+        } catch (error) {
+            // The parent can navigate while the request is pending.
+        }
+    }
+
     var api = {
-        version: 1,
+        version: 2,
         skip: function () {
             return requestSkip();
+        },
+        skipAsync: function () {
+            return requestSkipAsync(0);
         },
         stats: stats
     };
@@ -433,8 +554,45 @@
 
     if (typeof window.addEventListener === 'function' && typeof skipChannel === 'string' && skipChannel.length) {
         window.addEventListener('message', function (event) {
-            if (window.parent !== window && event.source === window.parent && event.data
-                && event.data.adSpeedSkip === skipChannel) requestSkip();
+            var data = event.data;
+            if (!data) return;
+            var record = pendingChildren;
+            if (record && data.adSpeedReply === skipChannel && data.id === record.id
+                && validCount(data.handled) && validCount(data.unresolved)) {
+                var entry = record.children.find(function (child) { return child.source === event.source; });
+                if (!entry || !entry.pending) return;
+                entry.pending = false;
+                record.remaining -= 1;
+                record.handled = Math.min(4096, record.handled + data.handled);
+                record.unresolved = Math.min(4096, record.unresolved + data.unresolved);
+                if (!visible(entry.node)) record.unresolved += 1;
+                if (!record.remaining) record.finish();
+                return;
+            }
+            if (window.parent === window || event.source !== window.parent) return;
+            if (data.adSpeedSkip === skipChannel) {
+                requestSkip();
+                return;
+            }
+            if (data.adSpeedRequest !== skipChannel || typeof data.id !== 'string'
+                || !/^[0-9:.]{1,96}$/.test(data.id) || typeof data.depth !== 'number'
+                || data.depth < 1 || data.depth > maximumFrameDepth || Math.floor(data.depth) !== data.depth) return;
+            var received = receivedRequests.get(data.id);
+            if (received) {
+                if (received.result) replyToParent(event.source, data.id, received.result);
+                return;
+            }
+            if (receivedRequests.size >= 16) receivedRequests.delete(receivedRequests.keys().next().value);
+            received = {result: null};
+            receivedRequests.set(data.id, received);
+            var response = activeRequest ? Promise.resolve({handled: 0, unresolved: 1})
+                : requestSkipAsync(data.depth);
+            var parent = event.source;
+            var id = data.id;
+            response.then(function (result) {
+                received.result = result;
+                replyToParent(parent, id, result);
+            });
         }, false);
     }
 

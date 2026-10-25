@@ -1,16 +1,16 @@
 # AdVanish
 
-A manual **Skip current ad** button for jailbroken iOS apps. It uses AVPlayer, HTML video and the standard MRAID close interface, without requiring an ad SDK class-name match.
+A manual **Skip current ad** button for jailbroken iOS apps. It finds the displayed ad surface, then uses its player, HTML video, ready close/skip control or the standard MRAID close interface. Decompiled SDK paths improve ownership detection; a visible-media fallback covers other SDKs without a class-name match.
 
 Enable an app in **Settings > AdVanish**, reopen it, then press the floating button during an ad. Drag the button to move it. Manual mode leaves normal playback, timers and clocks unchanged until you press it. Legacy blocking and acceleration remain available when the manual button is disabled.
 
-A button press requests video completion or a supported ad close. Playable ads, nonseekable media, app-controlled close gates and server-validated rewards can reject or ignore it. Pressing it during ordinary video can skip that video. This is not a promise that every ad can be removed or every reward preserved.
+A button press requests video completion or activates an available close/skip action. Requests stay within the selected scene and surface. Offscreen players are excluded, and an empty webview can fall through to its owner's native player after child frames acknowledge the request. Playable ads, nonseekable media, app-controlled close gates and server-validated rewards can reject or ignore it. The generic fallback cannot prove that visible media is an ad. Pressing the button during ordinary video can skip that video. This is not a promise that every ad can be removed or every reward preserved.
 
 ## Compatibility
 
 | iOS | Status |
 | --- | --- |
-| 15â€“18 | Target range for rootless and rootful builds. Device testing is still needed. |
+| 15-18 | Target range for rootless and rootful builds. Device testing is still needed. |
 | 26 | Experimental, with a low chance of working. Not device-tested. |
 
 A compatible jailbreak and tweak loader are required. A build's deployment target does not establish jailbreak support. Both packages contain arm64 and arm64e slices and use an iOS 15 deployment minimum. Existing AdSpeed per-app preferences are retained.

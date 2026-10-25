@@ -1,6 +1,6 @@
 # Verification
 
-The shared web engine has 34 Node VM regression tests covering manual-only behavior, media eligibility, source changes, failed seeks, duplicate injection, timer/clock behavior, cross-frame message validation and standard MRAID close requests. Run them with:
+The shared web engine has 47 Node VM regression tests covering manual-only behavior, media eligibility, source changes, failed seeks, duplicate injection, timer/clock behavior, cross-frame request acknowledgments, stale/spoofed replies, bounded timeouts, loop handling and standard MRAID close requests. Run them with:
 
 ```sh
 node scripts/embed-web.cjs
@@ -19,14 +19,15 @@ Native compilation results are recorded in public Actions logs. A passing build 
 - Check taps outside the button, foreground/background transitions and app relaunches.
 - Confirm normal video, audio-only playback, timers and clocks remain unchanged before pressing the button.
 - Test native video, web video including cross-origin frames, repeated ads, pause/cancel, playables, close gates and actual rewards.
+- Check native video with a non-video web postitial, hidden/offscreen preloaders, multiple scenes, partially covering windows, and media replacement during a pending request. View/layer visibility is sampled and still requires device verification.
 - Verify the rootless and rootful packages on their matching jailbreak layouts. Treat iOS 26 as experimental with a low chance of working.
 
-A manual request can select ordinary media if that is what is currently visible or playing. The code does not fabricate reward/completion events or forcibly dismiss an SDK's controller. Some close/reward gates remain outside the shared media interfaces.
+A manual request can select ordinary media if that is what is currently visible or playing. The code does not fabricate reward/completion events or forcibly dismiss an SDK's controller. SDK controls require a verified getter, the expected runtime type, an enabled and interactive view hierarchy, and an unobstructed hit target. Native player requests freeze the original item and recheck the current scene/surface during readiness retries. Some close/reward gates remain outside the shared media interfaces.
 
 ## Analysis provenance
 
 The supplied AdSpeed 2.2.1.2 dylib had SHA-256 `7bf6dc5f2a884719af6a6a3d2f91c551bb8ba432d45d3eaecadc38a2ee6b582a`. Direct Ghidra 12.1.4 analysis recovered 31 arm64 function bodies. All 179 decoded hook-table entries matched the selected upstream fork in class, selector, order and stub type. This established the reviewed implementation paths, not a reproducible full-build identity.
 
-Seven user-supplied IPAs were inventoried with REA and supplemental static parsing. Their plists all declared iOS 18.0 minima. Those samples do not establish older-iOS runtime compatibility. None of the games, their binaries, assets or private data are part of this repository or a build input.
+Seven user-supplied IPAs were inventoried with REA and supplemental static parsing, followed by direct Ghidra decompilation of selected ad-controller implementations in every sample. Their plists all declared iOS 18.0 minima. Those samples do not establish older-iOS runtime compatibility. None of the games, their binaries, assets, decompiled pseudocode or private data are part of this repository or a build input. See [ANALYSIS.md](ANALYSIS.md) for the findings used by the detector.
 
 References: [Theos rootless layout](https://theos.dev/docs/rootless), [HTML media seeking](https://html.spec.whatwg.org/multipage/media.html#seeking), [IAB MRAID 3.0](https://dev.iabtechlab.com/wp-content/uploads/2018/06/MRAID_3.0_FINAL_June_2018.pdf).

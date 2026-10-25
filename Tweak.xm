@@ -46,7 +46,6 @@ static BOOL  gForceInline  = NO;
 static BOOL  gSpeedNative  = NO;
 static BOOL  gManualSkip = NO;
 static float gVideoRate  = 8.0f;
-static int   gAdDepth    = 0;     // >0 while a known ad view-controller is visible
 
 static NSDictionary *loadPrefs(void) {
     // The Settings panel writes via CFPreferences for the mobile user; read the plist
@@ -446,66 +445,27 @@ static const AdHook kJailbreakHooks[] = {
 
 #pragma mark - Video ad context + speed-up
 
-// Mark "we are inside an ad" by counting visible ad view-controllers. Uses
-// viewDidAppear:/viewDidDisappear: (distinct from the *blocking* hooks above, which
-// use viewWillAppear:) so the two never collide on the same selector.
-%group AdContext
-
-%hook GADFullScreenAdViewController
+%hook UIViewController
 - (void)viewDidAppear:(BOOL)animated {
-    gAdDepth++;
     %orig;
-}
-- (void)viewDidDisappear:(BOOL)animated {
-    %orig;
-    if (gAdDepth > 0) gAdDepth--;
+    if (gActive) ASPManualSkipTrackController(self);
 }
 %end
-
-%hook MAFullscreenAdViewController
-- (void)viewDidAppear:(BOOL)animated {
-    gAdDepth++;
-    %orig;
-}
-- (void)viewDidDisappear:(BOOL)animated {
-    %orig;
-    if (gAdDepth > 0) gAdDepth--;
-}
-%end
-
-%end // group AdContext
 
 // Only touch playback rate while an ad is on screen; leave the app's own video alone.
 %hook AVPlayer
 - (void)setRate:(float)rate {
 #ifdef ADSPEED_DEBUG
-    if (gActive && rate > 0.0f) aspLog(@"AVPlayer setRate %.2f adDepth=%d", rate, gAdDepth);
+    if (gActive && rate > 0.0f) aspLog(@"AVPlayer setRate %.2f", rate);
 #endif
-    // Speed native video: in a detected ad VC always, or anywhere if the user lets us
-    // (most AVPlayer activity in these ad-heavy games is the ad itself).
+    // Legacy acceleration uses a visible owner and its actual player. The
+    // explicit all-native preference still permits other players.
     if (gActive && !gManualSkip && gSpeedVideo && isfinite(rate) && rate > 0.0f &&
-        (gSpeedNative || gAdDepth > 0)) {
+        (gSpeedNative || ASPManualSkipIsAdPlayer(self))) {
         %orig(fminf(rate * gVideoRate, 16.0f));
     } else {
         %orig(rate);
     }
-    if (gActive && gManualSkip && isfinite(rate) && rate > 0.0f) {
-        ASPUniversalSkipObservePlayer(self);
-    }
-}
-- (void)play {
-    %orig;
-    if (gActive && gManualSkip) ASPUniversalSkipObservePlayer(self);
-}
-- (void)playImmediatelyAtRate:(float)rate {
-    %orig(rate);
-    if (gActive && gManualSkip && isfinite(rate) && rate > 0.0f) {
-        ASPUniversalSkipObservePlayer(self);
-    }
-}
-- (void)replaceCurrentItemWithPlayerItem:(AVPlayerItem *)item {
-    %orig(item);
-    if (gActive && gManualSkip) ASPUniversalSkipObservePlayer(self);
 }
 %end
 
@@ -675,9 +635,6 @@ static void imageAdded(const struct mach_header *mh, intptr_t slide) {
         installEnabled();                              // classes already loaded
         _dyld_register_func_for_add_image(&imageAdded); // + lazily-loaded ad SDKs
 
-        if (gSpeedVideo && !gManualSkip) {
-            %init(AdContext);
-        }
 #endif
         // Single ungrouped %init reached by both builds — installs the AVPlayer + WKWebView
         // hooks, which self-gate on the flags above.

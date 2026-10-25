@@ -1,16 +1,15 @@
 #import "ASPManualSkip.h"
 #import "ASPUniversalSkip.h"
+#import "ASPAdSurface.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#include <math.h>
 
 static BOOL gEnabled;
 static BOOL gRefreshing;
-static NSHashTable<WKWebView *> *gWebViews;
 static NSHashTable<UIWindow *> *gKnownWindows;
 static NSMapTable<UIWindowScene *, UIWindow *> *gWindows;
 static UIWindow *gLegacyWindow;
-static char kWebSequenceKey;
-static NSUInteger gWebSequence;
 static char kWindowSequenceKey;
 static NSUInteger gWindowSequence;
 
@@ -19,7 +18,6 @@ static void refreshWindows(void);
 static void rememberWindow(UIWindow *window) {
     if (!window) return;
     if (!gKnownWindows) gKnownWindows = [NSHashTable weakObjectsHashTable];
-    if ([gKnownWindows containsObject:window]) return;
     if (gKnownWindows.count >= 64) {
         UIWindow *oldest = nil;
         NSUInteger sequence = NSUIntegerMax;
@@ -36,37 +34,43 @@ static void rememberWindow(UIWindow *window) {
     [gKnownWindows addObject:window];
 }
 
-static WKWebView *frontWebView(UIWindowScene *scene) {
+static NSArray<UIWindow *> *contentWindows(UIWindowScene *scene) {
     NSArray<UIWindow *> *windows = scene ? scene.windows : gKnownWindows.allObjects;
-    UIWindow *overlay = scene ? [gWindows objectForKey:scene] : gLegacyWindow;
-    UIWindow *front = nil;
+    NSMutableArray<UIWindow *> *content = [NSMutableArray array];
+    Class overlay = NSClassFromString(@"ASPSkipWindow");
     for (UIWindow *window in windows) {
-        if (window.hidden || window.alpha <= 0.01 || window == gLegacyWindow ||
-            window == overlay) continue;
-        NSUInteger sequence = [objc_getAssociatedObject(window, &kWindowSequenceKey) unsignedIntegerValue];
-        NSUInteger previous = [objc_getAssociatedObject(front, &kWindowSequenceKey) unsignedIntegerValue];
-        if (!front || window.windowLevel > front.windowLevel ||
-            (window.windowLevel == front.windowLevel && (scene || sequence >= previous))) front = window;
+        if ([window isKindOfClass:overlay] || window.hidden || window.alpha <= 0.01) continue;
+        if (window.windowScene != scene) continue;
+        [content addObject:window];
     }
-    WKWebView *selected = nil;
-    NSUInteger latest = 0;
-    for (WKWebView *view in gWebViews.allObjects) {
-        UIWindow *window = view.window;
-        if (!window || window.hidden || view.hidden || view.alpha <= 0.01 ||
-            window.windowScene.activationState != UISceneActivationStateForegroundActive) continue;
-        if (scene && window.windowScene != scene) continue;
-        if (front && window != front) continue;
-        CGRect visible = CGRectIntersection([view convertRect:view.bounds toView:window], window.bounds);
-        if (CGRectIsNull(visible) || CGRectIsEmpty(visible)) continue;
-        UIView *hit = [window hitTest:CGPointMake(CGRectGetMidX(visible), CGRectGetMidY(visible)) withEvent:nil];
-        if (hit != view && ![hit isDescendantOfView:view]) continue;
-        NSUInteger sequence = [objc_getAssociatedObject(view, &kWebSequenceKey) unsignedIntegerValue];
-        if (sequence >= latest) {
-            latest = sequence;
-            selected = view;
+    return [content sortedArrayUsingComparator:^NSComparisonResult(UIWindow *left, UIWindow *right) {
+        if (left.windowLevel != right.windowLevel) {
+            return left.windowLevel > right.windowLevel ? NSOrderedAscending : NSOrderedDescending;
         }
+        NSUInteger a = [objc_getAssociatedObject(left, &kWindowSequenceKey) unsignedIntegerValue];
+        NSUInteger b = [objc_getAssociatedObject(right, &kWindowSequenceKey) unsignedIntegerValue];
+        if (a != b) return a > b ? NSOrderedAscending : NSOrderedDescending;
+        NSUInteger x = [windows indexOfObjectIdenticalTo:left];
+        NSUInteger y = [windows indexOfObjectIdenticalTo:right];
+        if (x == y) return NSOrderedSame;
+        return x > y ? NSOrderedAscending : NSOrderedDescending;
+    }];
+}
+
+static ASPAdSurface *currentSurface(UIWindowScene *scene) {
+    return ASPFindAdSurface(contentWindows(scene), NO);
+}
+
+BOOL ASPManualSkipIsAdPlayer(AVPlayer *player) {
+    if (![NSThread isMainThread]) return NO;
+    for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]] ||
+            scene.activationState != UISceneActivationStateForegroundActive) continue;
+        ASPAdSurface *surface = ASPFindAdSurface(contentWindows((UIWindowScene *)scene), YES);
+        if (surface && ASPSurfaceOwnsPlayer(surface.root, player)) return YES;
     }
-    return selected;
+    ASPAdSurface *legacy = ASPFindAdSurface(contentWindows(nil), YES);
+    return legacy && ASPSurfaceOwnsPlayer(legacy.root, player);
 }
 
 @interface ASPSkipButtonController : UIViewController
@@ -115,25 +119,111 @@ static WKWebView *frontWebView(UIWindowScene *scene) {
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
 }
-- (void)skipCurrentAd {
-    if (!gEnabled || self.requestPending ||
-        [UIApplication sharedApplication].applicationState != UIApplicationStateActive) return;
-    self.requestPending = YES;
-    NSUInteger generation = ++self.feedbackGeneration;
-    [self.skipButton setTitle:@"Skip requested" forState:UIControlStateNormal];
-    WKWebView *web = frontWebView(self.view.window.windowScene);
-    if (web) {
-        [web evaluateJavaScript:@"(function(){return window.__adspeed ? window.__adspeed.skip() : 0;}())"
-             completionHandler:nil];
-    } else {
-        ASPUniversalSkipNow();
-    }
+- (BOOL)surfaceCurrent:(ASPAdSurface *)surface {
+    UIView *root = surface.root;
+    return gEnabled && root && ASPViewVisibleInSurface(root, root) &&
+        [UIApplication sharedApplication].applicationState == UIApplicationStateActive &&
+        currentSurface(self.view.window.windowScene).root == root;
+}
+- (void)finishRequest:(NSString *)message generation:(NSUInteger)generation {
+    if (self.feedbackGeneration != generation) return;
+    [self.skipButton setTitle:message forState:UIControlStateNormal];
     __weak ASPSkipButtonController *weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         ASPSkipButtonController *controller = weakSelf;
         if (!controller || controller.feedbackGeneration != generation) return;
         controller.requestPending = NO;
         [controller.skipButton setTitle:@"Skip current ad" forState:UIControlStateNormal];
+    });
+}
+- (void)trySurface:(ASPAdSurface *)surface webIndex:(NSUInteger)index generation:(NSUInteger)generation {
+    if (self.feedbackGeneration != generation) return;
+    if (![self surfaceCurrent:surface]) {
+        [self finishRequest:@"Ad changed" generation:generation];
+        return;
+    }
+    if (index >= surface.webViews.count) {
+        __weak ASPSkipButtonController *weakSelf = self;
+        ASPUniversalSkipNow(surface.players, surface.root, surface.items, ^BOOL {
+            ASPSkipButtonController *controller = weakSelf;
+            return controller && controller.feedbackGeneration == generation && [controller surfaceCurrent:surface];
+        }, ^(NSString *message) {
+            [weakSelf finishRequest:message generation:generation];
+        });
+        return;
+    }
+    WKWebView *web = surface.webViews[index];
+    if (!ASPViewVisibleInSurface(web, surface.root)) {
+        [self trySurface:surface webIndex:index + 1 generation:generation];
+        return;
+    }
+    __weak ASPSkipButtonController *weakSelf = self;
+    [web callAsyncJavaScript:@"return window.__adspeed && typeof window.__adspeed.skipAsync === 'function' ? await window.__adspeed.skipAsync() : {handled:0,unresolved:1};"
+        arguments:@{} inFrame:nil inContentWorld:[WKContentWorld pageWorld]
+        completionHandler:^(id result, NSError *error) {
+        ASPSkipButtonController *controller = weakSelf;
+        if (!controller || controller.feedbackGeneration != generation) return;
+        if (![controller surfaceCurrent:surface]) {
+            [controller finishRequest:@"Ad changed" generation:generation];
+        } else if (error || ![result isKindOfClass:[NSDictionary class]]) {
+            [controller finishRequest:@"Web unavailable" generation:generation];
+        } else if (![result[@"handled"] isKindOfClass:[NSNumber class]] ||
+                   ![result[@"unresolved"] isKindOfClass:[NSNumber class]] ||
+                   !isfinite([result[@"handled"] doubleValue]) || !isfinite([result[@"unresolved"] doubleValue]) ||
+                   [result[@"handled"] doubleValue] < 0 || [result[@"unresolved"] doubleValue] < 0 ||
+                   floor([result[@"handled"] doubleValue]) != [result[@"handled"] doubleValue] ||
+                   floor([result[@"unresolved"] doubleValue]) != [result[@"unresolved"] doubleValue] ||
+                   [result[@"handled"] doubleValue] > 4096 || [result[@"unresolved"] doubleValue] > 4096) {
+            [controller finishRequest:@"Web unavailable" generation:generation];
+        } else if ([result[@"handled"] unsignedIntegerValue] > 0) {
+            [controller finishRequest:@"Skip requested" generation:generation];
+        } else if ([result[@"unresolved"] unsignedIntegerValue] > 0) {
+            [controller finishRequest:@"Frame unavailable" generation:generation];
+        } else {
+            [controller trySurface:surface webIndex:index + 1 generation:generation];
+        }
+    }];
+}
+- (void)skipCurrentAd {
+    if (!gEnabled || self.requestPending ||
+        [UIApplication sharedApplication].applicationState != UIApplicationStateActive) return;
+    self.requestPending = YES;
+    NSUInteger generation = ++self.feedbackGeneration;
+    ASPAdSurface *surface = currentSurface(self.view.window.windowScene);
+    if (!surface) {
+        [self finishRequest:@"No visible ad" generation:generation];
+        return;
+    }
+    for (UIControl *control in surface.controls) {
+        if (!control.enabled || !control.userInteractionEnabled ||
+            !ASPViewVisibleInSurface(control, surface.root)) continue;
+        BOOL interactive = YES;
+        for (UIView *ancestor = control; ancestor; ancestor = ancestor.superview) {
+            if (!ancestor.userInteractionEnabled) {
+                interactive = NO;
+                break;
+            }
+        }
+        CGPoint center = [control convertPoint:CGPointMake(CGRectGetMidX(control.bounds),
+                                                           CGRectGetMidY(control.bounds)) toView:control.window];
+        UIView *hit = [control.window hitTest:center withEvent:nil];
+        if (!interactive || (hit != control && ![hit isDescendantOfView:control])) continue;
+        UIControlEvents event = control.allControlEvents & UIControlEventTouchUpInside;
+        if (!event) event = control.allControlEvents & UIControlEventPrimaryActionTriggered;
+        if (!event) continue;
+        [control sendActionsForControlEvents:event];
+        [self finishRequest:@"Skip requested" generation:generation];
+        return;
+    }
+    [self.skipButton setTitle:@"Checking ad" forState:UIControlStateNormal];
+    [self trySurface:surface webIndex:0 generation:generation];
+    __weak ASPSkipButtonController *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        ASPSkipButtonController *controller = weakSelf;
+        if (controller.requestPending && controller.feedbackGeneration == generation) {
+            controller.feedbackGeneration += 1;
+            [controller finishRequest:@"Request timed out" generation:controller.feedbackGeneration];
+        }
     });
 }
 @end
@@ -217,19 +307,8 @@ void ASPManualSkipConfigure(BOOL enabled) {
 
 void ASPManualSkipTrackWebView(WKWebView *view) {
     rememberWindow(view.window);
-    if (!gWebViews) gWebViews = [NSHashTable weakObjectsHashTable];
-    if (![gWebViews containsObject:view] && gWebViews.count >= 64) {
-        WKWebView *oldest = nil;
-        NSUInteger sequence = NSUIntegerMax;
-        for (WKWebView *candidate in gWebViews.allObjects) {
-            NSUInteger observed = [objc_getAssociatedObject(candidate, &kWebSequenceKey) unsignedIntegerValue];
-            if (observed < sequence) {
-                oldest = candidate;
-                sequence = observed;
-            }
-        }
-        if (oldest) [gWebViews removeObject:oldest];
-    }
-    objc_setAssociatedObject(view, &kWebSequenceKey, @(++gWebSequence), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [gWebViews addObject:view];
+}
+
+void ASPManualSkipTrackController(UIViewController *controller) {
+    rememberWindow(controller.viewIfLoaded.window);
 }
