@@ -1,6 +1,6 @@
 # Verification
 
-The shared web engine has 34 Node VM regression tests covering manual-only behavior, media eligibility, source changes, failed seeks, duplicate injection, timer/clock behavior, cross-frame message validation and standard MRAID close requests. Run them with:
+The shared web engine has 47 Node VM regression tests covering manual-only behavior, media eligibility, source changes, failed seeks, duplicate injection, timer/clock behavior, cross-frame request acknowledgments, stale/spoofed replies, bounded timeouts, loop handling and standard MRAID close requests. Run them with:
 
 ```sh
 node scripts/embed-web.cjs
@@ -19,9 +19,10 @@ Native compilation results are recorded in public Actions logs. A passing build 
 - Check taps outside the button, foreground/background transitions and app relaunches.
 - Confirm normal video, audio-only playback, timers and clocks remain unchanged before pressing the button.
 - Test native video, web video including cross-origin frames, repeated ads, pause/cancel, playables, close gates and actual rewards.
+- Check native video with a non-video web postitial, hidden/offscreen preloaders, multiple scenes, partially covering windows, and media replacement during a pending request. View/layer visibility is sampled and still requires device verification.
 - Verify the rootless and rootful packages on their matching jailbreak layouts. Treat iOS 26 as experimental with a low chance of working.
 
-A manual request can select ordinary media if that is what is currently visible or playing. The code does not fabricate reward/completion events or forcibly dismiss an SDK's controller. Some close/reward gates remain outside the shared media interfaces.
+A manual request can select ordinary media if that is what is currently visible or playing. The code does not fabricate reward/completion events or forcibly dismiss an SDK's controller. SDK controls require a verified getter, the expected runtime type, an enabled and interactive view hierarchy, and an unobstructed hit target. Native player requests freeze the original item and recheck the current scene/surface during readiness retries. Some close/reward gates remain outside the shared media interfaces.
 
 ## Analysis provenance
 

@@ -17,9 +17,14 @@ function environment(configuration = {}, options = {}) {
     const observers = [];
     const nativeCalls = [];
     const videos = [];
+    const frameNodes = [];
     const document = {
         hidden: !!options.hidden,
         visibilityState: options.hidden ? 'hidden' : 'visible',
+        querySelectorAll(selector) {
+            assert.equal(selector, 'iframe,frame');
+            return frameNodes;
+        },
         getElementsByTagName(name) {
             assert.equal(name, 'video');
             return videos;
@@ -89,6 +94,7 @@ function environment(configuration = {}, options = {}) {
         sandbox,
         document,
         videos,
+        frameNodes,
         tasks,
         listeners,
         windowListeners,
@@ -151,6 +157,7 @@ function video(env, overrides = {}) {
     const attributes = new Set();
     const media = Object.assign({
         tagName: 'VIDEO',
+        loop: false,
         currentSrc: 'https://example.invalid/creative.mp4',
         src: '',
         duration: 30,
@@ -721,4 +728,265 @@ test('hidden pages neither relay requests nor close ads, with frame work capped'
     env.sandbox.__adspeed.skip();
     assert.equal(posts, 64);
     assert.equal(closes, 1);
+});
+
+function frame(env, contentWindow, overrides = {}) {
+    const node = Object.assign({
+        contentWindow,
+        hidden: false,
+        isConnected: true,
+        parentElement: null,
+        style: {},
+        rectangle: {left: 0, top: 0, right: 320, bottom: 180, width: 320, height: 180},
+        getBoundingClientRect() {
+            return this.rectangle;
+        }
+    }, overrides);
+    env.frameNodes.push(node);
+    env.sandbox.frames.push(contentWindow);
+    return node;
+}
+
+function message(env, source, data) {
+    for (const handler of env.windowListeners.get('message') || []) {
+        handler({source, data});
+    }
+}
+
+function connect(parent, child, overrides) {
+    const parentProxy = {
+        postMessage(data) {
+            message(parent, childProxy, data);
+        }
+    };
+    const childProxy = {
+        postMessage(data) {
+            message(child, parentProxy, data);
+        }
+    };
+    child.sandbox.parent = parentProxy;
+    frame(parent, childProxy, overrides);
+    return {parentProxy, childProxy};
+}
+
+function installClose(env) {
+    let closes = 0;
+    env.sandbox.mraid = {
+        getState: () => 'default',
+        getPlacementType: () => 'interstitial',
+        isViewable: () => true,
+        close() {
+            closes += 1;
+        }
+    };
+    return () => closes;
+}
+
+test('explicit looping video skip disables only its loop and lets playback finish naturally', async () => {
+    const env = environment({speedVideo: false});
+    const media = video(env, {loop: true});
+    env.emit('play', media);
+    env.advance(2000);
+    assert.equal(media.loop, true);
+    assert.equal(media.seeks.length, 0);
+    const result = await env.sandbox.__adspeed.skipAsync();
+    assert.equal(result.handled, 1);
+    assert.equal(result.unresolved, 0);
+    assert.equal(media.loop, false);
+    assert.equal(media.currentTime, 29.75);
+    assert.equal(media.ended, false);
+    assert.equal(media.paused, false);
+});
+
+test('automatic scans leave looping media untouched', () => {
+    const env = environment({speedVideo: false, autoSkip: true});
+    const media = video(env, {loop: true});
+    env.emit('play', media);
+    env.advance(2000);
+    assert.equal(media.loop, true);
+    assert.equal(media.seeks.length, 0);
+});
+
+test('immutable loops and failed seeks do not report success, and restore loop state', async () => {
+    const frozen = environment({speedVideo: false});
+    const immutable = video(frozen);
+    Object.defineProperty(immutable, 'loop', {get: () => true, set() {}});
+    const first = await frozen.sandbox.__adspeed.skipAsync();
+    assert.equal(first.handled, 0);
+    assert.equal(immutable.loop, true);
+    assert.equal(immutable.seeks.length, 0);
+    const failing = environment({speedVideo: false});
+    const media = video(failing, {loop: true, throwSeek: true});
+    const second = await failing.sandbox.__adspeed.skipAsync();
+    assert.equal(second.handled, 0);
+    assert.equal(media.loop, true);
+    assert.equal(media.seeks.length, 1);
+    assert.equal(failing.sandbox.__adspeed.stats.skipped, 0);
+});
+
+test('async frame result waits for child video and avoids closing its parent ad', async () => {
+    const config = {speedVideo: false, manualClose: true, skipChannel: 'session-token'};
+    const parent = environment(config);
+    const child = environment(config);
+    const media = video(child);
+    connect(parent, child);
+    const closes = installClose(parent);
+    const result = await parent.sandbox.__adspeed.skipAsync();
+    assert.equal(result.handled, 1);
+    assert.equal(result.unresolved, 0);
+    assert.equal(media.seeks.length, 1);
+    assert.equal(closes(), 0);
+    assert.equal(parent.tasks.size, 0);
+});
+
+test('empty child acknowledgment allows the current parent MRAID close', async () => {
+    const config = {speedVideo: false, manualClose: true, skipChannel: 'session-token'};
+    const parent = environment(config);
+    const child = environment(config);
+    connect(parent, child);
+    const closes = installClose(parent);
+    const result = await parent.sandbox.__adspeed.skipAsync();
+    assert.equal(result.handled, 1);
+    assert.equal(result.unresolved, 0);
+    assert.equal(closes(), 1);
+});
+
+test('an unresponsive visible frame times out as unresolved without parent close', async () => {
+    const env = environment({speedVideo: false, manualClose: true, skipChannel: 'session-token'});
+    let posts = 0;
+    frame(env, {postMessage() { posts += 1; }});
+    const closes = installClose(env);
+    const pending = env.sandbox.__adspeed.skipAsync();
+    assert.equal(closes(), 0);
+    assert.equal(posts, 1);
+    env.advance(799);
+    assert.equal(closes(), 0);
+    env.advance(1);
+    const result = await pending;
+    assert.equal(result.handled, 0);
+    assert.equal(result.unresolved, 1);
+    assert.equal(closes(), 0);
+    assert.equal(env.tasks.size, 0);
+});
+
+test('hidden frames receive no async action and do not block a supported parent close', async () => {
+    const config = {speedVideo: false, manualClose: true, skipChannel: 'session-token'};
+    const parent = environment(config);
+    const child = environment(config);
+    const media = video(child);
+    connect(parent, child, {parentElement: {hidden: true}});
+    const closes = installClose(parent);
+    const result = await parent.sandbox.__adspeed.skipAsync();
+    assert.equal(result.handled, 1);
+    assert.equal(result.unresolved, 0);
+    assert.equal(media.seeks.length, 0);
+    assert.equal(parent.sandbox.__adspeed.stats.frameRequests, 0);
+    assert.equal(closes(), 1);
+});
+
+test('async replies require the selected source, channel, request ID and bounded counts', async () => {
+    const env = environment({speedVideo: false, skipChannel: 'session-token'});
+    let request;
+    const child = {postMessage(data) { request = data; }};
+    frame(env, child);
+    const pending = env.sandbox.__adspeed.skipAsync();
+    const valid = {adSpeedReply: 'session-token', id: request.id, handled: 1, unresolved: 0};
+    message(env, {}, valid);
+    message(env, child, {...valid, adSpeedReply: 'wrong'});
+    message(env, child, {...valid, id: 'stale'});
+    message(env, child, {...valid, handled: NaN});
+    message(env, child, {...valid, handled: -1});
+    assert.equal(env.tasks.size, 1);
+    message(env, child, valid);
+    const result = await pending;
+    assert.equal(result.handled, 1);
+    assert.equal(result.unresolved, 0);
+    assert.equal(env.tasks.size, 0);
+    message(env, child, valid);
+    assert.equal(env.tasks.size, 0);
+});
+
+test('duplicate inbound requests perform one child action and wrong parents are rejected', async () => {
+    const env = environment({speedVideo: false, manualClose: true, skipChannel: 'session-token'});
+    const closes = installClose(env);
+    let replies = 0;
+    const parent = {postMessage() { replies += 1; }};
+    env.sandbox.parent = parent;
+    const request = {adSpeedRequest: 'session-token', id: '123:456:1', depth: 1};
+    message(env, {}, request);
+    message(env, parent, {...request, adSpeedRequest: 'wrong'});
+    message(env, parent, {...request, depth: 100});
+    assert.equal(closes(), 0);
+    message(env, parent, request);
+    await Promise.resolve();
+    await Promise.resolve();
+    message(env, parent, request);
+    await Promise.resolve();
+    assert.equal(closes(), 1);
+    assert.ok(replies >= 1);
+});
+
+test('concurrent manual requests share one bounded relay and hide cancels close fallback', async () => {
+    const env = environment({speedVideo: false, manualClose: true, skipChannel: 'session-token'});
+    let request;
+    const child = {postMessage(data) { request = data; }};
+    frame(env, child);
+    const closes = installClose(env);
+    const first = env.sandbox.__adspeed.skipAsync();
+    const second = env.sandbox.__adspeed.skipAsync();
+    assert.equal(first, second);
+    assert.equal(env.sandbox.__adspeed.stats.frameRequests, 1);
+    env.hide(true);
+    message(env, child, {adSpeedReply: 'session-token', id: request.id, handled: 0, unresolved: 0});
+    const result = await first;
+    assert.equal(result.handled, 0);
+    assert.ok(result.unresolved >= 1);
+    assert.equal(closes(), 0);
+});
+
+test('late child replies cannot resolve a newer manual request', async () => {
+    const env = environment({speedVideo: false, skipChannel: 'session-token'});
+    const requests = [];
+    const child = {postMessage(data) { requests.push(data); }};
+    frame(env, child);
+    const first = env.sandbox.__adspeed.skipAsync();
+    env.advance(800);
+    assert.equal((await first).unresolved, 1);
+    const second = env.sandbox.__adspeed.skipAsync();
+    message(env, child, {adSpeedReply: 'session-token', id: requests[0].id, handled: 1, unresolved: 0});
+    assert.equal(env.tasks.size, 1);
+    message(env, child, {adSpeedReply: 'session-token', id: requests[1].id, handled: 0, unresolved: 0});
+    const result = await second;
+    assert.equal(result.handled, 0);
+    assert.equal(result.unresolved, 0);
+});
+
+test('frame enumeration is capped and missing channels remain unresolved', async () => {
+    const env = environment({speedVideo: false, skipChannel: 'session-token'});
+    let posts = 0;
+    for (let index = 0; index < 100; index++) frame(env, {postMessage() { posts += 1; }});
+    const pending = env.sandbox.__adspeed.skipAsync();
+    assert.equal(posts, 64);
+    env.advance(800);
+    assert.equal((await pending).unresolved, 65);
+    const missing = environment({speedVideo: false});
+    frame(missing, {postMessage() { throw new Error('must not relay without a channel'); }});
+    assert.equal((await missing.sandbox.__adspeed.skipAsync()).unresolved, 1);
+});
+
+test('nested requests stop relaying at the depth limit and do not close unsupported surfaces', async () => {
+    const env = environment({speedVideo: false, manualClose: true, skipChannel: 'session-token'});
+    const replies = [];
+    let posts = 0;
+    frame(env, {postMessage() { posts += 1; }});
+    const parent = {postMessage(data) { replies.push(data); }};
+    env.sandbox.parent = parent;
+    const closes = installClose(env);
+    message(env, parent, {adSpeedRequest: 'session-token', id: '123:456:1', depth: 8});
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(posts, 0);
+    assert.equal(closes(), 0);
+    assert.equal(replies.length, 1);
+    assert.equal(replies[0].unresolved, 1);
 });
