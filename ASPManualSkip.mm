@@ -6,21 +6,47 @@
 static BOOL gEnabled;
 static BOOL gRefreshing;
 static NSHashTable<WKWebView *> *gWebViews;
+static NSHashTable<UIWindow *> *gKnownWindows;
 static NSMapTable<UIWindowScene *, UIWindow *> *gWindows;
 static UIWindow *gLegacyWindow;
 static char kWebSequenceKey;
 static NSUInteger gWebSequence;
+static char kWindowSequenceKey;
+static NSUInteger gWindowSequence;
 
 static void refreshWindows(void);
 
+static void rememberWindow(UIWindow *window) {
+    if (!window) return;
+    if (!gKnownWindows) gKnownWindows = [NSHashTable weakObjectsHashTable];
+    if ([gKnownWindows containsObject:window]) return;
+    if (gKnownWindows.count >= 64) {
+        UIWindow *oldest = nil;
+        NSUInteger sequence = NSUIntegerMax;
+        for (UIWindow *candidate in gKnownWindows.allObjects) {
+            NSUInteger observed = [objc_getAssociatedObject(candidate, &kWindowSequenceKey) unsignedIntegerValue];
+            if (observed < sequence) {
+                oldest = candidate;
+                sequence = observed;
+            }
+        }
+        if (oldest) [gKnownWindows removeObject:oldest];
+    }
+    objc_setAssociatedObject(window, &kWindowSequenceKey, @(++gWindowSequence), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [gKnownWindows addObject:window];
+}
+
 static WKWebView *frontWebView(UIWindowScene *scene) {
-    NSArray<UIWindow *> *windows = scene ? scene.windows : [UIApplication sharedApplication].windows;
+    NSArray<UIWindow *> *windows = scene ? scene.windows : gKnownWindows.allObjects;
     UIWindow *overlay = scene ? [gWindows objectForKey:scene] : gLegacyWindow;
     UIWindow *front = nil;
     for (UIWindow *window in windows) {
         if (window.hidden || window.alpha <= 0.01 || window == gLegacyWindow ||
             window == overlay) continue;
-        if (!front || window.windowLevel >= front.windowLevel) front = window;
+        NSUInteger sequence = [objc_getAssociatedObject(window, &kWindowSequenceKey) unsignedIntegerValue];
+        NSUInteger previous = [objc_getAssociatedObject(front, &kWindowSequenceKey) unsignedIntegerValue];
+        if (!front || window.windowLevel > front.windowLevel ||
+            (window.windowLevel == front.windowLevel && (scene || sequence >= previous))) front = window;
     }
     WKWebView *selected = nil;
     NSUInteger latest = 0;
@@ -174,6 +200,7 @@ void ASPManualSkipConfigure(BOOL enabled) {
                 [center addObserverForName:event object:nil queue:[NSOperationQueue mainQueue]
                                 usingBlock:^(NSNotification *notification) {
                     if ([notification.object isKindOfClass:[ASPSkipWindow class]]) return;
+                    if ([notification.object isKindOfClass:[UIWindow class]]) rememberWindow(notification.object);
                     refreshWindows();
                 }];
             }
@@ -189,6 +216,7 @@ void ASPManualSkipConfigure(BOOL enabled) {
 }
 
 void ASPManualSkipTrackWebView(WKWebView *view) {
+    rememberWindow(view.window);
     if (!gWebViews) gWebViews = [NSHashTable weakObjectsHashTable];
     if (![gWebViews containsObject:view] && gWebViews.count >= 64) {
         WKWebView *oldest = nil;
