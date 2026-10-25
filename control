@@ -1,0 +1,13 @@
+Package: com.maxblox2999.advanish
+Name: AdVanish
+Version: 0.1.0~beta1
+Architecture: iphoneos-arm
+Depends: firmware (>= 15.0), ellekit | mobilesubstrate, preferenceloader
+Conflicts: com.34306-sr.adspeed, com.34306.adspeed, com.soulrune.adspeed
+Replaces: com.34306-sr.adspeed, com.34306.adspeed, com.soulrune.adspeed
+Provides: com.34306-sr.adspeed
+Description: Manual ad skipping with per-app controls.
+Maintainer: maxblox2999
+Author: 34306, SoulRune, maxblox2999
+Section: Tweaks
+Homepage: https://github.com/maxblox2999/AdVanish
