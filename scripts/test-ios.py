@@ -34,6 +34,7 @@ def main(video, output):
     if not types:
         raise RuntimeError("No compatible iPhone simulator type")
     device = run("xcrun", "simctl", "create", "AdVanish fixture", types[-1]["identifier"], runtime["identifier"])
+    booted = False;
     try:
         with tempfile.TemporaryDirectory(prefix="advanish-ios-") as directory:
             app = Path(directory) / "AdVanishFixture.app"
@@ -64,6 +65,7 @@ def main(video, output):
             run("codesign", "--force", "--sign", "-", str(app))
             print(json.dumps({"phase": "boot", "runtime": runtime["version"]}), flush=True)
             run("xcrun", "simctl", "boot", device)
+            booted = True
             run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
             run("xcrun", "simctl", "install", device, str(app))
             container = Path(run("xcrun", "simctl", "get_app_container", device, BUNDLE, "data"))
@@ -82,8 +84,11 @@ def main(video, output):
             if not report["passed"]:
                 raise RuntimeError(report["failure"])
     finally:
-        subprocess.run(["xcrun", "simctl", "shutdown", device], check=False, timeout=45)
-        subprocess.run(["xcrun", "simctl", "delete", device], check=False, timeout=45)
+        try:
+            if booted:
+                subprocess.run(["xcrun", "simctl", "shutdown", device], check=False, timeout=45)
+        finally:
+            subprocess.run(["xcrun", "simctl", "delete", device], check=False, timeout=45)
 
 
 if __name__ == "__main__":
