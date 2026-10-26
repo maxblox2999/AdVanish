@@ -18,12 +18,14 @@ def run(*command, timeout=120):
 
 
 def main(video, output):
+    sdk = run("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
     devices = json.loads(run("xcrun", "simctl", "list", "-j"))
     runtimes = [item for item in devices["runtimes"]
                 if item.get("isAvailable") and item["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]
     if not runtimes:
         raise RuntimeError("An installed iOS Simulator runtime is required")
-    runtime = max(runtimes, key=lambda item: tuple(map(int, item["version"].split("."))))
+    matching = [item for item in runtimes if item["version"].startswith("18.")]
+    runtime = max(matching or runtimes, key=lambda item: tuple(map(int, item["version"].split("."))))
     runtime_version = tuple(map(int, runtime["version"].split(".")))
     packed_version = (runtime_version[0] << 16) | (runtime_version[1] << 8)
     types = [item for item in devices["devicetypes"]
@@ -33,8 +35,6 @@ def main(video, output):
         raise RuntimeError("No compatible iPhone simulator type")
     device = run("xcrun", "simctl", "create", "AdVanish fixture", types[-1]["identifier"], runtime["identifier"])
     try:
-        run("xcrun", "simctl", "boot", device)
-        run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
         with tempfile.TemporaryDirectory(prefix="advanish-ios-") as directory:
             app = Path(directory) / "AdVanishFixture.app"
             app.mkdir()
@@ -54,7 +54,6 @@ def main(video, output):
             }
             (app / "Info.plist").write_bytes(plistlib.dumps(info))
             shutil.copyfile(video, app / "fixture.mp4")
-            sdk = run("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
             command = ["xcrun", "--sdk", "iphonesimulator", "clang++", "-fobjc-arc", "-fblocks", "-std=c++11",
                        "-isysroot", sdk, "-target", platform.machine() + "-apple-ios15.0-simulator", "-I", str(ROOT)]
             command += [str(ROOT / name) for name in ["tests/ios/Fixture.mm", "ASPManualSkip.mm", "ASPAdSurface.mm", "ASPUniversalSkip.mm"]]
@@ -63,6 +62,9 @@ def main(video, output):
             command += ["-o", str(app / "AdVanishFixture")]
             subprocess.run(command, check=True, timeout=120)
             run("codesign", "--force", "--sign", "-", str(app))
+            print(json.dumps({"phase": "boot", "runtime": runtime["version"]}), flush=True)
+            run("xcrun", "simctl", "boot", device)
+            run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
             run("xcrun", "simctl", "install", device, str(app))
             container = Path(run("xcrun", "simctl", "get_app_container", device, BUNDLE, "data"))
             run("xcrun", "simctl", "launch", device, BUNDLE)

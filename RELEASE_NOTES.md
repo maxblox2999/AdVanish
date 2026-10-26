@@ -1,10 +1,10 @@
 # AdVanish 0.2.1
 
-Removes automatic AppLovin Close activation. The SDK schedules reward reporting separately from video completion, so an ended video cannot establish that closing is safe for a pending reward. After seeking, wait for the app's countdown or reward and use its own Close button.
+Addresses the reported black screen and failed reward after pressing Skip: the manual button now requests 2x playback instead of jumping to the video end. It is labelled Fast-forward ad. SDK countdowns stay unchanged; wait for the app's reward/countdown and use its own Close button. Actual game rewards still need device testing.
 
-Fixes silently ignored web seeks being reported as successful and leaving loops disabled. Rejected seeks now report failure and restore looping; bounded explicit retry remains available. Asynchronous seeks remain supported.
+Removes automatic AppLovin Close activation, leaves looping web creatives unchanged, checks rejected speed changes and releases manual rates on media changes without resuming paused playback. The floating window and root view are explicitly transparent. Also fixes success reporting for ignored seeks in the legacy web engine.
 
-Verification: 58 automated web tests and twelve real Edge media/frame cases passed. Public Actions builds rootless/rootful packages and runs a native UIKit/AVPlayer simulator fixture with a mock SDK. Complete source and SHA-256 checksums are included. See AUDIT.md and VALIDATION.md for scope and remaining checks.
+Verification includes 67 automated web tests, sixteen real Edge media/frame cases and a native UIKit/AVPlayer simulator fixture with a mock SDK. Public Actions builds rootless/rootful packages. Complete source, test runners and SHA-256 checksums are included. See AUDIT.md and VALIDATION.md for scope and remaining checks.
 
 Targets iOS 15-18 with arm64/arm64e builds. iOS 26 is experimental with a low chance of working. A compatible jailbreak and tweak loader are required.
 

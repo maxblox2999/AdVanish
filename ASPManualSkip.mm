@@ -97,15 +97,16 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
 @implementation ASPSkipButtonController
 - (void)loadView {
     self.view = [[UIView alloc] initWithFrame:CGRectZero];
+    self.view.opaque = NO;
     self.view.backgroundColor = [UIColor clearColor];
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.92];
     [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    [button setTitle:@"Skip current ad" forState:UIControlStateNormal];
+    [button setTitle:@"Fast-forward ad" forState:UIControlStateNormal];
     button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     button.layer.cornerRadius = 18;
-    button.accessibilityLabel = @"Skip current ad";
-    button.accessibilityHint = @"Seeks one visible video. The app controls closing and rewards. Drag to reposition.";
+    button.accessibilityLabel = @"Fast-forward ad";
+    button.accessibilityHint = @"Requests faster playback of one visible video. The app controls closing and rewards. Drag to reposition.";
     [button addTarget:self action:@selector(skipCurrentAd) forControlEvents:UIControlEventTouchUpInside];
     [button addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(moveButton:)]];
     [self.view addSubview:button];
@@ -159,7 +160,7 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
         ASPSkipButtonController *controller = weakSelf;
         if (!controller || controller.feedbackGeneration != generation) return;
         controller.requestPending = NO;
-        [controller.skipButton setTitle:@"Skip current ad" forState:UIControlStateNormal];
+        [controller.skipButton setTitle:@"Fast-forward ad" forState:UIControlStateNormal];
     });
 }
 - (void)performSelection:(ASPAdSurface *)surface snapshots:(NSArray<ASPWebSnapshot *> *)snapshots
@@ -217,7 +218,7 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
                    !boundedInteger(result[@"handled"], 1) || !boundedInteger(result[@"unresolved"], 1)) {
             [controller finishRequest:@"Web unavailable" generation:generation];
         } else if ([result[@"handled"] unsignedIntegerValue] == 1) {
-            [controller finishRequest:@"Seek requested" generation:generation];
+            [controller finishRequest:@"Playback requested" generation:generation];
         } else {
             [controller finishRequest:@"Media unavailable" generation:generation];
         }
@@ -349,6 +350,7 @@ static void refreshWindows(void) {
             UIWindow *window = [gWindows objectForKey:windowScene];
             if (!window) {
                 window = [[ASPSkipWindow alloc] initWithWindowScene:windowScene];
+                window.opaque = NO;
                 window.backgroundColor = [UIColor clearColor];
                 window.windowLevel = UIWindowLevelAlert + 1;
                 window.rootViewController = [ASPSkipButtonController new];
@@ -360,6 +362,7 @@ static void refreshWindows(void) {
         if (application.connectedScenes.count == 0) {
             if (!gLegacyWindow) {
                 gLegacyWindow = [[ASPSkipWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+                gLegacyWindow.opaque = NO;
                 gLegacyWindow.backgroundColor = [UIColor clearColor];
                 gLegacyWindow.windowLevel = UIWindowLevelAlert + 1;
                 gLegacyWindow.rootViewController = [ASPSkipButtonController new];

@@ -12,8 +12,8 @@ const config = {speedVideo:false,compressTimers:false,accelerateClock:false,forc
 const engine = source.replace('__ADSPEED_CONFIG__', JSON.stringify(config));
 let portA;
 let portB;
-function html(child) {
-    return `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#eee}video{display:block;width:320px;height:180px}iframe{width:360px;height:210px;border:0}</style><script src="/engine.js"></script><script>
+function html(child, playback) {
+    return `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#eee}video{display:block;width:320px;height:180px}iframe{width:360px;height:210px;border:0}</style><script src="/engine.js?playback=${playback ? 1 : 0}"></script><script>
     window.fixture = {messages:[],closes:0,errors:[]};
     window.addEventListener('error',e=>fixture.errors.push(String(e.message)));
     window.addEventListener('unhandledrejection',e=>fixture.errors.push(String(e.reason)));
@@ -21,16 +21,22 @@ function html(child) {
     window.sleep=ms=>new Promise(r=>setTimeout(r,ms));
     window.until=async (fn,label,ms=6000)=>{const end=performance.now()+ms;while(performance.now()<end){if(fn())return;await sleep(20)}throw Error('Timeout: '+label)};
     window.addVideo=async (loop=false)=>{const v=document.createElement('video');v.muted=true;v.playsInline=true;v.loop=loop;v.src='/fixture.mp4?n='+Math.random();v.preload='auto';v.dataset.seeks='0';v.addEventListener('seeking',()=>{v.dataset.seeks=String(Number(v.dataset.seeks)+1);if(parent!==window)report('seeking')});v.addEventListener('ended',()=>{if(parent!==window)report('ended')});document.body.append(v);await v.play();await until(()=>v.readyState>=3&&Number.isFinite(v.duration)&&v.seekable.length&&!v.paused&&!v.seeking&&v.currentTime>0.1,'video ready');return v};
-    window.state=()=>({closes:fixture.closes,videos:Array.from(document.querySelectorAll('video')).map(v=>({ended:v.ended,seeks:Number(v.dataset.seeks),current:v.currentTime,duration:v.duration,loop:v.loop,paused:v.paused})),errors:fixture.errors});
+    window.state=()=>({closes:fixture.closes,videos:Array.from(document.querySelectorAll('video')).map(v=>({ended:v.ended,seeks:Number(v.dataset.seeks),current:v.currentTime,duration:v.duration,loop:v.loop,paused:v.paused,rate:v.playbackRate})),errors:fixture.errors});
     window.report=phase=>parent.postMessage({fixtureReport:true,phase,state:state()},'*');
     window.addEventListener('message',async e=>{if(e.data&&e.data.fixtureReport)fixture.messages.push({source:e.source,phase:e.data.phase,state:e.data.state});if(e.data&&e.data.fixtureCommand==='add-video'){await addVideo();report('added')}if(e.data&&e.data.fixtureCommand==='state')report('state')});
-    window.addFrame=async video=>{const frame=document.createElement('iframe');frame.src='http://127.0.0.1:${portB}/child?video='+(video?'1':'0');document.body.append(frame);await until(()=>fixture.messages.some(m=>m.source===frame.contentWindow&&m.phase==='ready'),'frame ready');return frame};
+    window.addFrame=async video=>{const frame=document.createElement('iframe');frame.src='http://127.0.0.1:${portB}/child?video='+(video?'1':'0')+'&playback=${playback ? 1 : 0}';document.body.append(frame);await until(()=>fixture.messages.some(m=>m.source===frame.contentWindow&&m.phase==='ready'),'frame ready');return frame};
     ${child ? `window.addEventListener('DOMContentLoaded',async()=>{try{if(new URL(location.href).searchParams.get('video')==='1')await addVideo();report('ready')}catch(e){fixture.errors.push(String(e));report('error')}});` : ''}
     </script><body></body>`;
 }
 function serve(req,res){
     const url = new URL(req.url,'http://127.0.0.1');
-    if(url.pathname==='/engine.js'){res.writeHead(200,{'Content-Type':'text/javascript'});res.end(engine);return;}
+    if (url.pathname === '/engine.js') {
+        const script = url.searchParams.get('playback') === '1'
+            ? source.replace('__ADSPEED_CONFIG__', JSON.stringify({...config, manualPlayback: true})) : engine;
+        res.writeHead(200, {'Content-Type': 'text/javascript'});
+        res.end(script);
+        return;
+    }
     if(url.pathname==='/fixture.mp4'){
         const data=fs.readFileSync(path.join(root,'../ios/fixture.mp4'));
         let start=0;let end=data.length-1;
@@ -39,7 +45,7 @@ function serve(req,res){
         else res.writeHead(200,{'Content-Type':'video/mp4','Accept-Ranges':'bytes','Content-Length':data.length});
         res.end(data.subarray(start,end+1));return;
     }
-    res.writeHead(200,{'Content-Type':'text/html'});res.end(html(url.pathname==='/child'));
+    res.writeHead(200,{'Content-Type':'text/html'});res.end(html(url.pathname==='/child', url.searchParams.get('playback') === '1'));
 }
 const serverA=http.createServer(serve);
 const serverB=http.createServer(serve);
@@ -51,8 +57,8 @@ const pending=new Map();
 function command(method,params={},sessionId){return new Promise((resolve,reject)=>{const id=next++;const timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout '+method))},20000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params,sessionId}));});}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function evaluate(sessionId,expression){const r=await command('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},sessionId);if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
-async function runCase(name,body,verify){
-    const {targetId}=await command('Target.createTarget',{url:`http://127.0.0.1:${portA}/?case=${name}`});
+async function runCase(name,body,verify,playback=false){
+    const {targetId}=await command('Target.createTarget',{url:`http://127.0.0.1:${portA}/?case=${name}&playback=${playback ? 1 : 0}`});
     const {sessionId}=await command('Target.attachToTarget',{targetId,flatten:true});
     try{
         await command('Runtime.enable',{},sessionId);
@@ -143,6 +149,65 @@ async function main(){
         assert.equal(result.closes, 0);
         assert.deepEqual(result.errors, []);
     }));
+    cases.push(await runCase('production-manual-playback-without-seek', `
+        const v = await addVideo();
+        const before = v.currentTime;
+        const action = await __adspeed.skipAsync();
+        const requested = {rate: v.playbackRate, time: v.currentTime, before};
+        await until(() => v.ended, 'normal playback ended', 8000).catch(error => {
+            throw new Error(error.message + ': ' + JSON.stringify({requested, ...state(),
+                hidden: document.hidden, stats: __adspeed.stats}));
+        });
+        return {action, requested, ...state()};
+    `, result => {
+        assert.equal(result.action.handled, 1);
+        assert.equal(result.requested.rate, 2);
+        assert.ok(result.requested.time < result.requested.before + 0.25);
+        assert.equal(result.videos[0].seeks, 0);
+        assert.equal(result.videos[0].ended, true);
+        assert.equal(result.videos[0].rate, 2);
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }, true));
+    cases.push(await runCase('production-cross-origin-playback-without-seek', `
+        const f = await addFrame(true);
+        const action = await __adspeed.skipAsync();
+        await until(() => fixture.messages.some(m => m.source === f.contentWindow && m.phase === 'ended'),
+            'child natural completion', 8000);
+        f.contentWindow.postMessage({fixtureCommand: 'state'}, '*');
+        await until(() => fixture.messages.some(m => m.source === f.contentWindow && m.phase === 'state'), 'child state');
+        return {action, child: fixture.messages.filter(m => m.source === f.contentWindow).at(-1).state, ...state()};
+    `, result => {
+        assert.equal(result.action.handled, 1);
+        assert.equal(result.child.videos[0].seeks, 0);
+        assert.equal(result.child.videos[0].ended, true);
+        assert.equal(result.child.videos[0].rate, 2);
+        assert.equal(result.child.closes, 0);
+        assert.deepEqual(result.child.errors, []);
+    }, true));
+    cases.push(await runCase('production-loop-is-untouched', `
+        await addVideo(true);
+        const action = await __adspeed.skipAsync();
+        return {action, ...state()};
+    `, result => {
+        assert.equal(result.action.handled, 0);
+        assert.equal(result.videos[0].rate, 1);
+        assert.equal(result.videos[0].loop, true);
+        assert.equal(result.videos[0].seeks, 0);
+        assert.equal(result.closes, 0);
+    }, true));
+    cases.push(await runCase('production-ignored-rate-does-not-seek', `
+        const v = await addVideo();
+        Object.defineProperty(v, 'playbackRate', {get() { return 1; }, set(value) {}});
+        const action = await __adspeed.skipAsync();
+        return {action, ...state()};
+    `, result => {
+        assert.equal(result.action.handled, 0);
+        assert.equal(result.videos[0].rate, 1);
+        assert.equal(result.videos[0].seeks, 0);
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }, true));
     const report={sourceSha256,browser:version,fixture:'Locally generated12-second H264MP4,160x90,15fps,noaudio',origins:[`http://127.0.0.1:${portA}`,`http://127.0.0.1:${portB}`],passed:cases.length,cases};
     const output = path.join(root, '../../dist/browser.json');
     fs.mkdirSync(path.dirname(output), {recursive: true});

@@ -16,6 +16,9 @@ static char kStateKey;
 @property (nonatomic) BOOL mayWait;
 @property (nonatomic) NSUInteger attempts;
 @property (nonatomic) NSTimeInterval lastAttempt;
+@property (nonatomic) NSUInteger rateGeneration;
+@property (nonatomic) BOOL manualRateActive;
+@property (nonatomic) float originalRate;
 @property (nonatomic, copy) void (^completion)(NSString *);
 @property (nonatomic, copy) BOOL (^isCurrent)(void);
 @end
@@ -37,6 +40,11 @@ static ASPSkipRequest *stateFor(AVPlayer *player) {
         objc_setAssociatedObject(player, &kStateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     if (state.item != player.currentItem) {
+        state.rateGeneration += 1;
+        if (state.manualRateActive && player.rate > 0 && fabsf(player.rate - 2.0f) <= 0.01f) {
+            player.rate = state.originalRate;
+        }
+        state.manualRateActive = NO;
         state.generation += 1;
         state.attempts = 0;
         state.lastAttempt = 0;
@@ -59,20 +67,11 @@ static BOOL videoItem(AVPlayerItem *item) {
     return NO;
 }
 
-static BOOL targetFor(AVPlayerItem *item, CMTime *target) {
+static BOOL finiteVideo(AVPlayerItem *item) {
     if (!CMTIME_IS_NUMERIC(item.duration)) return NO;
     double duration = CMTimeGetSeconds(item.duration);
     if (!isfinite(duration) || duration <= 0.5) return NO;
-    CMTime candidate = CMTimeMakeWithSeconds(duration - 0.25, 600);
-    for (NSValue *value in item.seekableTimeRanges) {
-        CMTimeRange range = value.CMTimeRangeValue;
-        if (CMTIMERANGE_IS_VALID(range) && CMTIME_IS_NUMERIC(range.start) &&
-            CMTIME_IS_NUMERIC(range.duration) && CMTimeRangeContainsTime(range, candidate)) {
-            *target = candidate;
-            return YES;
-        }
-    }
-    return NO;
+    return YES;
 }
 
 static BOOL stillOwned(AVPlayer *player, ASPSkipRequest *state) {
@@ -82,6 +81,26 @@ static BOOL stillOwned(AVPlayer *player, ASPSkipRequest *state) {
         state.isCurrent && state.isCurrent() &&
         (!window.windowScene || window.windowScene.activationState == UISceneActivationStateForegroundActive) &&
         ASPSurfaceOwnsPlayer(root, player);
+}
+
+static void releaseManualRate(AVPlayer *player, ASPSkipRequest *state, AVPlayerItem *item,
+                              NSUInteger generation, float originalRate, NSTimeInterval deadline) {
+    if (state.rateGeneration != generation) return;
+    if (player.currentItem != item || !playing(player) || !state.root.window ||
+        !ASPViewVisibleInSurface(state.root, state.root) ||
+        NSProcessInfo.processInfo.systemUptime >= deadline || fabsf(player.rate - 2.0f) > 0.01f) {
+        state.rateGeneration += 1;
+        state.manualRateActive = NO;
+        // Never resume a player paused by the app or at its natural end.
+        if (player.rate > 0 && fabsf(player.rate - 2.0f) <= 0.01f) player.rate = originalRate;
+        return;
+    }
+    __weak AVPlayer *weakPlayer = player;
+    __weak AVPlayerItem *weakItem = item;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+        AVPlayer *current = weakPlayer;
+        if (current) releaseManualRate(current, state, weakItem, generation, originalRate, deadline);
+    });
 }
 
 static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation) {
@@ -100,9 +119,8 @@ static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation)
         finish(state, @"No visible video");
         return;
     }
-    CMTime target = kCMTimeInvalid;
     if (item.status != AVPlayerItemStatusReadyToPlay || !videoItem(item) ||
-        player.timeControlStatus != AVPlayerTimeControlStatusPlaying || !targetFor(item, &target) ||
+        player.timeControlStatus != AVPlayerTimeControlStatusPlaying || !finiteVideo(item) ||
         !CMTIME_IS_NUMERIC(player.currentTime)) {
         if (!state.mayWait) {
             finish(state, @"Video not ready");
@@ -119,27 +137,29 @@ static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation)
         });
         return;
     }
-    if (CMTimeCompare(player.currentTime, target) >= 0) {
-        finish(state, @"Video at end");
+    if (player.rate >= 2.0f) {
+        finish(state, @"Already faster");
         return;
     }
     state.attempts += 1;
     state.lastAttempt = [NSProcessInfo processInfo].systemUptime;
-    __weak AVPlayer *weakPlayer = player;
-    __weak AVPlayerItem *weakItem = item;
-    [player seekToTime:target toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero
-        completionHandler:^(BOOL finished) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            AVPlayer *currentPlayer = weakPlayer;
-            AVPlayerItem *currentItem = weakItem;
-            if (state.generation != generation || !state.pending) return;
-            if (!currentPlayer || !currentItem || currentPlayer.currentItem != currentItem) {
-                finish(state, @"Media changed");
-                return;
-            }
-            finish(state, finished ? @"Seek completed" : @"Seek rejected");
-        });
-    }];
+    // Do not seek across SDK progress callbacks or force a video-end transition.
+    float original = player.rate;
+    player.rate = 2.0f;
+    if (player.currentItem != item) {
+        finish(state, @"Media changed");
+    } else if (fabsf(player.rate - 2.0f) <= 0.01f) {
+        state.originalRate = original;
+        state.manualRateActive = YES;
+        NSUInteger rateGeneration = ++state.rateGeneration;
+        NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime +
+            fmin(300.0, CMTimeGetSeconds(item.duration) / 2.0 + 10.0);
+        releaseManualRate(player, state, item, rateGeneration, original, deadline);
+        finish(state, @"Playing at 2x");
+    } else {
+        if (player.rate > 0 && player.rate != original) player.rate = original;
+        finish(state, @"Speed unsupported");
+    }
 }
 
 NSArray<AVPlayer *> *ASPUniversalSkipCandidates(NSArray<AVPlayer *> *players, UIView *root,
@@ -173,7 +193,7 @@ void ASPUniversalSkipNow(NSArray<AVPlayer *> *players, UIView *root,
     ASPSkipRequest *state = stateFor(selected);
     if (state.pending || state.attempts >= 3 ||
         (state.attempts && [NSProcessInfo processInfo].systemUptime - state.lastAttempt < 1.0)) {
-        completion(state.pending ? @"Seek pending" : @"Retry limit");
+        completion(state.pending ? @"Request pending" : @"Retry limit");
         return;
     }
     state.generation += 1;

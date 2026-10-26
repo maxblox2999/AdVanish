@@ -2,13 +2,17 @@
 
 ## Follow-up fixes
 
+The user reported a black ad surface followed by an unable-to-get-reward error after pressing Skip in Subway Surfers and other supplied apps. The manual button now requests 2x playback instead of seeking to the tail. This removes the forced time jump and preserves the opportunity for normal progress/completion callbacks; it does not establish that every SDK or server accepts accelerated playback. The button is labelled Fast-forward ad. Native rates are released on item/visibility changes without resuming paused players; web rates are released on source changes, replay and hiding. Web completion handlers receive an unchanged ended element. Looping web creatives are not modified. SDK timer/clock functions are untouched in manual mode.
+
+The floating window and its root view are explicitly non-opaque. Its hit testing continues to pass taps outside the button to the app. This corrects an overlay configuration risk; it is not a confirmed explanation for the reported failure after pressing.
+
 The AppLovin automatic Close path was removed. Static review of all seven supplied SDKs established a separately scheduled reward-report task, potentially delayed beyond video completion. The old item-end and `isVideoFullyWatched` checks did not establish that this task had run. AdVanish now leaves every SDK Close/Skip control and dismissal path under the app's control, including after a second press on an ended video. The unused end-event observer and close-only getters were removed.
 
-A reproduced web failure silently ignored `currentTime` while the engine reported success and left looping disabled. The seek now requires either an observed seeking state or a finite readback within 50 ms of the requested position. A rejected seek reports failure, restores looping and retains bounded explicit retries. A separate regression preserves asynchronous seeks whose position has not yet updated.
+A reproduced failure in the legacy web seek path silently ignored `currentTime` while the engine reported success and left looping disabled. That path now requires either an observed seeking state or a finite readback within 50 ms of the requested position. A rejected seek reports failure, restores looping and retains bounded explicit retries. The production manual button uses the new playback mode and does not call this seek path.
 
-The current web engine passes 58 Node tests and twelve real Edge media/frame cases, including the ignored-seek/loop-restoration regression and a successful retry with natural completion. The tested script SHA-256 is `0ff72aa25505286ef673c7f46a3aa0d5b44f0f3dc61e64ebc81c2800a2ba8a4d`.
+The current web engine has 67 Node tests and sixteen real Edge media/frame cases, covering the production playback mode and legacy seek/timer behavior. The production cases check no time jump, no looping mutation, rejected speed changes, restoration and cross-origin playback. The script SHA-256 is `57d33a7867c660089c29c7adb8611c4e9f68a1491a50b5c4470c1d25a4284e32`.
 
-Actions also builds a native iOS Simulator fixture from the production native files. It exercises real AVPlayer seeking, window/player discovery and the floating button with a mock AppLovin owner whose reward remains pending. Its JSON result is included in the rootless build artifact. It does not execute a real ad SDK or prove rewards on a jailbroken phone.
+Actions also builds a native iOS Simulator fixture from the production native files. It exercises real AVPlayer playback, transparent/pass-through windows, player discovery, rate cleanup on creative replacement and the floating button with a mock AppLovin owner whose reward remains pending. Its JSON result is included in the rootless build artifact. It does not execute a real ad SDK or prove rewards on a jailbroken phone.
 
 ## Earlier 0.2.0 audit
 
