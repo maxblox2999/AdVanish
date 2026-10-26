@@ -18,7 +18,7 @@ static void refreshWindows(void);
 static void rememberWindow(UIWindow *window) {
     if (!window) return;
     if (!gKnownWindows) gKnownWindows = [NSHashTable weakObjectsHashTable];
-    if (gKnownWindows.count >= 64) {
+    if (![gKnownWindows containsObject:window] && gKnownWindows.count >= 64) {
         UIWindow *oldest = nil;
         NSUInteger sequence = NSUIntegerMax;
         for (UIWindow *candidate in gKnownWindows.allObjects) {
@@ -67,10 +67,24 @@ BOOL ASPManualSkipIsAdPlayer(AVPlayer *player) {
         if (![scene isKindOfClass:[UIWindowScene class]] ||
             scene.activationState != UISceneActivationStateForegroundActive) continue;
         ASPAdSurface *surface = ASPFindAdSurface(contentWindows((UIWindowScene *)scene), YES);
-        if (surface && ASPSurfaceOwnsPlayer(surface.root, player)) return YES;
+        if (surface && !surface.incomplete && ASPSurfaceOwnsPlayer(surface.root, player)) return YES;
     }
     ASPAdSurface *legacy = ASPFindAdSurface(contentWindows(nil), YES);
-    return legacy && ASPSurfaceOwnsPlayer(legacy.root, player);
+    return legacy && !legacy.incomplete && ASPSurfaceOwnsPlayer(legacy.root, player);
+}
+
+@interface ASPWebSnapshot : NSObject
+@property (nonatomic, weak) WKWebView *web;
+@property (nonatomic, copy) NSString *token;
+@property (nonatomic) NSUInteger count;
+@end
+@implementation ASPWebSnapshot
+@end
+
+static BOOL boundedInteger(id value, NSUInteger maximum) {
+    if (![value isKindOfClass:[NSNumber class]]) return NO;
+    double number = [value doubleValue];
+    return isfinite(number) && number >= 0 && number <= maximum && floor(number) == number;
 }
 
 @interface ASPSkipButtonController : UIViewController
@@ -121,9 +135,21 @@ BOOL ASPManualSkipIsAdPlayer(AVPlayer *player) {
 }
 - (BOOL)surfaceCurrent:(ASPAdSurface *)surface {
     UIView *root = surface.root;
-    return gEnabled && root && ASPViewVisibleInSurface(root, root) &&
+    ASPAdSurface *fresh = currentSurface(self.view.window.windowScene);
+    return gEnabled && root && !surface.incomplete && !fresh.incomplete &&
+        ASPAdSurfaceUnchanged(surface) && ASPViewVisibleInSurface(root, root) &&
         [UIApplication sharedApplication].applicationState == UIApplicationStateActive &&
-        currentSurface(self.view.window.windowScene).root == root;
+        fresh.root == root && [[NSSet setWithArray:fresh.webViews] isEqualToSet:[NSSet setWithArray:surface.webViews]];
+}
+- (BOOL)nativeSelectionCurrent:(NSArray<AVPlayer *> *)native surface:(ASPAdSurface *)surface {
+    if (![self surfaceCurrent:surface]) return NO;
+    ASPAdSurface *fresh = currentSurface(self.view.window.windowScene);
+    NSArray<AVPlayer *> *current = ASPUniversalSkipCandidates(fresh.players, fresh.root, fresh.items);
+    if (![[NSSet setWithArray:current] isEqualToSet:[NSSet setWithArray:native]]) return NO;
+    for (AVPlayer *player in native) {
+        if ([surface.items objectForKey:player] != player.currentItem) return NO;
+    }
+    return YES;
 }
 - (void)finishRequest:(NSString *)message generation:(NSUInteger)generation {
     if (self.feedbackGeneration != generation) return;
@@ -136,51 +162,158 @@ BOOL ASPManualSkipIsAdPlayer(AVPlayer *player) {
         [controller.skipButton setTitle:@"Skip current ad" forState:UIControlStateNormal];
     });
 }
-- (void)trySurface:(ASPAdSurface *)surface webIndex:(NSUInteger)index generation:(NSUInteger)generation {
+- (void)performSelection:(ASPAdSurface *)surface snapshots:(NSArray<ASPWebSnapshot *> *)snapshots
+                  native:(NSArray<AVPlayer *> *)native generation:(NSUInteger)generation {
+    if (self.feedbackGeneration != generation) return;
+    if (![self surfaceCurrent:surface]) {
+        [self finishRequest:@"Ad changed" generation:generation];
+        return;
+    }
+    if (![self nativeSelectionCurrent:native surface:surface]) {
+        [self finishRequest:@"Media changed" generation:generation];
+        return;
+    }
+    ASPWebSnapshot *selected = nil;
+    NSUInteger count = native.count;
+    for (ASPWebSnapshot *snapshot in snapshots) {
+        count += snapshot.count;
+        if (snapshot.count == 1) selected = snapshot;
+    }
+    if (count == 0) {
+        UIControl *control = ASPCompletedVideoCloseControl(surface);
+        if (control && control.enabled && control.userInteractionEnabled) {
+            BOOL interactive = YES;
+            for (UIView *ancestor = control; ancestor; ancestor = ancestor.superview) {
+                if (!ancestor.userInteractionEnabled) {
+                    interactive = NO;
+                    break;
+                }
+            }
+            CGPoint center = [control convertPoint:CGPointMake(CGRectGetMidX(control.bounds),
+                                                               CGRectGetMidY(control.bounds)) toView:control.window];
+            UIView *hit = [control.window hitTest:center withEvent:nil];
+            UIControlEvents event = control.allControlEvents & UIControlEventTouchUpInside;
+            if (!event) event = control.allControlEvents & UIControlEventPrimaryActionTriggered;
+            if (interactive && event && (hit == control || [hit isDescendantOfView:control])) {
+                [control sendActionsForControlEvents:event];
+                [self finishRequest:@"Close requested" generation:generation];
+                return;
+            }
+        }
+        [self finishRequest:@"No eligible video" generation:generation];
+        return;
+    }
+    if (count > 1) {
+        [self finishRequest:@"Multiple videos" generation:generation];
+        return;
+    }
+    __weak ASPSkipButtonController *weakSelf = self;
+    if (!selected) {
+        // A waiting native request cannot keep an empty web snapshot current.
+        if (snapshots.count && native.firstObject.currentItem.status != AVPlayerItemStatusReadyToPlay) {
+            [self finishRequest:@"Video not ready" generation:generation];
+            return;
+        }
+        ASPUniversalSkipNow(native, surface.root, surface.items, snapshots.count == 0, ^BOOL {
+            ASPSkipButtonController *controller = weakSelf;
+            return controller && controller.feedbackGeneration == generation && [controller nativeSelectionCurrent:native surface:surface];
+        }, ^(NSString *message) {
+            [weakSelf finishRequest:message generation:generation];
+        });
+        return;
+    }
+    if (!ASPViewVisibleInSurface(selected.web, surface.root)) {
+        [self finishRequest:@"Ad changed" generation:generation];
+        return;
+    }
+    [selected.web callAsyncJavaScript:@"return window.__adspeed && typeof window.__adspeed.skipAsync === 'function' ? await window.__adspeed.skipAsync(token) : {handled:0,unresolved:1};"
+        arguments:@{@"token": selected.token} inFrame:nil inContentWorld:[WKContentWorld pageWorld]
+        completionHandler:^(id result, NSError *error) {
+        ASPSkipButtonController *controller = weakSelf;
+        if (!controller || controller.feedbackGeneration != generation) return;
+        if (![controller surfaceCurrent:surface]) {
+            [controller finishRequest:@"Ad changed" generation:generation];
+        } else if (error || ![result isKindOfClass:[NSDictionary class]] ||
+                   !boundedInteger(result[@"handled"], 1) || !boundedInteger(result[@"unresolved"], 1)) {
+            [controller finishRequest:@"Web unavailable" generation:generation];
+        } else if ([result[@"handled"] unsignedIntegerValue] == 1) {
+            [controller finishRequest:@"Seek requested" generation:generation];
+        } else {
+            [controller finishRequest:@"Media unavailable" generation:generation];
+        }
+    }];
+}
+- (void)validateSnapshots:(NSArray<ASPWebSnapshot *> *)snapshots index:(NSUInteger)index
+                 surface:(ASPAdSurface *)surface native:(NSArray<AVPlayer *> *)native
+              generation:(NSUInteger)generation {
+    if (self.feedbackGeneration != generation) return;
+    if (![self surfaceCurrent:surface]) {
+        [self finishRequest:@"Ad changed" generation:generation];
+        return;
+    }
+    if (index >= snapshots.count) {
+        [self performSelection:surface snapshots:snapshots native:native generation:generation];
+        return;
+    }
+    ASPWebSnapshot *snapshot = snapshots[index];
+    if (!ASPViewVisibleInSurface(snapshot.web, surface.root)) {
+        [self finishRequest:@"Ad changed" generation:generation];
+        return;
+    }
+    __weak ASPSkipButtonController *weakSelf = self;
+    [snapshot.web callAsyncJavaScript:@"return window.__adspeed && typeof window.__adspeed.validateAsync === 'function' ? await window.__adspeed.validateAsync(token) : false;"
+        arguments:@{@"token": snapshot.token} inFrame:nil inContentWorld:[WKContentWorld pageWorld]
+        completionHandler:^(id result, NSError *error) {
+        ASPSkipButtonController *controller = weakSelf;
+        if (!controller || controller.feedbackGeneration != generation) return;
+        if (error || ![result isKindOfClass:[NSNumber class]] || ![result isEqual:@YES]) {
+            [controller finishRequest:@"Media changed" generation:generation];
+        } else {
+            [controller validateSnapshots:snapshots index:index + 1 surface:surface native:native generation:generation];
+        }
+    }];
+}
+- (void)inspectSurface:(ASPAdSurface *)surface index:(NSUInteger)index
+            snapshots:(NSMutableArray<ASPWebSnapshot *> *)snapshots native:(NSArray<AVPlayer *> *)native
+           generation:(NSUInteger)generation {
     if (self.feedbackGeneration != generation) return;
     if (![self surfaceCurrent:surface]) {
         [self finishRequest:@"Ad changed" generation:generation];
         return;
     }
     if (index >= surface.webViews.count) {
-        __weak ASPSkipButtonController *weakSelf = self;
-        ASPUniversalSkipNow(surface.players, surface.root, surface.items, ^BOOL {
-            ASPSkipButtonController *controller = weakSelf;
-            return controller && controller.feedbackGeneration == generation && [controller surfaceCurrent:surface];
-        }, ^(NSString *message) {
-            [weakSelf finishRequest:message generation:generation];
-        });
+        [self validateSnapshots:snapshots index:0 surface:surface native:native generation:generation];
         return;
     }
     WKWebView *web = surface.webViews[index];
     if (!ASPViewVisibleInSurface(web, surface.root)) {
-        [self trySurface:surface webIndex:index + 1 generation:generation];
+        [self finishRequest:@"Ad changed" generation:generation];
         return;
     }
     __weak ASPSkipButtonController *weakSelf = self;
-    [web callAsyncJavaScript:@"return window.__adspeed && typeof window.__adspeed.skipAsync === 'function' ? await window.__adspeed.skipAsync() : {handled:0,unresolved:1};"
+    [web callAsyncJavaScript:@"return window.__adspeed && typeof window.__adspeed.inspectAsync === 'function' ? await window.__adspeed.inspectAsync() : {count:0,unresolved:1,token:null};"
         arguments:@{} inFrame:nil inContentWorld:[WKContentWorld pageWorld]
         completionHandler:^(id result, NSError *error) {
         ASPSkipButtonController *controller = weakSelf;
         if (!controller || controller.feedbackGeneration != generation) return;
         if (![controller surfaceCurrent:surface]) {
             [controller finishRequest:@"Ad changed" generation:generation];
-        } else if (error || ![result isKindOfClass:[NSDictionary class]]) {
+        } else if (error || ![result isKindOfClass:[NSDictionary class]] ||
+                   !boundedInteger(result[@"count"], 2) || !boundedInteger(result[@"unresolved"], 1) ||
+                   [result[@"unresolved"] unsignedIntegerValue] != 0) {
             [controller finishRequest:@"Web unavailable" generation:generation];
-        } else if (![result[@"handled"] isKindOfClass:[NSNumber class]] ||
-                   ![result[@"unresolved"] isKindOfClass:[NSNumber class]] ||
-                   !isfinite([result[@"handled"] doubleValue]) || !isfinite([result[@"unresolved"] doubleValue]) ||
-                   [result[@"handled"] doubleValue] < 0 || [result[@"unresolved"] doubleValue] < 0 ||
-                   floor([result[@"handled"] doubleValue]) != [result[@"handled"] doubleValue] ||
-                   floor([result[@"unresolved"] doubleValue]) != [result[@"unresolved"] doubleValue] ||
-                   [result[@"handled"] doubleValue] > 4096 || [result[@"unresolved"] doubleValue] > 4096) {
+        } else if ([result[@"count"] unsignedIntegerValue] > 1) {
+            [controller finishRequest:@"Multiple videos" generation:generation];
+        } else if (![result[@"token"] isKindOfClass:[NSString class]] ||
+                   [result[@"token"] length] == 0 || [result[@"token"] length] > 192) {
             [controller finishRequest:@"Web unavailable" generation:generation];
-        } else if ([result[@"handled"] unsignedIntegerValue] > 0) {
-            [controller finishRequest:@"Skip requested" generation:generation];
-        } else if ([result[@"unresolved"] unsignedIntegerValue] > 0) {
-            [controller finishRequest:@"Frame unavailable" generation:generation];
         } else {
-            [controller trySurface:surface webIndex:index + 1 generation:generation];
+            ASPWebSnapshot *snapshot = [ASPWebSnapshot new];
+            snapshot.web = web;
+            snapshot.token = result[@"token"];
+            snapshot.count = [result[@"count"] unsignedIntegerValue];
+            [snapshots addObject:snapshot];
+            [controller inspectSurface:surface index:index + 1 snapshots:snapshots native:native generation:generation];
         }
     }];
 }
@@ -190,33 +323,17 @@ BOOL ASPManualSkipIsAdPlayer(AVPlayer *player) {
     self.requestPending = YES;
     NSUInteger generation = ++self.feedbackGeneration;
     ASPAdSurface *surface = currentSurface(self.view.window.windowScene);
-    if (!surface) {
+    if (!surface || surface.incomplete) {
         [self finishRequest:@"No visible ad" generation:generation];
         return;
     }
-    for (UIControl *control in surface.controls) {
-        if (!control.enabled || !control.userInteractionEnabled ||
-            !ASPViewVisibleInSurface(control, surface.root)) continue;
-        BOOL interactive = YES;
-        for (UIView *ancestor = control; ancestor; ancestor = ancestor.superview) {
-            if (!ancestor.userInteractionEnabled) {
-                interactive = NO;
-                break;
-            }
-        }
-        CGPoint center = [control convertPoint:CGPointMake(CGRectGetMidX(control.bounds),
-                                                           CGRectGetMidY(control.bounds)) toView:control.window];
-        UIView *hit = [control.window hitTest:center withEvent:nil];
-        if (!interactive || (hit != control && ![hit isDescendantOfView:control])) continue;
-        UIControlEvents event = control.allControlEvents & UIControlEventTouchUpInside;
-        if (!event) event = control.allControlEvents & UIControlEventPrimaryActionTriggered;
-        if (!event) continue;
-        [control sendActionsForControlEvents:event];
-        [self finishRequest:@"Skip requested" generation:generation];
+    [self.skipButton setTitle:@"Checking ad" forState:UIControlStateNormal];
+    NSArray<AVPlayer *> *native = ASPUniversalSkipCandidates(surface.players, surface.root, surface.items);
+    if (native.count > 1) {
+        [self finishRequest:@"Multiple videos" generation:generation];
         return;
     }
-    [self.skipButton setTitle:@"Checking ad" forState:UIControlStateNormal];
-    [self trySurface:surface webIndex:0 generation:generation];
+    [self inspectSurface:surface index:0 snapshots:[NSMutableArray array] native:native generation:generation];
     __weak ASPSkipButtonController *weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         ASPSkipButtonController *controller = weakSelf;
@@ -277,6 +394,7 @@ static void refreshWindows(void) {
 void ASPManualSkipConfigure(BOOL enabled) {
     dispatch_async(dispatch_get_main_queue(), ^{
         gEnabled = enabled;
+        if (enabled) ASPUniversalSkipConfigure();
         static dispatch_once_t once;
         dispatch_once(&once, ^{
             gWindows = [NSMapTable weakToStrongObjectsMapTable];

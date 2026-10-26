@@ -4,8 +4,13 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+void ASPUniversalSkipConfigure(void);
+BOOL ASPUniversalSkipItemEnded(AVPlayerItem *item);
+NSArray<AVPlayer *> *ASPUniversalSkipCandidates(NSArray<AVPlayer *> *players, UIView *root,
+                                               NSMapTable<AVPlayer *, AVPlayerItem *> *items);
 void ASPUniversalSkipNow(NSArray<AVPlayer *> *players, UIView *root,
                          NSMapTable<AVPlayer *, AVPlayerItem *> *items,
+                         BOOL mayWait,
                          BOOL (^isCurrent)(void), void (^completion)(NSString *));
 #ifdef __cplusplus
 }

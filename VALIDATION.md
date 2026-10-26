@@ -1,6 +1,6 @@
 # Verification
 
-The shared web engine has 47 Node VM regression tests covering manual-only behavior, media eligibility, source changes, failed seeks, duplicate injection, timer/clock behavior, cross-frame request acknowledgments, stale/spoofed replies, bounded timeouts, loop handling and standard MRAID close requests. Run them with:
+The shared web engine has 56 Node VM regression tests covering manual-only behavior, media eligibility, source changes, failed seeks, duplicate injection, timer/clock behavior, side-effect-free cross-frame discovery, single-use action tokens, stale/spoofed replies, token expiry, bounded retries, ambiguity, loop handling and the absence of generic MRAID closing. Run them with:
 
 ```sh
 node scripts/embed-web.cjs
@@ -13,6 +13,10 @@ Each successful package job checks Debian metadata and installation layout, both
 
 Native compilation results are recorded in public Actions logs. A passing build does not prove ad skipping, reward handling or UI behavior on a device. No device results are claimed yet for iOS 15–18 or 26.
 
+## Real-browser fixtures
+
+Eleven live Microsoft Edge 156.0.4314.42 cases passed with an isolated profile, real HTML video and cross-origin frames. The locally generated 12-second H264 clip sought once and naturally emitted ended, including in a child frame. Multiple targets abstained, stale snapshots invalidated, concurrent token reuse acted once, and no MRAID close or JavaScript error occurred. This checks Chromium media behavior, not iOS WebKit/UIKit or real SDK rewards.
+
 ## Device checks still needed
 
 - Confirm the floating button appears and can be dragged in portrait and landscape, on both scene-based and legacy-window apps.
@@ -22,7 +26,7 @@ Native compilation results are recorded in public Actions logs. A passing build 
 - Check native video with a non-video web postitial, hidden/offscreen preloaders, multiple scenes, partially covering windows, and media replacement during a pending request. View/layer visibility is sampled and still requires device verification.
 - Verify the rootless and rootful packages on their matching jailbreak layouts. Treat iOS 26 as experimental with a low chance of working.
 
-A manual request can select ordinary media if that is what is currently visible or playing. The code does not fabricate reward/completion events or forcibly dismiss an SDK's controller. SDK controls require a verified getter, the expected runtime type, an enabled and interactive view hierarchy, and an unobstructed hit target. Native player requests freeze the original item and recheck the current scene/surface during readiness retries. Some close/reward gates remain outside the shared media interfaces.
+A manual request can select ordinary media if that is what is currently visible or playing. The code does not fabricate reward/completion events or forcibly dismiss an SDK's controller. The only programmatic SDK close is AppLovin's completion-gated close: actual item-end notification, SDK video-completion signal, unchanged item/creative, end position, stopped playback, no remaining media candidates, a verified getter and an interactive unobstructed UIControl. No SDK Skip control is activated. Video completion does not prove server reward eligibility. Native player requests freeze the original item and recheck the current scene/surface during readiness retries. Some close/reward gates remain outside the shared media interfaces.
 
 ## Analysis provenance
 

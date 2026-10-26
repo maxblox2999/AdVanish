@@ -1,6 +1,8 @@
 #import "ASPAdSurface.h"
+#import "ASPUniversalSkip.h"
 #import <objc/message.h>
 #include <string.h>
+#include <math.h>
 
 @implementation ASPAdSurface
 @end
@@ -101,17 +103,36 @@ static AVPlayer *ownedAppLovinPlayer(UIViewController *owner) {
     return [player isKindOfClass:[AVPlayer class]] ? player : nil;
 }
 
-static NSArray<UIControl *> *ownedControls(UIViewController *owner, UIView *root) {
-    BOOL appLovin = kindOfNamedClass(owner, @"ALBaseVideoViewController");
-    if (!appLovin && !kindOfNamedClass(owner, @"GADFullScreenAdViewController")) return @[];
-    NSMutableArray<UIControl *> *controls = [NSMutableArray array];
-    for (NSString *name in appLovin ? @[@"closeButton", @"skipButton"] : @[@"closeButton"]) {
-        id control = objectGetter(owner, name);
-        if ([control isKindOfClass:[UIControl class]] && ASPViewVisibleInSurface(control, root)) {
-            [controls addObject:control];
-        }
+BOOL ASPAdSurfaceUnchanged(ASPAdSurface *surface) {
+    return surface.root && surface.owner &&
+        (!surface.creative || objectGetter(surface.owner, @"currentAd") == surface.creative);
+}
+
+UIControl *ASPCompletedVideoCloseControl(ASPAdSurface *surface) {
+    UIViewController *owner = surface.owner;
+    if (surface.incomplete || !kindOfNamedClass(owner, @"ALBaseVideoViewController") || !surface.creative ||
+        !ASPAdSurfaceUnchanged(surface)) return nil;
+    id value = objectGetter(owner, @"avPlayer");
+    if (![value isKindOfClass:[AVPlayer class]]) return nil;
+    AVPlayer *player = value;
+    AVPlayerItem *item = player.currentItem;
+    if (!item || [surface.items objectForKey:player] != item || !ASPUniversalSkipItemEnded(item) ||
+        item.status != AVPlayerItemStatusReadyToPlay || !CMTIME_IS_NUMERIC(item.duration) ||
+        !CMTIME_IS_NUMERIC(player.currentTime) || player.rate != 0) return nil;
+    double duration = CMTimeGetSeconds(item.duration);
+    double position = CMTimeGetSeconds(player.currentTime);
+    if (!isfinite(duration) || !isfinite(position) || duration <= 0 || position < duration - 0.05) return nil;
+    SEL selector = NSSelectorFromString(@"isVideoFullyWatched");
+    NSMethodSignature *signature = [owner methodSignatureForSelector:selector];
+    if (!signature || signature.numberOfArguments != 2 ||
+        (strcmp(signature.methodReturnType, "B") != 0 && strcmp(signature.methodReturnType, "c") != 0)) return nil;
+    @try {
+        if (!((BOOL (*)(id, SEL))objc_msgSend)(owner, selector)) return nil;
+    } @catch (NSException *exception) {
+        return nil;
     }
-    return controls;
+    id control = objectGetter(owner, @"closeButton");
+    return [control isKindOfClass:[UIControl class]] && ASPViewVisibleInSurface(control, surface.root) ? control : nil;
 }
 
 static BOOL layerExposed(CALayer *layer, UIWindow *window) {
@@ -153,7 +174,7 @@ static void collectViews(UIView *view, UIView *root, NSMutableArray<WKWebView *>
     if (*remaining == 0 || !ASPViewVisibleInSurface(view, root)) return;
     *remaining -= 1;
     if ([view isKindOfClass:[WKWebView class]]) {
-        if (webViews.count < 16) [webViews addObject:(WKWebView *)view];
+        if (webViews.count < 17) [webViews addObject:(WKWebView *)view];
         return;
     }
     // Frontmost descendants precede a parent's player layer.
@@ -201,6 +222,7 @@ ASPAdSurface *ASPFindAdSurface(NSArray<UIWindow *> *windows, BOOL recognizedOnly
         if (!ASPViewVisibleInSurface(root, root)) continue;
         NSUInteger remaining = 512;
         UIViewController *owner = findOwner(front, root, &remaining);
+        BOOL incompleteOwners = remaining == 0;
         if (recognizedOnly && !owner) {
             if (blocksLowerWindow(window)) return nil;
             continue;
@@ -219,14 +241,18 @@ ASPAdSurface *ASPFindAdSurface(NSArray<UIWindow *> *windows, BOOL recognizedOnly
         ASPAdSurface *surface = [ASPAdSurface new];
         surface.root = root;
         surface.owner = owner ?: front;
-        surface.recognized = owner != nil;
+        surface.incomplete = incompleteOwners || remaining == 0 || webViews.count > 16;
+        surface.creative = kindOfNamedClass(owner, @"ALBaseVideoViewController") ? objectGetter(owner, @"currentAd") : nil;
         surface.webViews = webViews;
         surface.players = players.array;
         surface.items = [NSMapTable strongToStrongObjectsMapTable];
         for (AVPlayer *player in surface.players) {
             if (player.currentItem) [surface.items setObject:player.currentItem forKey:player];
         }
-        surface.controls = ownedControls(owner, root);
+        id sdkPlayer = kindOfNamedClass(owner, @"ALBaseVideoViewController") ? objectGetter(owner, @"avPlayer") : nil;
+        if ([sdkPlayer isKindOfClass:[AVPlayer class]] && [sdkPlayer currentItem]) {
+            [surface.items setObject:[sdkPlayer currentItem] forKey:sdkPlayer];
+        }
         return surface;
     }
     return nil;
