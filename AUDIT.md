@@ -26,7 +26,7 @@ Web results are checked for dictionary/number/string types, finite bounded integ
 - The browser fixture video was generated locally: H264, 160x90, 15fps, 12 seconds, no audio. No game binaries, proprietary media or private data are distributed.
 - Both package variants must pass the public Actions build and static package checks before publication. Build artifacts record their exact commit and toolchain versions.
 
-The browser-tested production script has SHA-256 `6d83c1ab6420adbce9d776a095273deb69f828a3d1e8f0118a776b23c52f3f8d`.
+The browser-tested production script has SHA-256 `72c9d63adff085e5c4cb7575bc49a6486d6a16f3c32a34c259b7075fc89e1d05`.
 
 ## Limits
 
