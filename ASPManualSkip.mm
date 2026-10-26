@@ -105,7 +105,7 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
     button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     button.layer.cornerRadius = 18;
     button.accessibilityLabel = @"Skip current ad";
-    button.accessibilityHint = @"Requests video completion or a supported ad close action. Drag to reposition.";
+    button.accessibilityHint = @"Seeks one visible video. The app controls closing and rewards. Drag to reposition.";
     [button addTarget:self action:@selector(skipCurrentAd) forControlEvents:UIControlEventTouchUpInside];
     [button addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(moveButton:)]];
     [self.view addSubview:button];
@@ -180,26 +180,6 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
         if (snapshot.count == 1) selected = snapshot;
     }
     if (count == 0) {
-        UIControl *control = ASPCompletedVideoCloseControl(surface);
-        if (control && control.enabled && control.userInteractionEnabled) {
-            BOOL interactive = YES;
-            for (UIView *ancestor = control; ancestor; ancestor = ancestor.superview) {
-                if (!ancestor.userInteractionEnabled) {
-                    interactive = NO;
-                    break;
-                }
-            }
-            CGPoint center = [control convertPoint:CGPointMake(CGRectGetMidX(control.bounds),
-                                                               CGRectGetMidY(control.bounds)) toView:control.window];
-            UIView *hit = [control.window hitTest:center withEvent:nil];
-            UIControlEvents event = control.allControlEvents & UIControlEventTouchUpInside;
-            if (!event) event = control.allControlEvents & UIControlEventPrimaryActionTriggered;
-            if (interactive && event && (hit == control || [hit isDescendantOfView:control])) {
-                [control sendActionsForControlEvents:event];
-                [self finishRequest:@"Close requested" generation:generation];
-                return;
-            }
-        }
         [self finishRequest:@"No eligible video" generation:generation];
         return;
     }
@@ -394,7 +374,6 @@ static void refreshWindows(void) {
 void ASPManualSkipConfigure(BOOL enabled) {
     dispatch_async(dispatch_get_main_queue(), ^{
         gEnabled = enabled;
-        if (enabled) ASPUniversalSkipConfigure();
         static dispatch_once_t once;
         dispatch_once(&once, ^{
             gWindows = [NSMapTable weakToStrongObjectsMapTable];

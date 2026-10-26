@@ -1,6 +1,6 @@
 # Verification
 
-The shared web engine has 56 Node VM regression tests covering manual-only behavior, media eligibility, source changes, failed seeks, duplicate injection, timer/clock behavior, side-effect-free cross-frame discovery, single-use action tokens, stale/spoofed replies, token expiry, bounded retries, ambiguity, loop handling and the absence of generic MRAID closing. Run them with:
+The shared web engine has 58 Node VM regression tests covering manual-only behavior, media eligibility, source changes, failed and silently ignored seeks, asynchronous seeks, duplicate injection, timer/clock behavior, side-effect-free cross-frame discovery, single-use action tokens, stale/spoofed replies, token expiry, bounded retries, ambiguity, loop handling and the absence of generic MRAID closing. Run them with:
 
 ```sh
 node scripts/embed-web.cjs
@@ -15,7 +15,19 @@ Native compilation results are recorded in public Actions logs. A passing build 
 
 ## Real-browser fixtures
 
-Eleven live Microsoft Edge 156.0.4314.42 cases passed with an isolated profile, real HTML video and cross-origin frames. The locally generated 12-second H264 clip sought once and naturally emitted ended, including in a child frame. Multiple targets abstained, stale snapshots invalidated, concurrent token reuse acted once, and no MRAID close or JavaScript error occurred. This checks Chromium media behavior, not iOS WebKit/UIKit or real SDK rewards.
+Twelve live Microsoft Edge 156.0.4314.42 cases passed with an isolated profile, real HTML video and cross-origin frames. The locally generated 12-second H264 clip sought once and naturally emitted ended, including in a child frame. Multiple targets abstained, stale snapshots invalidated, concurrent token reuse acted once, and no MRAID close or JavaScript error occurred. An ignored seek restored looping and reported failure; retrying through the native browser setter reached natural completion. This checks Chromium media behavior, not iOS WebKit or real SDK rewards.
+
+Run `node tests/browser/verify.cjs` with Node.js 22+ and Microsoft Edge on Windows, or set `BROWSER_PATH` to a Chromium browser executable. The runner uses two local HTTP origins and its own temporary browser profile, closes its browser afterward and writes `dist/browser.json`. It is included in the source so the browser checks can be repeated independently.
+
+## Native iOS Simulator fixture
+
+On macOS with an installed iOS Simulator runtime, run:
+
+```sh
+python3 scripts/test-ios.py --video tests/ios/fixture.mp4
+```
+
+This compiles the production native files into an isolated UIKit fixture, creates a temporary simulator, runs the checks, writes `dist/ios-simulator.json` and deletes its simulator. The rootless Actions job runs the same fixture and includes its result in the artifact. It checks visible AppLovin-style ownership, unchanged playback before pressing, a real AVPlayer seek/end event, a repeat press while a mocked reward is pending and the app's own working Close button. It does not test injection, a real ad SDK, remote reward validation or jailbreak compatibility. The 12-second H264 fixture is locally generated, has no audio and contains no proprietary media.
 
 ## Device checks still needed
 
@@ -26,7 +38,7 @@ Eleven live Microsoft Edge 156.0.4314.42 cases passed with an isolated profile, 
 - Check native video with a non-video web postitial, hidden/offscreen preloaders, multiple scenes, partially covering windows, and media replacement during a pending request. View/layer visibility is sampled and still requires device verification.
 - Verify the rootless and rootful packages on their matching jailbreak layouts. Treat iOS 26 as experimental with a low chance of working.
 
-A manual request can select ordinary media if that is what is currently visible or playing. The code does not fabricate reward/completion events or forcibly dismiss an SDK's controller. The only programmatic SDK close is AppLovin's completion-gated close: actual item-end notification, SDK video-completion signal, unchanged item/creative, end position, stopped playback, no remaining media candidates, a verified getter and an interactive unobstructed UIControl. No SDK Skip control is activated. Video completion does not prove server reward eligibility. Native player requests freeze the original item and recheck the current scene/surface during readiness retries. Some close/reward gates remain outside the shared media interfaces.
+A manual request can select ordinary media if that is what is currently visible or playing. The code does not fabricate reward/completion events, activate SDK Close/Skip controls or forcibly dismiss an SDK's controller. Video completion does not prove reward eligibility. Wait for the app's countdown or reward and use its own Close button when available. Native player requests freeze the original item and recheck the current scene/surface during readiness retries. Some close/reward gates remain outside the shared media interfaces.
 
 ## Analysis provenance
 

@@ -230,6 +230,11 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
                 if (video.loop) throw new Error('Loop cannot be disabled');
             }
             video.currentTime = target;
+            var position = video.currentTime;
+            if (!video.seeking && (typeof position !== 'number' || !isFinite(position)
+                || Math.abs(position - target) > 0.05)) {
+                throw new Error('Seek was not accepted');
+            }
             stats.skipped += 1;
             return true;
         } catch (error) {

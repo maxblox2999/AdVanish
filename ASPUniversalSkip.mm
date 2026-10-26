@@ -5,7 +5,6 @@
 #include <math.h>
 
 static char kStateKey;
-static char kEndedKey;
 
 @interface ASPSkipRequest : NSObject
 @property (nonatomic, weak) AVPlayerItem *item;
@@ -22,22 +21,6 @@ static char kEndedKey;
 @end
 @implementation ASPSkipRequest
 @end
-
-void ASPUniversalSkipConfigure(void) {
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        [[NSNotificationCenter defaultCenter] addObserverForName:AVPlayerItemDidPlayToEndTimeNotification
-            object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *notification) {
-            if ([notification.object isKindOfClass:[AVPlayerItem class]]) {
-                objc_setAssociatedObject(notification.object, &kEndedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            }
-        }];
-    });
-}
-
-BOOL ASPUniversalSkipItemEnded(AVPlayerItem *item) {
-    return item && [objc_getAssociatedObject(item, &kEndedKey) boolValue];
-}
 
 static void finish(ASPSkipRequest *state, NSString *message) {
     state.pending = NO;
@@ -142,7 +125,6 @@ static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation)
     }
     state.attempts += 1;
     state.lastAttempt = [NSProcessInfo processInfo].systemUptime;
-    objc_setAssociatedObject(item, &kEndedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     __weak AVPlayer *weakPlayer = player;
     __weak AVPlayerItem *weakItem = item;
     [player seekToTime:target toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero

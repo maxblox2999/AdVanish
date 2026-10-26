@@ -17,4 +17,3 @@ ASPAdSurface *ASPFindAdSurface(NSArray<UIWindow *> *windows, BOOL recognizedOnly
 BOOL ASPViewVisibleInSurface(UIView *view, UIView *root);
 BOOL ASPSurfaceOwnsPlayer(UIView *root, AVPlayer *player);
 BOOL ASPAdSurfaceUnchanged(ASPAdSurface *surface);
-UIControl *ASPCompletedVideoCloseControl(ASPAdSurface *surface);
