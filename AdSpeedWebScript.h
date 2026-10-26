@@ -20,7 +20,6 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
     var accelerateClock = !!(configuration && configuration.accelerateClock);
     var forceInline = !!(configuration && configuration.forceInline);
     var autoSkip = !!(configuration && configuration.autoSkip);
-    var manualClose = !!(configuration && configuration.manualClose);
     var skipChannel = configuration && configuration.skipChannel;
     var nativeTimeout = window.setTimeout;
     var nativeInterval = window.setInterval;
@@ -136,11 +135,34 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
             && video.readyState >= 2 && visible(video);
     }
 
+    function exposed(node) {
+        if (typeof document.elementFromPoint !== 'function') return false;
+        var rect = node.getBoundingClientRect();
+        var left = Math.max(0, rect.left);
+        var top = Math.max(0, rect.top);
+        var right = Math.min(window.innerWidth, rect.right);
+        var bottom = Math.min(window.innerHeight, rect.bottom);
+        if (right <= left || bottom <= top) return false;
+        try {
+            for (var x = 1; x <= 3; x += 1) {
+                for (var y = 1; y <= 3; y += 1) {
+                    var hit = document.elementFromPoint(left + (right - left) * x / 4,
+                        top + (bottom - top) * y / 4);
+                    if (hit === node || (hit && typeof node.contains === 'function' && node.contains(hit))
+                        || (hit && typeof hit.contains === 'function' && hit.contains(node))) return true;
+                }
+            }
+        } catch (error) {
+            return false;
+        }
+        return false;
+    }
+
     function mediaState(video) {
         var source = String(video.currentSrc || video.src || '');
         var state = states.get(video);
         if (!state || state.source !== source) {
-            state = {source: source, attempted: false, rateAttempts: 0, rateFailed: false};
+            state = {source: source, attempted: false, manualAttempts: 0, rateAttempts: 0, rateFailed: false};
             states.set(video, state);
         }
         return state;
@@ -172,7 +194,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
     }
 
     function skipVideo(video, state, explicit) {
-        if (state.attempted) {
+        if ((!explicit && state.attempted) || (explicit && state.manualAttempts >= 3)) {
             return false;
         }
         var duration = video.duration;
@@ -200,6 +222,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
         var looping = video.loop === true;
         if (looping && !explicit) return false;
         state.attempted = true;
+        if (explicit) state.manualAttempts += 1;
         stats.skipAttempts += 1;
         try {
             if (looping) {
@@ -391,55 +414,32 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
         }
     }
 
-    function closeAd() {
-        var result = 0;
-        if (manualClose && !pageHidden()) {
-            try {
-                var bridge = window.mraid;
-                if (bridge && typeof bridge.close === 'function'
-                    && typeof bridge.getState === 'function') {
-                    var state = bridge.getState();
-                    var placement = typeof bridge.getPlacementType === 'function'
-                        ? bridge.getPlacementType() : null;
-                    var viewable = typeof bridge.isViewable !== 'function' || bridge.isViewable();
-                    if (viewable && (state === 'default' || state === 'expanded' || state === 'resized')
-                        && (placement === 'interstitial' || state === 'expanded' || state === 'resized')) {
-                        bridge.close();
-                        stats.closeRequests += 1;
-                        result += 1;
-                    }
-                }
-            } catch (error) {
-                stats.closeFailures += 1;
-            }
-        }
-        return result;
-    }
-
-    function requestSkip() {
-        if (pageHidden()) return 0;
-        var result = scan(true, true);
-        if (!result) result = closeAd();
-        if (typeof skipChannel === 'string' && skipChannel.length) {
-            var count = window.frames ? Math.min(window.frames.length, 64) : 0;
-            for (var index = 0; index < count; index += 1) {
-                try {
-                    window.frames[index].postMessage({adSpeedSkip: skipChannel}, '*');
-                    stats.frameRequests += 1;
-                } catch (error) {
-                    // A frame can disappear between enumeration and delivery.
-                }
-            }
-        }
-        return result;
-    }
-
     var requestSequence = 0;
     var requestPrefix = String(dateNow()) + ':' + String(Math.floor(Math.random() * 0x100000000)) + ':';
-    var pendingChildren = null;
+    var generation = 0;
+    var snapshots = new Map();
+    var pendingMessages = new Map();
+    var receivedMessages = new Map();
+    var activeInspection = null;
     var activeRequest = null;
-    var receivedRequests = new Map();
     var maximumFrameDepth = 8;
+    var snapshotLifetime = 5000;
+
+    function realNow() {
+        return performanceClock ? performanceNow() : dateNow();
+    }
+
+    function identifier() {
+        return requestPrefix + (++requestSequence);
+    }
+
+    function validIdentifier(value) {
+        return typeof value === 'string' && /^[0-9:.]{1,96}$/.test(value);
+    }
+
+    function unknown() {
+        return {count: 0, unresolved: 1, token: null};
+    }
 
     function frameCandidates() {
         var result = {children: [], unresolved: 0};
@@ -447,69 +447,210 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
             var nodes = document.querySelectorAll('iframe,frame');
             var count = Math.min(nodes.length, 64);
             if (nodes.length > count || (window.frames && window.frames.length > nodes.length)) {
-                result.unresolved += 1;
+                result.unresolved = 1;
             }
             for (var index = 0; index < count; index += 1) {
                 var node = nodes[index];
                 if (!visible(node)) continue;
+                if (!exposed(node)) {
+                    result.unresolved = 1;
+                    continue;
+                }
                 var child = node.contentWindow;
                 if (!child || typeof child.postMessage !== 'function') {
-                    result.unresolved += 1;
+                    result.unresolved = 1;
                 } else if (!result.children.some(function (entry) { return entry.source === child; })) {
-                    result.children.push({source: child, node: node, pending: true});
+                    result.children.push({source: child, node: node});
                 }
             }
         } catch (error) {
-            result.unresolved += window.frames && window.frames.length ? 1 : 0;
+            result.unresolved = window.frames && window.frames.length ? 1 : 0;
         }
         return result;
     }
 
-    function relayChildren(depth) {
-        var candidates = frameCandidates();
-        if (!candidates.children.length) return Promise.resolve({handled: 0, unresolved: candidates.unresolved});
-        if (depth >= maximumFrameDepth || typeof skipChannel !== 'string' || !skipChannel.length) {
-            return Promise.resolve({handled: 0, unresolved: candidates.unresolved + candidates.children.length});
+    function seekableTarget(video) {
+        if (!playing(video)) return null;
+        var duration = video.duration;
+        var current = video.currentTime;
+        if (typeof duration !== 'number' || !isFinite(duration) || duration <= 0
+            || typeof current !== 'number' || !isFinite(current) || current < 0) return null;
+        var target = duration - Math.min(0.25, duration / 10);
+        if (target <= current + 0.05) return null;
+        var ranges = video.seekable;
+        var count = ranges ? Math.min(ranges.length, 32) : 0;
+        for (var index = 0; index < count; index += 1) {
+            if (ranges.start(index) <= target && ranges.end(index) >= target) return target;
+        }
+        return null;
+    }
+
+    function capture() {
+        var frames = frameCandidates();
+        var snapshot = {generation: generation, videos: [], children: frames.children,
+            unresolved: frames.unresolved, candidates: []};
+        if (pageHidden()) snapshot.unresolved = 1;
+        try {
+            var videos = document.getElementsByTagName('video');
+            var count = Math.min(videos.length, maximumVideos);
+            if (videos.length > count) snapshot.unresolved = 1;
+            for (var index = 0; index < count; index += 1) {
+                var video = videos[index];
+                if (!visible(video)) continue;
+                if (!exposed(video)) {
+                    snapshot.unresolved = 1;
+                    continue;
+                }
+                var source = String(video.currentSrc || video.src || '');
+                snapshot.videos.push({node: video, source: source, paused: !!video.paused,
+                    ended: !!video.ended, seeking: !!video.seeking, ready: video.readyState,
+                    duration: video.duration});
+                if (video.ended) continue;
+                var target = seekableTarget(video);
+                if (target === null || mediaState(video).manualAttempts >= 3) snapshot.unresolved = 1;
+                else snapshot.candidates.push(video);
+            }
+        } catch (error) {
+            snapshot.unresolved = 1;
+        }
+        return snapshot;
+    }
+
+    function unchanged(snapshot) {
+        if (pageHidden() || generation !== snapshot.generation) return false;
+        var current = capture();
+        if (current.unresolved !== snapshot.unresolved || current.videos.length !== snapshot.videos.length
+            || current.children.length !== snapshot.children.length) return false;
+        for (var index = 0; index < snapshot.videos.length; index += 1) {
+            var before = snapshot.videos[index];
+            var after = current.videos[index];
+            if (before.node !== after.node || before.source !== after.source || before.paused !== after.paused
+                || before.ended !== after.ended || before.seeking !== after.seeking || before.ready !== after.ready
+                || !Object.is(before.duration, after.duration)) return false;
+        }
+        for (var frameIndex = 0; frameIndex < snapshot.children.length; frameIndex += 1) {
+            if (snapshot.children[frameIndex].node !== current.children[frameIndex].node
+                || snapshot.children[frameIndex].source !== current.children[frameIndex].source) return false;
+        }
+        return true;
+    }
+
+    function query(source, phase, token, depth) {
+        if (pendingMessages.size >= 64 || typeof skipChannel !== 'string' || !skipChannel.length) {
+            return Promise.resolve(phase === 'inspect' ? unknown() : phase === 'validate' ? false : {handled: 0, unresolved: 1});
         }
         return new Promise(function (resolve) {
-            var record = {
-                id: requestPrefix + (++requestSequence),
-                children: candidates.children,
-                remaining: candidates.children.length,
-                handled: 0,
-                unresolved: candidates.unresolved,
-                timer: null,
-                finish: function () {
-                    if (pendingChildren !== record) return;
-                    pendingChildren = null;
-                    nativeClearTimeout.call(window, record.timer);
-                    resolve({handled: record.handled, unresolved: Math.min(4096, record.unresolved + record.remaining)});
-                }
-            };
-            pendingChildren = record;
-            record.timer = nativeTimeout.call(window, record.finish, 800 - depth * 80);
-            record.children.forEach(function (entry) {
-                try {
-                    entry.source.postMessage({adSpeedRequest: skipChannel, id: record.id, depth: depth + 1}, '*');
-                    stats.frameRequests += 1;
-                } catch (error) {
-                    entry.pending = false;
-                    record.remaining -= 1;
-                    record.unresolved += 1;
-                }
-            });
-            if (!record.remaining) record.finish();
+            var id = identifier();
+            var fallback = phase === 'inspect' ? unknown() : phase === 'validate' ? false : {handled: 0, unresolved: 1};
+            var record = {source: source, phase: phase, resolve: resolve, timer: null};
+            record.timer = nativeTimeout.call(window, function () {
+                if (!pendingMessages.delete(id)) return;
+                resolve(fallback);
+            }, 800 - depth * 80);
+            pendingMessages.set(id, record);
+            try {
+                source.postMessage({adSpeedProtocol: skipChannel, phase: phase, id: id,
+                    token: token, depth: depth + 1}, '*');
+                stats.frameRequests += 1;
+            } catch (error) {
+                pendingMessages.delete(id);
+                nativeClearTimeout.call(window, record.timer);
+                resolve(fallback);
+            }
         });
     }
 
-    function requestSkipAsync(depth) {
+    function inspect(depth) {
+        if (activeInspection) {
+            return activeInspection.depth === depth ? activeInspection.promise : Promise.resolve(unknown());
+        }
+        var snapshot = capture();
+        if (snapshot.unresolved || (snapshot.children.length && depth >= maximumFrameDepth)) {
+            return Promise.resolve(unknown());
+        }
+        var record = {depth: depth, promise: null};
+        activeInspection = record;
+        record.promise = Promise.all(snapshot.children.map(function (child) {
+            return query(child.source, 'inspect', null, depth);
+        })).then(function (results) {
+            if (!unchanged(snapshot)) return unknown();
+            var count = Math.min(2, snapshot.candidates.length);
+            var unresolved = 0;
+            var route = snapshot.candidates.length === 1 ? {video: snapshot.candidates[0]} : null;
+            results.forEach(function (result, index) {
+                count = Math.min(2, count + result.count);
+                if (result.unresolved) unresolved = 1;
+                if (result.count === 1 && !result.unresolved) {
+                    route = {child: snapshot.children[index], token: result.token};
+                }
+            });
+            if (count > 1 || unresolved) return {count: count, unresolved: unresolved, token: null};
+            var token = identifier();
+            if (snapshots.size >= 8) snapshots.delete(snapshots.keys().next().value);
+            snapshots.set(token, {snapshot: snapshot, route: route, children: results, created: realNow()});
+            return {count: count, unresolved: 0, token: token};
+        }, function () {
+            return unknown();
+        }).then(function (result) {
+            if (activeInspection === record) activeInspection = null;
+            return result;
+        });
+        return record.promise;
+    }
+
+    function validSnapshot(record) {
+        if (!record || !unchanged(record.snapshot)) return false;
+        var elapsed = realNow() - record.created;
+        return isFinite(elapsed) && elapsed >= 0 && elapsed <= snapshotLifetime;
+    }
+
+    function validate(token, depth) {
+        var record = snapshots.get(token);
+        if (!validSnapshot(record) || depth > maximumFrameDepth) return Promise.resolve(false);
+        if (record.snapshot.children.length && depth >= maximumFrameDepth) return Promise.resolve(false);
+        return Promise.all(record.snapshot.children.map(function (child, index) {
+            var result = record.children[index];
+            if (!result || result.unresolved || !validIdentifier(result.token)) return Promise.resolve(false);
+            return query(child.source, 'validate', result.token, depth);
+        })).then(function (results) {
+            return snapshots.get(token) === record && validSnapshot(record)
+                && results.every(function (valid) { return valid === true; });
+        }, function () {
+            return false;
+        });
+    }
+
+    function act(token, depth) {
+        var record = snapshots.get(token);
+        return validate(token, depth).then(function (valid) {
+            if (!valid || snapshots.get(token) !== record || !record.route || !validSnapshot(record)) {
+                return {handled: 0, unresolved: 1};
+            }
+            snapshots.delete(token);
+            if (record.route.video) {
+                var video = record.route.video;
+                if (seekableTarget(video) === null) return {handled: 0, unresolved: 1};
+                var handled = skipVideo(video, mediaState(video), true) ? 1 : 0;
+                return {handled: handled, unresolved: handled ? 0 : 1};
+            }
+            if (depth >= maximumFrameDepth) return {handled: 0, unresolved: 1};
+            return query(record.route.child.source, 'act', record.route.token, depth).then(function (result) {
+                if (!result.handled && !unchanged(record.snapshot)) return {handled: 0, unresolved: 1};
+                return result;
+            });
+        }, function () {
+            return {handled: 0, unresolved: 1};
+        });
+    }
+
+    function requestSkipAsync(token) {
+        if (typeof token === 'string') return act(token, 0);
         if (activeRequest) return activeRequest;
-        if (pageHidden()) return Promise.resolve({handled: 0, unresolved: 1});
-        var local = scan(true, true);
-        if (local) return Promise.resolve({handled: local, unresolved: 0});
-        activeRequest = relayChildren(depth).then(function (result) {
-            if (pageHidden()) result.unresolved = Math.min(4096, result.unresolved + 1);
-            if (!result.handled && !result.unresolved) result.handled = closeAd();
+        activeRequest = inspect(0).then(function (result) {
+            if (result.unresolved || result.count > 1) return {handled: 0, unresolved: 1};
+            if (!result.count) return {handled: 0, unresolved: 0};
+            return act(result.token, 0);
+        }).then(function (result) {
             activeRequest = null;
             return result;
         }, function () {
@@ -519,30 +660,21 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
         return activeRequest;
     }
 
-    function validCount(value) {
-        return typeof value === 'number' && isFinite(value) && value >= 0 && value <= 4096
-            && Math.floor(value) === value;
+    function requestSkip() {
+        var snapshot = capture();
+        if (snapshot.unresolved || snapshot.children.length || snapshot.candidates.length !== 1) return 0;
+        var video = snapshot.candidates[0];
+        return skipVideo(video, mediaState(video), true) ? 1 : 0;
     }
 
-    function replyToParent(parent, id, result) {
-        try {
-            parent.postMessage({adSpeedReply: skipChannel, id: id,
-                handled: result.handled, unresolved: result.unresolved}, '*');
-        } catch (error) {
-            // The parent can navigate while the request is pending.
-        }
-    }
-
-    var api = {
-        version: 2,
-        skip: function () {
-            return requestSkip();
-        },
-        skipAsync: function () {
-            return requestSkipAsync(0);
-        },
+    var api = Object.freeze({
+        version: 3,
+        skip: requestSkip,
+        inspectAsync: function () { return inspect(0); },
+        validateAsync: function (token) { return validate(token, 0); },
+        skipAsync: requestSkipAsync,
         stats: stats
-    };
+    });
     try {
         Object.defineProperty(window, '__adspeed', {
             configurable: false,
@@ -554,46 +686,59 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
         return;
     }
 
+    function replyToParent(parent, request, result) {
+        try {
+            parent.postMessage({adSpeedReply: skipChannel, id: request.id, phase: request.phase,
+                count: result.count, token: result.token, handled: result.handled,
+                unresolved: result && result.unresolved, valid: result === true}, '*');
+        } catch (error) {
+            // The parent can disappear while discovery is pending.
+        }
+    }
+
     if (typeof window.addEventListener === 'function' && typeof skipChannel === 'string' && skipChannel.length) {
         window.addEventListener('message', function (event) {
             var data = event.data;
             if (!data) return;
-            var record = pendingChildren;
-            if (record && data.adSpeedReply === skipChannel && data.id === record.id
-                && validCount(data.handled) && validCount(data.unresolved)) {
-                var entry = record.children.find(function (child) { return child.source === event.source; });
-                if (!entry || !entry.pending) return;
-                entry.pending = false;
-                record.remaining -= 1;
-                record.handled = Math.min(4096, record.handled + data.handled);
-                record.unresolved = Math.min(4096, record.unresolved + data.unresolved);
-                if (!visible(entry.node)) record.unresolved += 1;
-                if (!record.remaining) record.finish();
+            var record = pendingMessages.get(data.id);
+            if (record && data.adSpeedReply === skipChannel && record.source === event.source
+                && data.phase === record.phase) {
+                var bounded = data.unresolved === 0 || data.unresolved === 1;
+                var valid = record.phase === 'inspect'
+                    ? bounded && (data.count === 0 || data.count === 1 || data.count === 2)
+                        && (data.count > 1 || data.unresolved || validIdentifier(data.token))
+                    : record.phase === 'validate' ? typeof data.valid === 'boolean'
+                    : bounded && (data.handled === 0 || data.handled === 1);
+                if (!valid) return;
+                pendingMessages.delete(data.id);
+                nativeClearTimeout.call(window, record.timer);
+                record.resolve(record.phase === 'inspect'
+                    ? {count: data.count, unresolved: data.unresolved, token: data.token}
+                    : record.phase === 'validate' ? data.valid
+                    : {handled: data.handled, unresolved: data.unresolved});
                 return;
             }
-            if (window.parent === window || event.source !== window.parent) return;
-            if (data.adSpeedSkip === skipChannel) {
-                requestSkip();
-                return;
-            }
-            if (data.adSpeedRequest !== skipChannel || typeof data.id !== 'string'
-                || !/^[0-9:.]{1,96}$/.test(data.id) || typeof data.depth !== 'number'
-                || data.depth < 1 || data.depth > maximumFrameDepth || Math.floor(data.depth) !== data.depth) return;
-            var received = receivedRequests.get(data.id);
+            if (window.parent === window || event.source !== window.parent || data.adSpeedProtocol !== skipChannel
+                || (data.phase !== 'inspect' && data.phase !== 'act' && data.phase !== 'validate')
+                || !validIdentifier(data.id) || typeof data.depth !== 'number' || data.depth < 1
+                || data.depth > maximumFrameDepth || Math.floor(data.depth) !== data.depth
+                || (data.phase !== 'inspect' && !validIdentifier(data.token))) return;
+            var key = data.phase + ':' + data.id;
+            var received = receivedMessages.get(key);
             if (received) {
-                if (received.result) replyToParent(event.source, data.id, received.result);
+                if (received.complete) replyToParent(event.source, data, received.result);
                 return;
             }
-            if (receivedRequests.size >= 16) receivedRequests.delete(receivedRequests.keys().next().value);
-            received = {result: null};
-            receivedRequests.set(data.id, received);
-            var response = activeRequest ? Promise.resolve({handled: 0, unresolved: 1})
-                : requestSkipAsync(data.depth);
+            if (receivedMessages.size >= 16) receivedMessages.delete(receivedMessages.keys().next().value);
+            received = {result: null, complete: false};
+            receivedMessages.set(key, received);
+            var response = data.phase === 'inspect' ? inspect(data.depth)
+                : data.phase === 'validate' ? validate(data.token, data.depth) : act(data.token, data.depth);
             var parent = event.source;
-            var id = data.id;
             response.then(function (result) {
                 received.result = result;
-                replyToParent(parent, id, result);
+                received.complete = true;
+                replyToParent(parent, data, result);
             });
         }, false);
     }
@@ -604,6 +749,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
             document.addEventListener(mediaEvents[eventIndex], refresh, true);
         }
         function sourceChanged(event) {
+            generation += 1;
             if (event.target && String(event.target.tagName).toLowerCase() === 'video') {
                 states.delete(event.target);
             }

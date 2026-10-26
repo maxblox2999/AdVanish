@@ -5,6 +5,7 @@
 #include <math.h>
 
 static char kStateKey;
+static char kEndedKey;
 
 @interface ASPSkipRequest : NSObject
 @property (nonatomic, weak) AVPlayerItem *item;
@@ -13,12 +14,30 @@ static char kStateKey;
 @property (nonatomic) NSUInteger generation;
 @property (nonatomic) NSTimeInterval deadline;
 @property (nonatomic) BOOL pending;
-@property (nonatomic) BOOL attempted;
+@property (nonatomic) BOOL mayWait;
+@property (nonatomic) NSUInteger attempts;
+@property (nonatomic) NSTimeInterval lastAttempt;
 @property (nonatomic, copy) void (^completion)(NSString *);
 @property (nonatomic, copy) BOOL (^isCurrent)(void);
 @end
 @implementation ASPSkipRequest
 @end
+
+void ASPUniversalSkipConfigure(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        [[NSNotificationCenter defaultCenter] addObserverForName:AVPlayerItemDidPlayToEndTimeNotification
+            object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *notification) {
+            if ([notification.object isKindOfClass:[AVPlayerItem class]]) {
+                objc_setAssociatedObject(notification.object, &kEndedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+        }];
+    });
+}
+
+BOOL ASPUniversalSkipItemEnded(AVPlayerItem *item) {
+    return item && [objc_getAssociatedObject(item, &kEndedKey) boolValue];
+}
 
 static void finish(ASPSkipRequest *state, NSString *message) {
     state.pending = NO;
@@ -36,7 +55,8 @@ static ASPSkipRequest *stateFor(AVPlayer *player) {
     }
     if (state.item != player.currentItem) {
         state.generation += 1;
-        state.attempted = NO;
+        state.attempts = 0;
+        state.lastAttempt = 0;
         state.item = player.currentItem;
         finish(state, @"Media changed");
     }
@@ -101,6 +121,10 @@ static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation)
     if (item.status != AVPlayerItemStatusReadyToPlay || !videoItem(item) ||
         player.timeControlStatus != AVPlayerTimeControlStatusPlaying || !targetFor(item, &target) ||
         !CMTIME_IS_NUMERIC(player.currentTime)) {
+        if (!state.mayWait) {
+            finish(state, @"Video not ready");
+            return;
+        }
         __weak AVPlayer *weakPlayer = player;
         __weak AVPlayerItem *weakItem = item;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
@@ -116,7 +140,9 @@ static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation)
         finish(state, @"Video at end");
         return;
     }
-    state.attempted = YES;
+    state.attempts += 1;
+    state.lastAttempt = [NSProcessInfo processInfo].systemUptime;
+    objc_setAssociatedObject(item, &kEndedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     __weak AVPlayer *weakPlayer = player;
     __weak AVPlayerItem *weakItem = item;
     [player seekToTime:target toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero
@@ -129,40 +155,48 @@ static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation)
                 finish(state, @"Media changed");
                 return;
             }
-            if (!finished) state.attempted = NO;
             finish(state, finished ? @"Seek completed" : @"Seek rejected");
         });
     }];
 }
 
+NSArray<AVPlayer *> *ASPUniversalSkipCandidates(NSArray<AVPlayer *> *players, UIView *root,
+                                               NSMapTable<AVPlayer *, AVPlayerItem *> *items) {
+    NSMutableArray<AVPlayer *> *candidates = [NSMutableArray array];
+    for (AVPlayer *player in players) {
+        if (!playing(player) || !player.currentItem ||
+            [items objectForKey:player] != player.currentItem || !ASPSurfaceOwnsPlayer(root, player)) continue;
+        if (player.currentItem.status == AVPlayerItemStatusReadyToPlay && player.currentItem.tracks.count &&
+            !videoItem(player.currentItem)) continue;
+        [candidates addObject:player];
+    }
+    return candidates;
+}
+
 void ASPUniversalSkipNow(NSArray<AVPlayer *> *players, UIView *root,
                          NSMapTable<AVPlayer *, AVPlayerItem *> *items,
+                         BOOL mayWait,
                          BOOL (^isCurrent)(void), void (^completion)(NSString *)) {
     NSCAssert([NSThread isMainThread], @"Manual actions must run on the main thread");
     if (!isCurrent || !isCurrent()) {
         completion(@"Ad changed");
         return;
     }
-    AVPlayer *selected = nil;
-    for (AVPlayer *player in players) {
-        if (!playing(player) || !player.currentItem ||
-            [items objectForKey:player] != player.currentItem || !ASPSurfaceOwnsPlayer(root, player)) continue;
-        if (player.currentItem.status == AVPlayerItemStatusReadyToPlay && player.currentItem.tracks.count &&
-            !videoItem(player.currentItem)) continue;
-        selected = player;
-        break;
-    }
-    if (!selected) {
-        completion(@"No visible video");
+    NSArray<AVPlayer *> *candidates = ASPUniversalSkipCandidates(players, root, items);
+    if (candidates.count != 1) {
+        completion(candidates.count ? @"Multiple videos" : @"No visible video");
         return;
     }
+    AVPlayer *selected = candidates.firstObject;
     ASPSkipRequest *state = stateFor(selected);
-    if (state.pending || state.attempted) {
-        completion(state.pending ? @"Seek pending" : @"Already requested");
+    if (state.pending || state.attempts >= 3 ||
+        (state.attempts && [NSProcessInfo processInfo].systemUptime - state.lastAttempt < 1.0)) {
+        completion(state.pending ? @"Seek pending" : @"Retry limit");
         return;
     }
     state.generation += 1;
     state.pending = YES;
+    state.mayWait = mayWait;
     state.root = root;
     state.window = root.window;
     state.completion = completion;
@@ -171,7 +205,6 @@ void ASPUniversalSkipNow(NSArray<AVPlayer *> *players, UIView *root,
     NSUInteger generation = state.generation;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         if (state.pending && state.generation == generation) {
-            state.attempted = NO;
             finish(state, @"Request timed out");
         }
     });

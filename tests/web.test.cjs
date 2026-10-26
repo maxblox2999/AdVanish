@@ -21,6 +21,11 @@ function environment(configuration = {}, options = {}) {
     const document = {
         hidden: !!options.hidden,
         visibilityState: options.hidden ? 'hidden' : 'visible',
+        // Default fixtures model unobstructed media under one container. Tests
+        // for occlusion replace this with the actual frontmost fixture node.
+        elementFromPoint() {
+            return {contains(node) { return videos.includes(node) || frameNodes.includes(node); }};
+        },
         querySelectorAll(selector) {
             assert.equal(selector, 'iframe,frame');
             return frameNodes;
@@ -384,10 +389,12 @@ test('seek failure is bounded and leaves the independent speed fallback working'
     const media = video(env, {throwSeek: true});
     env.emit('play', media);
     env.advance(2000);
-    assert.equal(env.sandbox.__adspeed.skip(), 0);
     assert.equal(media.seeks.length, 1);
-    assert.equal(media.playbackRate, 8);
     assert.equal(env.sandbox.__adspeed.stats.seekFailures, 1);
+    assert.equal(env.sandbox.__adspeed.skip(), 0);
+    assert.equal(media.seeks.length, 2);
+    assert.equal(media.playbackRate, 8);
+    assert.equal(env.sandbox.__adspeed.stats.seekFailures, 2);
     assert.equal(env.sandbox.__adspeed.stats.skipped, 0);
 });
 
@@ -585,12 +592,14 @@ test('hidden-page startup does not scan or seek until foregrounded', () => {
     assert.equal(env.tasks.size, 1);
 });
 
-test('all media scans have a fixed upper bound', () => {
-    const env = environment({speedVideo: false});
+test('automatic media scans have a fixed upper bound and manual ambiguity abstains', () => {
+    const env = environment({speedVideo: false, autoSkip: true});
     for (let index = 0; index < 80; index++) {
         video(env);
     }
-    assert.equal(env.sandbox.__adspeed.skip(), 64);
+    env.emit('play', env.videos[0]);
+    assert.equal(env.sandbox.__adspeed.stats.skipped, 64);
+    assert.equal(env.sandbox.__adspeed.skip(), 0);
     assert.equal(env.videos[64].seeks.length, 0);
 });
 
@@ -621,113 +630,6 @@ test('manual mode leaves video, native timers, and clocks unchanged until reques
     assert.deepEqual(media.rates, []);
     assert.equal(env.sandbox.performance.now(), 3000);
     assert.equal(env.sandbox.Date.now(), 1700000003000);
-});
-
-test('manual requests use the standard interstitial close API without fake events', () => {
-    const env = environment({speedVideo: false, manualClose: true});
-    let closes = 0;
-    env.sandbox.mraid = {
-        getState: () => 'default',
-        getPlacementType: () => 'interstitial',
-        isViewable: () => true,
-        close() { closes += 1; }
-    };
-    env.advance(1000);
-    assert.equal(closes, 0);
-    assert.equal(env.sandbox.__adspeed.skip(), 1);
-    assert.equal(closes, 1);
-    assert.equal(env.sandbox.__adspeed.stats.closeRequests, 1);
-});
-
-test('manual close respects hidden, loading, inline and nonviewable ad containers', () => {
-    for (const settings of [
-        {state: 'loading', placement: 'interstitial', viewable: true},
-        {state: 'hidden', placement: 'interstitial', viewable: true},
-        {state: 'unexpected', placement: 'interstitial', viewable: true},
-        {state: 'default', placement: 'inline', viewable: true},
-        {state: 'default', placement: 'interstitial', viewable: false}
-    ]) {
-        const env = environment({speedVideo: false, manualClose: true});
-        let closes = 0;
-        env.sandbox.mraid = {
-            getState: () => settings.state,
-            getPlacementType: () => settings.placement,
-            isViewable: () => settings.viewable,
-            close() { closes += 1; }
-        };
-        assert.equal(env.sandbox.__adspeed.skip(), 0);
-        assert.equal(closes, 0);
-    }
-});
-
-test('a media-tail request finishes naturally before requesting an ad close', () => {
-    const env = environment({speedVideo: false, manualClose: true});
-    const media = video(env);
-    let closes = 0;
-    env.sandbox.mraid = {
-        getState: () => 'default',
-        getPlacementType: () => 'interstitial',
-        close() { closes += 1; }
-    };
-    assert.equal(env.sandbox.__adspeed.skip(), 1);
-    assert.equal(media.seeks.length, 1);
-    assert.equal(closes, 0);
-});
-
-test('close errors remain a failed request and do not report completion', () => {
-    const env = environment({speedVideo: false, manualClose: true});
-    env.sandbox.mraid = {
-        getState: () => 'default',
-        getPlacementType: () => 'interstitial',
-        close() { throw new Error('SDK rejects early close'); }
-    };
-    assert.equal(env.sandbox.__adspeed.skip(), 0);
-    assert.equal(env.sandbox.__adspeed.stats.closeFailures, 1);
-    assert.equal(env.sandbox.__adspeed.stats.closeRequests, 0);
-});
-
-test('manual requests relay into cross-origin child frames using the session channel', () => {
-    const env = environment({speedVideo: false, skipChannel: 'session-token'});
-    const messages = [];
-    env.sandbox.frames = [{postMessage(data, origin) { messages.push({data, origin}); }}];
-    assert.equal(env.sandbox.__adspeed.skip(), 0);
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].data.adSpeedSkip, 'session-token');
-    assert.equal(messages[0].origin, '*');
-    assert.equal(env.sandbox.__adspeed.stats.frameRequests, 1);
-});
-
-test('frame relay accepts only its parent and the current channel, once per installation', () => {
-    const env = environment({speedVideo: false, skipChannel: 'session-token'});
-    const media = video(env);
-    const parent = {};
-    env.sandbox.parent = parent;
-    env.inject();
-    const handlers = env.windowListeners.get('message');
-    assert.equal(handlers.length, 1);
-    handlers[0]({source: {}, data: {adSpeedSkip: 'session-token'}});
-    handlers[0]({source: parent, data: {adSpeedSkip: 'wrong-token'}});
-    assert.equal(media.seeks.length, 0);
-    handlers[0]({source: parent, data: {adSpeedSkip: 'session-token'}});
-    assert.equal(media.seeks.length, 1);
-});
-
-test('hidden pages neither relay requests nor close ads, with frame work capped', () => {
-    const env = environment({speedVideo: false, skipChannel: 'session-token', manualClose: true});
-    let posts = 0;
-    let closes = 0;
-    env.sandbox.frames = Array.from({length: 100}, () => ({postMessage() { posts += 1; }}));
-    env.sandbox.mraid = {
-        getState: () => 'default', getPlacementType: () => 'interstitial', close() { closes += 1; }
-    };
-    env.hide(true);
-    assert.equal(env.sandbox.__adspeed.skip(), 0);
-    assert.equal(posts, 0);
-    assert.equal(closes, 0);
-    env.hide(false);
-    env.sandbox.__adspeed.skip();
-    assert.equal(posts, 64);
-    assert.equal(closes, 1);
 });
 
 function frame(env, contentWindow, overrides = {}) {
@@ -782,16 +684,231 @@ function installClose(env) {
     return () => closes;
 }
 
-test('explicit looping video skip disables only its loop and lets playback finish naturally', async () => {
-    const env = environment({speedVideo: false});
+const manualConfig = {speedVideo: false, manualClose: true, skipChannel: 'session-token'};
+
+async function settle() {
+    for (let index = 0; index < 20; index++) await Promise.resolve();
+}
+
+function inspectionReply(request, overrides = {}) {
+    return Object.assign({adSpeedReply: 'session-token', phase: request.phase, id: request.id,
+        count: 0, unresolved: 0, token: '123:456:9'}, overrides);
+}
+
+test('inspection and validation are side-effect free and tokens authorize one local seek', async () => {
+    const env = environment(manualConfig);
+    const media = video(env);
+    const inspected = await env.sandbox.__adspeed.inspectAsync();
+    assert.equal(inspected.count, 1);
+    assert.equal(inspected.unresolved, 0);
+    assert.equal(typeof inspected.token, 'string');
+    assert.deepEqual(media.seeks, []);
+    assert.deepEqual(media.rates, []);
+    assert.equal(await env.sandbox.__adspeed.validateAsync(inspected.token), true);
+    const result = await env.sandbox.__adspeed.skipAsync(inspected.token);
+    assert.equal(result.handled, 1);
+    assert.equal(media.currentTime, 29.75);
+    assert.equal(media.ended, false);
+    assert.equal((await env.sandbox.__adspeed.skipAsync(inspected.token)).handled, 0);
+    assert.equal(media.seeks.length, 1);
+});
+
+test('empty snapshots are tokenized for native fallback and invalidate when media arrives', async () => {
+    const env = environment(manualConfig);
+    const inspected = await env.sandbox.__adspeed.inspectAsync();
+    assert.equal(inspected.count, 0);
+    assert.equal(typeof inspected.token, 'string');
+    assert.equal(await env.sandbox.__adspeed.validateAsync(inspected.token), true);
+    video(env);
+    assert.equal(await env.sandbox.__adspeed.validateAsync(inspected.token), false);
+    assert.equal((await env.sandbox.__adspeed.skipAsync(inspected.token)).handled, 0);
+});
+
+test('manual APIs never invoke generic MRAID close, including empty and finished documents', async () => {
+    const env = environment(manualConfig);
+    const closes = installClose(env);
+    assert.equal(env.sandbox.__adspeed.skip(), 0);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+    const media = video(env, {ended: true});
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+    assert.equal(closes(), 0);
+    assert.equal(media.seeks.length, 0);
+    assert.equal(env.sandbox.__adspeed.stats.closeRequests, 0);
+});
+
+test('a second press never closes a video whose seek has not ended', async () => {
+    const env = environment(manualConfig);
+    const media = video(env);
+    const closes = installClose(env);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    env.advance(1100);
+    const second = await env.sandbox.__adspeed.skipAsync();
+    assert.equal(second.handled, 0);
+    assert.equal(second.unresolved, 1);
+    assert.equal(media.ended, false);
+    assert.equal(media.seeks.length, 1);
+    assert.equal(closes(), 0);
+});
+
+test('two local videos are ambiguous and neither is sought', async () => {
+    const env = environment(manualConfig);
+    const first = video(env);
+    const second = video(env, {currentSrc: 'https://example.invalid/other.mp4'});
+    const inspected = await env.sandbox.__adspeed.inspectAsync();
+    assert.equal(inspected.count, 2);
+    assert.equal(inspected.token, null);
+    assert.equal(env.sandbox.__adspeed.skip(), 0);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+    assert.equal(first.seeks.length + second.seeks.length, 0);
+});
+
+test('local media cannot preempt a child-frame ad during discovery', async () => {
+    const parent = environment(manualConfig);
+    const child = environment(manualConfig);
+    const game = video(parent);
+    const ad = video(child);
+    connect(parent, child);
+    const inspected = await parent.sandbox.__adspeed.inspectAsync();
+    assert.equal(inspected.count, 2);
+    const result = await parent.sandbox.__adspeed.skipAsync();
+    assert.equal(result.handled, 0);
+    assert.equal(result.unresolved, 1);
+    assert.equal(game.seeks.length + ad.seeks.length, 0);
+    assert.ok(parent.sandbox.__adspeed.stats.frameRequests > 0);
+});
+
+test('frame discovery authorizes only one video and never closes a sibling frame', async () => {
+    const parent = environment(manualConfig);
+    const videoFrame = environment(manualConfig);
+    const closeFrame = environment(manualConfig);
+    const ad = video(videoFrame);
+    const closes = installClose(closeFrame);
+    connect(parent, videoFrame);
+    connect(parent, closeFrame);
+    const inspected = await parent.sandbox.__adspeed.inspectAsync();
+    assert.equal(inspected.count, 1);
+    assert.equal(ad.seeks.length, 0);
+    assert.equal(closes(), 0);
+    const result = await parent.sandbox.__adspeed.skipAsync(inspected.token);
+    assert.equal(result.handled, 1);
+    assert.equal(result.unresolved, 0);
+    assert.equal(ad.seeks.length, 1);
+    assert.equal(closes(), 0);
+    assert.equal(parent.tasks.size + videoFrame.tasks.size + closeFrame.tasks.size, 0);
+});
+
+test('multiple child-frame videos abstain without performing any action', async () => {
+    const parent = environment(manualConfig);
+    const first = environment(manualConfig);
+    const second = environment(manualConfig);
+    const a = video(first);
+    const b = video(second);
+    connect(parent, first);
+    connect(parent, second);
+    assert.equal((await parent.sandbox.__adspeed.skipAsync()).unresolved, 1);
+    assert.equal(a.seeks.length + b.seeks.length, 0);
+});
+
+test('new root media during empty child discovery invalidates the original request', async () => {
+    const parent = environment(manualConfig);
+    let request;
+    const child = {postMessage(data) { request = data; }};
+    frame(parent, child);
+    const closes = installClose(parent);
+    const pending = parent.sandbox.__adspeed.skipAsync();
+    const media = video(parent);
+    message(parent, child, inspectionReply(request));
+    const result = await pending;
+    assert.equal(result.handled, 0);
+    assert.equal(result.unresolved, 1);
+    assert.equal(media.seeks.length, 0);
+    assert.equal(closes(), 0);
+});
+
+test('new sibling media after discovery invalidates action on a different child', async () => {
+    const parent = environment(manualConfig);
+    const first = environment(manualConfig);
+    const second = environment(manualConfig);
+    const original = video(first);
+    connect(parent, first);
+    connect(parent, second);
+    const inspected = await parent.sandbox.__adspeed.inspectAsync();
+    const replacement = video(second);
+    assert.equal(await parent.sandbox.__adspeed.validateAsync(inspected.token), false);
+    const result = await parent.sandbox.__adspeed.skipAsync(inspected.token);
+    assert.equal(result.handled, 0);
+    assert.equal(original.seeks.length + replacement.seeks.length, 0);
+});
+
+test('tokens reject source replacement, loadstart, hidden pages and expiration', async () => {
+    for (const change of [
+        (env, media) => { media.currentSrc = 'https://example.invalid/new.mp4'; },
+        (env, media) => env.emit('loadstart', media),
+        (env) => env.hide(true),
+        (env) => env.advance(5001)
+    ]) {
+        const env = environment(manualConfig);
+        const media = video(env);
+        const inspected = await env.sandbox.__adspeed.inspectAsync();
+        change(env, media);
+        assert.equal(await env.sandbox.__adspeed.validateAsync(inspected.token), false);
+        assert.equal((await env.sandbox.__adspeed.skipAsync(inspected.token)).handled, 0);
+        assert.equal(media.seeks.length, 0);
+    }
+});
+
+test('one token cannot perform two concurrent actions', async () => {
+    const env = environment(manualConfig);
+    const media = video(env);
+    const inspected = await env.sandbox.__adspeed.inspectAsync();
+    const results = await Promise.all([
+        env.sandbox.__adspeed.skipAsync(inspected.token),
+        env.sandbox.__adspeed.skipAsync(inspected.token)
+    ]);
+    assert.equal(results.reduce((sum, result) => sum + result.handled, 0), 1);
+    assert.equal(media.seeks.length, 1);
+});
+
+test('failed seeks can be explicitly retried with a fixed per-source attempt bound', async () => {
+    const env = environment(manualConfig);
+    const media = video(env, {throwSeek: true});
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+    media.throwSeek = false;
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    media.currentTime = 1;
+    media.seeks.length = 0;
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    media.currentTime = 1;
+    media.seeks.length = 0;
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+    assert.equal(media.seeks.length, 0);
+    assert.equal(env.sandbox.__adspeed.stats.skipAttempts, 3);
+});
+
+test('immutable loops and failed seeks cannot authorize close and restore loop state', async () => {
+    const frozen = environment(manualConfig);
+    const immutable = video(frozen);
+    const frozenCloses = installClose(frozen);
+    Object.defineProperty(immutable, 'loop', {get: () => true, set() {}});
+    assert.equal((await frozen.sandbox.__adspeed.skipAsync()).handled, 0);
+    assert.equal(immutable.loop, true);
+    assert.equal(immutable.seeks.length, 0);
+    assert.equal(frozenCloses(), 0);
+    const failing = environment(manualConfig);
+    const media = video(failing, {loop: true, throwSeek: true});
+    assert.equal((await failing.sandbox.__adspeed.skipAsync()).handled, 0);
+    assert.equal(media.loop, true);
+    assert.equal(media.seeks.length, 1);
+});
+
+test('explicit looping video seeks only after the click and lets actual playback end', async () => {
+    const env = environment(manualConfig);
     const media = video(env, {loop: true});
     env.emit('play', media);
     env.advance(2000);
     assert.equal(media.loop, true);
     assert.equal(media.seeks.length, 0);
-    const result = await env.sandbox.__adspeed.skipAsync();
-    assert.equal(result.handled, 1);
-    assert.equal(result.unresolved, 0);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
     assert.equal(media.loop, false);
     assert.equal(media.currentTime, 29.75);
     assert.equal(media.ended, false);
@@ -807,186 +924,190 @@ test('automatic scans leave looping media untouched', () => {
     assert.equal(media.seeks.length, 0);
 });
 
-test('immutable loops and failed seeks do not report success, and restore loop state', async () => {
-    const frozen = environment({speedVideo: false});
-    const immutable = video(frozen);
-    Object.defineProperty(immutable, 'loop', {get: () => true, set() {}});
-    const first = await frozen.sandbox.__adspeed.skipAsync();
-    assert.equal(first.handled, 0);
-    assert.equal(immutable.loop, true);
-    assert.equal(immutable.seeks.length, 0);
-    const failing = environment({speedVideo: false});
-    const media = video(failing, {loop: true, throwSeek: true});
-    const second = await failing.sandbox.__adspeed.skipAsync();
-    assert.equal(second.handled, 0);
-    assert.equal(media.loop, true);
-    assert.equal(media.seeks.length, 1);
-    assert.equal(failing.sandbox.__adspeed.stats.skipped, 0);
-});
-
-test('async frame result waits for child video and avoids closing its parent ad', async () => {
-    const config = {speedVideo: false, manualClose: true, skipChannel: 'session-token'};
-    const parent = environment(config);
-    const child = environment(config);
-    const media = video(child);
-    connect(parent, child);
-    const closes = installClose(parent);
-    const result = await parent.sandbox.__adspeed.skipAsync();
-    assert.equal(result.handled, 1);
-    assert.equal(result.unresolved, 0);
-    assert.equal(media.seeks.length, 1);
-    assert.equal(closes(), 0);
-    assert.equal(parent.tasks.size, 0);
-});
-
-test('empty child acknowledgment allows the current parent MRAID close', async () => {
-    const config = {speedVideo: false, manualClose: true, skipChannel: 'session-token'};
-    const parent = environment(config);
-    const child = environment(config);
-    connect(parent, child);
-    const closes = installClose(parent);
-    const result = await parent.sandbox.__adspeed.skipAsync();
-    assert.equal(result.handled, 1);
-    assert.equal(result.unresolved, 0);
-    assert.equal(closes(), 1);
-});
-
-test('an unresponsive visible frame times out as unresolved without parent close', async () => {
-    const env = environment({speedVideo: false, manualClose: true, skipChannel: 'session-token'});
-    let posts = 0;
-    frame(env, {postMessage() { posts += 1; }});
-    const closes = installClose(env);
-    const pending = env.sandbox.__adspeed.skipAsync();
-    assert.equal(closes(), 0);
-    assert.equal(posts, 1);
-    env.advance(799);
-    assert.equal(closes(), 0);
-    env.advance(1);
-    const result = await pending;
-    assert.equal(result.handled, 0);
-    assert.equal(result.unresolved, 1);
-    assert.equal(closes(), 0);
-    assert.equal(env.tasks.size, 0);
-});
-
-test('hidden frames receive no async action and do not block a supported parent close', async () => {
-    const config = {speedVideo: false, manualClose: true, skipChannel: 'session-token'};
-    const parent = environment(config);
-    const child = environment(config);
+test('hidden frames receive no discovery or action and cannot cause a close', async () => {
+    const parent = environment(manualConfig);
+    const child = environment(manualConfig);
     const media = video(child);
     connect(parent, child, {parentElement: {hidden: true}});
     const closes = installClose(parent);
     const result = await parent.sandbox.__adspeed.skipAsync();
-    assert.equal(result.handled, 1);
+    assert.equal(result.handled, 0);
     assert.equal(result.unresolved, 0);
     assert.equal(media.seeks.length, 0);
     assert.equal(parent.sandbox.__adspeed.stats.frameRequests, 0);
-    assert.equal(closes(), 1);
+    assert.equal(closes(), 0);
 });
 
-test('async replies require the selected source, channel, request ID and bounded counts', async () => {
-    const env = environment({speedVideo: false, skipChannel: 'session-token'});
+test('unresponsive visible frames time out unresolved without fallback actions', async () => {
+    const env = environment(manualConfig);
+    let posts = 0;
+    frame(env, {postMessage() { posts += 1; }});
+    const closes = installClose(env);
+    const pending = env.sandbox.__adspeed.skipAsync();
+    assert.equal(posts, 1);
+    env.advance(800);
+    assert.equal((await pending).unresolved, 1);
+    assert.equal(closes(), 0);
+    assert.equal(env.tasks.size, 0);
+});
+
+test('discovery replies require source, channel, phase, request ID and bounded counts', async () => {
+    const env = environment(manualConfig);
     let request;
     const child = {postMessage(data) { request = data; }};
     frame(env, child);
-    const pending = env.sandbox.__adspeed.skipAsync();
-    const valid = {adSpeedReply: 'session-token', id: request.id, handled: 1, unresolved: 0};
+    const pending = env.sandbox.__adspeed.inspectAsync();
+    const valid = inspectionReply(request);
     message(env, {}, valid);
     message(env, child, {...valid, adSpeedReply: 'wrong'});
     message(env, child, {...valid, id: 'stale'});
-    message(env, child, {...valid, handled: NaN});
-    message(env, child, {...valid, handled: -1});
+    message(env, child, {...valid, phase: 'act'});
+    message(env, child, {...valid, count: NaN});
+    message(env, child, {...valid, count: -1});
+    message(env, child, {...valid, token: null});
     assert.equal(env.tasks.size, 1);
     message(env, child, valid);
     const result = await pending;
-    assert.equal(result.handled, 1);
+    assert.equal(result.count, 0);
     assert.equal(result.unresolved, 0);
     assert.equal(env.tasks.size, 0);
     message(env, child, valid);
     assert.equal(env.tasks.size, 0);
 });
 
-test('duplicate inbound requests perform one child action and wrong parents are rejected', async () => {
-    const env = environment({speedVideo: false, manualClose: true, skipChannel: 'session-token'});
-    const closes = installClose(env);
-    let replies = 0;
-    const parent = {postMessage() { replies += 1; }};
+test('wrong parents and old action broadcasts cannot trigger media actions', async () => {
+    const env = environment(manualConfig);
+    const media = video(env);
+    const parent = {postMessage() {}};
     env.sandbox.parent = parent;
-    const request = {adSpeedRequest: 'session-token', id: '123:456:1', depth: 1};
-    message(env, {}, request);
-    message(env, parent, {...request, adSpeedRequest: 'wrong'});
-    message(env, parent, {...request, depth: 100});
-    assert.equal(closes(), 0);
-    message(env, parent, request);
-    await Promise.resolve();
-    await Promise.resolve();
-    message(env, parent, request);
-    await Promise.resolve();
-    assert.equal(closes(), 1);
-    assert.ok(replies >= 1);
+    message(env, parent, {adSpeedSkip: 'session-token'});
+    message(env, parent, {adSpeedRequest: 'session-token', id: '123:456:1', depth: 1});
+    message(env, {}, {adSpeedProtocol: 'session-token', phase: 'act', token: '123:456:1', id: '123:456:2', depth: 1});
+    message(env, parent, {adSpeedProtocol: 'wrong', phase: 'act', token: '123:456:1', id: '123:456:2', depth: 1});
+    await settle();
+    assert.equal(media.seeks.length, 0);
 });
 
-test('concurrent manual requests share one bounded relay and hide cancels close fallback', async () => {
-    const env = environment({speedVideo: false, manualClose: true, skipChannel: 'session-token'});
+test('duplicate parent action messages consume one snapshot only', async () => {
+    const env = environment(manualConfig);
+    const media = video(env);
+    const replies = [];
+    const parent = {postMessage(data) { replies.push(data); }};
+    env.sandbox.parent = parent;
+    message(env, parent, {adSpeedProtocol: 'session-token', phase: 'inspect', id: '123:456:1', depth: 1});
+    await settle();
+    const token = replies[0].token;
+    const request = {adSpeedProtocol: 'session-token', phase: 'act', token, id: '123:456:2', depth: 1};
+    message(env, parent, request);
+    message(env, parent, request);
+    await settle();
+    message(env, parent, request);
+    await settle();
+    assert.equal(media.seeks.length, 1);
+    assert.ok(replies.filter((reply) => reply.phase === 'act').length >= 1);
+});
+
+test('concurrent convenience requests share discovery and hiding cancels action', async () => {
+    const env = environment(manualConfig);
     let request;
     const child = {postMessage(data) { request = data; }};
     frame(env, child);
-    const closes = installClose(env);
     const first = env.sandbox.__adspeed.skipAsync();
     const second = env.sandbox.__adspeed.skipAsync();
     assert.equal(first, second);
     assert.equal(env.sandbox.__adspeed.stats.frameRequests, 1);
     env.hide(true);
-    message(env, child, {adSpeedReply: 'session-token', id: request.id, handled: 0, unresolved: 0});
-    const result = await first;
-    assert.equal(result.handled, 0);
-    assert.ok(result.unresolved >= 1);
-    assert.equal(closes(), 0);
+    message(env, child, inspectionReply(request));
+    assert.equal((await first).unresolved, 1);
 });
 
-test('late child replies cannot resolve a newer manual request', async () => {
-    const env = environment({speedVideo: false, skipChannel: 'session-token'});
+test('late replies cannot resolve a newer discovery', async () => {
+    const env = environment(manualConfig);
     const requests = [];
     const child = {postMessage(data) { requests.push(data); }};
     frame(env, child);
-    const first = env.sandbox.__adspeed.skipAsync();
+    const first = env.sandbox.__adspeed.inspectAsync();
     env.advance(800);
     assert.equal((await first).unresolved, 1);
-    const second = env.sandbox.__adspeed.skipAsync();
-    message(env, child, {adSpeedReply: 'session-token', id: requests[0].id, handled: 1, unresolved: 0});
+    const second = env.sandbox.__adspeed.inspectAsync();
+    message(env, child, inspectionReply(requests[0]));
     assert.equal(env.tasks.size, 1);
-    message(env, child, {adSpeedReply: 'session-token', id: requests[1].id, handled: 0, unresolved: 0});
-    const result = await second;
-    assert.equal(result.handled, 0);
-    assert.equal(result.unresolved, 0);
+    message(env, child, inspectionReply(requests[1]));
+    assert.equal((await second).unresolved, 0);
 });
 
-test('frame enumeration is capped and missing channels remain unresolved', async () => {
-    const env = environment({speedVideo: false, skipChannel: 'session-token'});
+test('frame enumeration and tokens are bounded; missing channels remain unresolved', async () => {
+    const env = environment(manualConfig);
     let posts = 0;
     for (let index = 0; index < 100; index++) frame(env, {postMessage() { posts += 1; }});
     const pending = env.sandbox.__adspeed.skipAsync();
-    assert.equal(posts, 64);
-    env.advance(800);
-    assert.equal((await pending).unresolved, 65);
+    assert.equal((await pending).unresolved, 1);
+    assert.equal(posts, 0);
     const missing = environment({speedVideo: false});
-    frame(missing, {postMessage() { throw new Error('must not relay without a channel'); }});
+    frame(missing, {postMessage() { throw new Error('must not relay without channel'); }});
     assert.equal((await missing.sandbox.__adspeed.skipAsync()).unresolved, 1);
+    const local = environment(manualConfig);
+    video(local);
+    const first = await local.sandbox.__adspeed.inspectAsync();
+    for (let index = 0; index < 9; index++) await local.sandbox.__adspeed.inspectAsync();
+    assert.equal(await local.sandbox.__adspeed.validateAsync(first.token), false);
 });
 
-test('nested requests stop relaying at the depth limit and do not close unsupported surfaces', async () => {
-    const env = environment({speedVideo: false, manualClose: true, skipChannel: 'session-token'});
+test('nested requests stop discovery at depth limit', async () => {
+    const env = environment(manualConfig);
     const replies = [];
     let posts = 0;
     frame(env, {postMessage() { posts += 1; }});
     const parent = {postMessage(data) { replies.push(data); }};
     env.sandbox.parent = parent;
-    const closes = installClose(env);
-    message(env, parent, {adSpeedRequest: 'session-token', id: '123:456:1', depth: 8});
-    await Promise.resolve();
-    await Promise.resolve();
+    message(env, parent, {adSpeedProtocol: 'session-token', phase: 'inspect', id: '123:456:1', depth: 8});
+    await settle();
     assert.equal(posts, 0);
-    assert.equal(closes(), 0);
     assert.equal(replies.length, 1);
     assert.equal(replies[0].unresolved, 1);
+});
+
+test('exposed action API cannot be overwritten by another page script', () => {
+    const env = environment(manualConfig);
+    const api = env.sandbox.__adspeed;
+    assert.equal(Object.isFrozen(api), true);
+    assert.throws(() => vm.runInContext("'use strict'; window.__adspeed.skipAsync = function(){}", env.sandbox));
+    assert.equal(env.sandbox.__adspeed, api);
+});
+
+test('covered media and frames abstain instead of acting behind foreground content', async () => {
+    const env = environment(manualConfig);
+    const media = video(env);
+    env.document.elementFromPoint = () => ({tagName: 'DIV'});
+    const covered = await env.sandbox.__adspeed.inspectAsync();
+    assert.equal(covered.unresolved, 1);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+    assert.equal(media.seeks.length, 0);
+    const parent = environment(manualConfig);
+    frame(parent, {postMessage() { throw new Error('covered frame must not be queried'); }});
+    parent.document.elementFromPoint = () => ({tagName: 'DIV'});
+    assert.equal((await parent.sandbox.__adspeed.inspectAsync()).unresolved, 1);
+});
+
+test('a covering iframe blocks a local video even when the child has no video', async () => {
+    const parent = environment(manualConfig);
+    const child = environment(manualConfig);
+    const media = video(parent);
+    connect(parent, child);
+    const node = parent.frameNodes[0];
+    parent.document.elementFromPoint = () => node;
+    assert.equal((await parent.sandbox.__adspeed.skipAsync()).handled, 0);
+    assert.equal(media.seeks.length, 0);
+});
+
+test('new occlusion invalidates a previously discovered video snapshot', async () => {
+    const env = environment(manualConfig);
+    const media = video(env);
+    env.document.elementFromPoint = () => media;
+    const snapshot = await env.sandbox.__adspeed.inspectAsync();
+    assert.equal(snapshot.count, 1);
+    env.document.elementFromPoint = () => ({tagName: 'DIV'});
+    assert.equal(await env.sandbox.__adspeed.validateAsync(snapshot.token), false);
+    assert.equal((await env.sandbox.__adspeed.skipAsync(snapshot.token)).handled, 0);
+    assert.equal(media.seeks.length, 0);
 });
