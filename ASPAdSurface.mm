@@ -220,9 +220,11 @@ ASPAdSurface *ASPFindAdSurface(NSArray<UIWindow *> *windows, BOOL recognizedOnly
         for (AVPlayer *player in surface.players) {
             if (player.currentItem) [surface.items setObject:player.currentItem forKey:player];
         }
-        id sdkPlayer = kindOfNamedClass(owner, @"ALBaseVideoViewController") ? objectGetter(owner, @"avPlayer") : nil;
-        if ([sdkPlayer isKindOfClass:[AVPlayer class]] && [sdkPlayer currentItem]) {
-            [surface.items setObject:[sdkPlayer currentItem] forKey:sdkPlayer];
+        id value = kindOfNamedClass(owner, @"ALBaseVideoViewController") ? objectGetter(owner, @"avPlayer") : nil;
+        if ([value isKindOfClass:[AVPlayer class]]) {
+            AVPlayer *sdkPlayer = value;
+            AVPlayerItem *item = sdkPlayer.currentItem;
+            if (item) [surface.items setObject:item forKey:sdkPlayer];
         }
         return surface;
     }
