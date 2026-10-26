@@ -20,7 +20,7 @@ jobs:
           node --test tests/web.test.cjs
           git diff --exit-code -- AdSpeedWebScript.h
           bash -n scripts/setup-theos.sh scripts/build.sh
-          python3 -m py_compile scripts/verify-package.py
+          python3 -m py_compile scripts/verify-package.py scripts/test-ios.py
       - name: Archive complete source
         run: |
           mkdir -p dist/source "$RUNNER_TEMP/source-id"
@@ -55,6 +55,9 @@ jobs:
           echo "THEOS=$RUNNER_TEMP/advanish-tools/theos" >> "$GITHUB_ENV"
       - name: Build and inspect package
         run: bash scripts/build.sh "${{ matrix.variant }}"
+      - name: Exercise native skipping and pending reward protection in iOS Simulator
+        if: matrix.variant == 'rootless'
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --output dist/rootless/ios-simulator.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: advanish-${{ matrix.variant }}-${{ github.sha }}

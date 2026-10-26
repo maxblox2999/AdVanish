@@ -1,8 +1,6 @@
 #import "ASPAdSurface.h"
-#import "ASPUniversalSkip.h"
 #import <objc/message.h>
 #include <string.h>
-#include <math.h>
 
 @implementation ASPAdSurface
 @end
@@ -106,33 +104,6 @@ static AVPlayer *ownedAppLovinPlayer(UIViewController *owner) {
 BOOL ASPAdSurfaceUnchanged(ASPAdSurface *surface) {
     return surface.root && surface.owner &&
         (!surface.creative || objectGetter(surface.owner, @"currentAd") == surface.creative);
-}
-
-UIControl *ASPCompletedVideoCloseControl(ASPAdSurface *surface) {
-    UIViewController *owner = surface.owner;
-    if (surface.incomplete || !kindOfNamedClass(owner, @"ALBaseVideoViewController") || !surface.creative ||
-        !ASPAdSurfaceUnchanged(surface)) return nil;
-    id value = objectGetter(owner, @"avPlayer");
-    if (![value isKindOfClass:[AVPlayer class]]) return nil;
-    AVPlayer *player = value;
-    AVPlayerItem *item = player.currentItem;
-    if (!item || [surface.items objectForKey:player] != item || !ASPUniversalSkipItemEnded(item) ||
-        item.status != AVPlayerItemStatusReadyToPlay || !CMTIME_IS_NUMERIC(item.duration) ||
-        !CMTIME_IS_NUMERIC(player.currentTime) || player.rate != 0) return nil;
-    double duration = CMTimeGetSeconds(item.duration);
-    double position = CMTimeGetSeconds(player.currentTime);
-    if (!isfinite(duration) || !isfinite(position) || duration <= 0 || position < duration - 0.05) return nil;
-    SEL selector = NSSelectorFromString(@"isVideoFullyWatched");
-    NSMethodSignature *signature = [owner methodSignatureForSelector:selector];
-    if (!signature || signature.numberOfArguments != 2 ||
-        (strcmp(signature.methodReturnType, "B") != 0 && strcmp(signature.methodReturnType, "c") != 0)) return nil;
-    @try {
-        if (!((BOOL (*)(id, SEL))objc_msgSend)(owner, selector)) return nil;
-    } @catch (NSException *exception) {
-        return nil;
-    }
-    id control = objectGetter(owner, @"closeButton");
-    return [control isKindOfClass:[UIControl class]] && ASPViewVisibleInSurface(control, surface.root) ? control : nil;
 }
 
 static BOOL layerExposed(CALayer *layer, UIWindow *window) {

@@ -177,6 +177,8 @@ function video(env, overrides = {}) {
         seeks: [],
         rates: [],
         throwSeek: false,
+        ignoreSeek: false,
+        deferSeek: false,
         throwRate: false,
         ignoreRate: false,
         rectangle: {left: 0, top: 0, right: 320, bottom: 180, width: 320, height: 180},
@@ -211,6 +213,11 @@ function video(env, overrides = {}) {
                 media.seeks.push(value);
                 if (media.throwSeek) {
                     throw new Error('not seekable');
+                }
+                if (media.ignoreSeek) return;
+                if (media.deferSeek) {
+                    media.seeking = true;
+                    return;
                 }
                 position = value;
             }
@@ -883,6 +890,35 @@ test('failed seeks can be explicitly retried with a fixed per-source attempt bou
     assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
     assert.equal(media.seeks.length, 0);
     assert.equal(env.sandbox.__adspeed.stats.skipAttempts, 3);
+});
+
+test('silently ignored seeks report failure and preserve looping playback', async () => {
+    const env = environment(manualConfig);
+    const media = video(env, {loop: true, ignoreSeek: true});
+    const closes = installClose(env);
+    const result = await env.sandbox.__adspeed.skipAsync();
+    assert.equal(result.handled, 0);
+    assert.equal(result.unresolved, 1);
+    assert.equal(media.currentTime, 1);
+    assert.equal(media.loop, true);
+    assert.equal(media.paused, false);
+    assert.equal(env.sandbox.__adspeed.stats.skipped, 0);
+    assert.equal(env.sandbox.__adspeed.stats.seekFailures, 1);
+    assert.equal(closes(), 0);
+    media.ignoreSeek = false;
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    assert.equal(media.currentTime, 29.75);
+    assert.equal(media.loop, false);
+});
+
+test('an asynchronous seek is accepted while the media element reports seeking', async () => {
+    const env = environment(manualConfig);
+    const media = video(env, {deferSeek: true});
+    const result = await env.sandbox.__adspeed.skipAsync();
+    assert.equal(result.handled, 1);
+    assert.equal(media.seeking, true);
+    assert.equal(media.seeks.length, 1);
+    assert.equal(env.sandbox.__adspeed.stats.seekFailures, 0);
 });
 
 test('immutable loops and failed seeks cannot authorize close and restore loop state', async () => {

@@ -1,6 +1,6 @@
 Package: com.maxblox2999.advanish
 Name: AdVanish
-Version: 0.2.0
+Version: 0.2.1
 Architecture: iphoneos-arm
 Depends: firmware (>= 15.0), ellekit | mobilesubstrate, preferenceloader
 Conflicts: com.34306-sr.adspeed, com.34306.adspeed, com.soulrune.adspeed
