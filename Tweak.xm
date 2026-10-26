@@ -482,6 +482,7 @@ static NSString *webSpeedJS(void) {
         @"accelerateClock": @(gWebClock),
         @"forceInline": @(gForceInline),
         @"autoSkip": @NO,
+        @"manualPlayback": @YES,
         @"manualClose": @(gManualSkip),
         @"skipChannel": channel,
     };
@@ -622,7 +623,7 @@ static void imageAdded(const struct mach_header *mh, intptr_t slide) {
         gSpeedVideo  = !gManualSkip && prefBool(prefs, appKey(bid, kKeySpeedVideo), YES);
         gWebTimers   = !gManualSkip && prefBool(prefs, appKey(bid, kKeyWebTimers), NO);
         gWebClock    = !gManualSkip && prefBool(prefs, appKey(bid, kKeyWebClock), NO);
-        gForceInline = prefBool(prefs, appKey(bid, kKeyForceInline), NO);
+        gForceInline = !gManualSkip && prefBool(prefs, appKey(bid, kKeyForceInline), NO);
         gSpeedNative = prefBool(prefs, appKey(bid, kKeySpeedNative), NO);
         id rateVal = prefs[appKey(bid, kKeyVideoRate)];
         gVideoRate = prefRate(rateVal);

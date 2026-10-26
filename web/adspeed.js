@@ -18,6 +18,7 @@
     var accelerateClock = !!(configuration && configuration.accelerateClock);
     var forceInline = !!(configuration && configuration.forceInline);
     var autoSkip = !!(configuration && configuration.autoSkip);
+    var manualPlayback = !!(configuration && configuration.manualPlayback);
     var skipChannel = configuration && configuration.skipChannel;
     var nativeTimeout = window.setTimeout;
     var nativeInterval = window.setInterval;
@@ -27,6 +28,7 @@
     var nativePerformance = window.performance;
     var nativePerformanceNow = nativePerformance && nativePerformance.now;
     var states = new WeakMap();
+    var manuallyAccelerated = new Set();
     var pollHandle = null;
     var refreshing = false;
     var fast = false;
@@ -160,6 +162,7 @@
         var source = String(video.currentSrc || video.src || '');
         var state = states.get(video);
         if (!state || state.source !== source) {
+            if (state) restoreManualRate(video);
             state = {source: source, attempted: false, manualAttempts: 0, rateAttempts: 0, rateFailed: false};
             states.set(video, state);
         }
@@ -248,6 +251,66 @@
         }
     }
 
+    function restoreManualRate(video) {
+        var state = states.get(video);
+        if (!state || typeof state.manualRate !== 'number') return;
+        manuallyAccelerated.delete(video);
+        // Leave completion observers an unchanged ended element. Reset on reload/replay.
+        if (video.ended) {
+            state.manualEnded = true;
+            return;
+        }
+        try {
+            if (video.playbackRate === state.manualRate) video.playbackRate = state.originalRate;
+        } catch (error) {
+            stats.rateFailures += 1;
+        }
+        delete state.manualRate;
+        delete state.originalRate;
+        delete state.manualEnded;
+    }
+
+    function manualEligible(video) {
+        if (!manualPlayback) return seekableTarget(video) !== null;
+        return playing(video) && !video.loop && typeof video.duration === 'number'
+            && isFinite(video.duration) && video.duration > 0
+            && typeof video.currentTime === 'number' && isFinite(video.currentTime)
+            && typeof video.playbackRate === 'number' && isFinite(video.playbackRate)
+            && video.playbackRate > 0;
+    }
+
+    function manualAction(video) {
+        var state = mediaState(video);
+        if (!manualPlayback) return skipVideo(video, state, true);
+        if (!manualEligible(video) || state.manualAttempts >= 3) return false;
+        if (video.playbackRate >= 2) return true;
+        manuallyAccelerated.forEach(function (existing) {
+            if (existing.isConnected === false) restoreManualRate(existing);
+        });
+        if (!manuallyAccelerated.has(video) && manuallyAccelerated.size >= maximumVideos) return false;
+        var original = video.playbackRate;
+        state.manualAttempts += 1;
+        try {
+            video.playbackRate = 2;
+            if (Math.abs(video.playbackRate - 2) > 0.001 || !isFinite(video.playbackRate)) {
+                throw new Error('Playback rate was not accepted');
+            }
+            if (!manuallyAccelerated.has(video) || original !== state.manualRate) state.originalRate = original;
+            state.manualRate = 2;
+            manuallyAccelerated.add(video);
+            stats.rateChanges += 1;
+            return true;
+        } catch (error) {
+            try {
+                if (video.playbackRate !== original) video.playbackRate = original;
+            } catch (restoreError) {
+                stats.mediaFailures += 1;
+            }
+            stats.rateFailures += 1;
+            return false;
+        }
+    }
+
     function scan(shouldSkip, explicit) {
         if (refreshing || pageHidden()) {
             if (pageHidden()) {
@@ -319,6 +382,7 @@
 
     function visibilityChanged() {
         if (pageHidden()) {
+            manuallyAccelerated.forEach(restoreManualRate);
             changeMode(false);
             if (pollHandle !== null && typeof nativeClearTimeout === 'function') {
                 nativeClearTimeout.call(window, pollHandle);
@@ -509,8 +573,7 @@
                     ended: !!video.ended, seeking: !!video.seeking, ready: video.readyState,
                     duration: video.duration});
                 if (video.ended) continue;
-                var target = seekableTarget(video);
-                if (target === null || mediaState(video).manualAttempts >= 3) snapshot.unresolved = 1;
+                if (!manualEligible(video) || mediaState(video).manualAttempts >= 3) snapshot.unresolved = 1;
                 else snapshot.candidates.push(video);
             }
         } catch (error) {
@@ -632,8 +695,8 @@
             snapshots.delete(token);
             if (record.route.video) {
                 var video = record.route.video;
-                if (seekableTarget(video) === null) return {handled: 0, unresolved: 1};
-                var handled = skipVideo(video, mediaState(video), true) ? 1 : 0;
+                if (!manualEligible(video)) return {handled: 0, unresolved: 1};
+                var handled = manualAction(video) ? 1 : 0;
                 return {handled: handled, unresolved: handled ? 0 : 1};
             }
             if (depth >= maximumFrameDepth) return {handled: 0, unresolved: 1};
@@ -667,7 +730,7 @@
         var snapshot = capture();
         if (snapshot.unresolved || snapshot.children.length || snapshot.candidates.length !== 1) return 0;
         var video = snapshot.candidates[0];
-        return skipVideo(video, mediaState(video), true) ? 1 : 0;
+        return manualAction(video) ? 1 : 0;
     }
 
     var api = Object.freeze({
@@ -754,12 +817,18 @@
         function sourceChanged(event) {
             generation += 1;
             if (event.target && String(event.target.tagName).toLowerCase() === 'video') {
+                restoreManualRate(event.target);
                 states.delete(event.target);
             }
             refresh();
         }
         document.addEventListener('loadstart', sourceChanged, true);
         document.addEventListener('emptied', sourceChanged, true);
+        document.addEventListener('ended', function (event) { restoreManualRate(event.target); }, true);
+        document.addEventListener('play', function (event) {
+            var state = states.get(event.target);
+            if (state && state.manualEnded) restoreManualRate(event.target);
+        }, true);
         document.addEventListener('visibilitychange', visibilityChanged, false);
     }
     if (typeof window.MutationObserver === 'function') {

@@ -1147,3 +1147,128 @@ test('new occlusion invalidates a previously discovered video snapshot', async (
     assert.equal((await env.sandbox.__adspeed.skipAsync(snapshot.token)).handled, 0);
     assert.equal(media.seeks.length, 0);
 });
+
+const playbackConfig = Object.assign({}, manualConfig, {manualPlayback: true});
+
+test('production manual playback preserves time and clocks and requests only 2x after pressing', async () => {
+    const env = environment(playbackConfig);
+    const media = video(env, {ranges: []});
+    env.emit('play', media);
+    env.advance(2000);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(media.currentTime, 1);
+    assert.equal(env.tasks.size, 0);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    assert.equal(media.playbackRate, 2);
+    assert.equal(media.currentTime, 1);
+    assert.deepEqual(media.seeks, []);
+    assert.equal(env.sandbox.Date.now(), 1700000002000);
+    assert.equal(env.sandbox.performance.now(), 2000);
+});
+
+test('production playback rejects ignored rates with bounded retries and no seeks', async () => {
+    const env = environment(playbackConfig);
+    const media = video(env, {ignoreRate: true});
+    for (let i = 0; i < 4; i += 1) {
+        assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+    }
+    assert.equal(media.playbackRate, 1);
+    assert.equal(media.rates.length, 3);
+    assert.equal(media.currentTime, 1);
+    assert.deepEqual(media.seeks, []);
+});
+
+test('production playback rejects looping creatives without changing their lifecycle', async () => {
+    const env = environment(playbackConfig);
+    const media = video(env, {loop: true});
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+    assert.equal(media.loop, true);
+    assert.equal(media.playbackRate, 1);
+    assert.deepEqual(media.seeks, []);
+});
+
+test('production playback restores the original rate on source reload and hiding', async () => {
+    for (const event of ['loadstart', 'emptied', 'hidden']) {
+        const env = environment(playbackConfig);
+        const media = video(env);
+        media.playbackRate = 1.25;
+        assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+        assert.equal(media.playbackRate, 2);
+        if (event === 'hidden') env.hide(true);
+        else env.emit(event, media);
+        assert.equal(media.playbackRate, 1.25, event);
+        assert.equal(media.paused, false, 'Restoring speed must not call play or pause');
+        assert.deepEqual(media.seeks, []);
+    }
+});
+
+test('production playback leaves completion state untouched and resets when the element replays', async () => {
+    const env = environment(playbackConfig);
+    const media = video(env);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    const rateWrites = media.rates.length;
+    media.ended = true;
+    media.paused = true;
+    env.emit('ended', media);
+    assert.equal(media.rates.length, rateWrites);
+    assert.equal(media.playbackRate, 2);
+    assert.equal(media.ended, true);
+    assert.equal(media.paused, true);
+    media.ended = false;
+    media.paused = false;
+    env.emit('play', media);
+    assert.equal(media.playbackRate, 1);
+    assert.deepEqual(media.seeks, []);
+});
+
+test('production playback respects a rate changed by the SDK before cleanup', async () => {
+    const env = environment(playbackConfig);
+    const media = video(env);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    media.playbackRate = 1.5;
+    env.emit('ended', media);
+    assert.equal(media.playbackRate, 1.5);
+    assert.deepEqual(media.seeks, []);
+});
+
+test('source replacement without loadstart releases the prior manual rate', async () => {
+    const env = environment(playbackConfig);
+    const media = video(env);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    media.currentSrc = 'https://example.invalid/next-creative.mp4';
+    const next = await env.sandbox.__adspeed.inspectAsync();
+    assert.equal(media.playbackRate, 1);
+    assert.equal((await env.sandbox.__adspeed.skipAsync(next.token)).handled, 1);
+    assert.equal(media.playbackRate, 2);
+    env.emit('ended', media);
+    assert.equal(media.playbackRate, 1);
+});
+
+test('production playback selects only one validated child and never closes a sibling', async () => {
+    const parent = environment(playbackConfig);
+    const child = environment(playbackConfig);
+    const sibling = environment(playbackConfig);
+    const media = video(child);
+    connect(parent, child);
+    connect(parent, sibling);
+    const closes = installClose(sibling);
+    const inspected = await parent.sandbox.__adspeed.inspectAsync();
+    assert.equal(inspected.count, 1);
+    assert.equal((await parent.sandbox.__adspeed.skipAsync(inspected.token)).handled, 1);
+    assert.equal(media.playbackRate, 2);
+    assert.deepEqual(media.seeks, []);
+    assert.equal(closes(), 0);
+});
+
+test('production playback abstains on ambiguous videos or a stale token', async () => {
+    const env = environment(playbackConfig);
+    const first = video(env);
+    const token = (await env.sandbox.__adspeed.inspectAsync()).token;
+    const second = video(env);
+    assert.equal((await env.sandbox.__adspeed.skipAsync(token)).handled, 0);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+    assert.equal(first.playbackRate, 1);
+    assert.equal(second.playbackRate, 1);
+    assert.deepEqual(first.seeks, []);
+    assert.deepEqual(second.seeks, []);
+});

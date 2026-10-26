@@ -93,8 +93,9 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
     self.closeButton = close;
     __weak ALBaseVideoViewController *weakSelf = self;
     [[NSNotificationCenter defaultCenter] addObserverForName:AVPlayerItemDidPlayToEndTimeNotification
-        object:video.player.currentItem queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *notification) {
-        weakSelf.ended = YES;
+        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *notification) {
+        ALBaseVideoViewController *owner = weakSelf;
+        if (notification.object == owner.avPlayer.currentItem) owner.ended = YES;
     }];
 }
 - (AVPlayer *)avPlayer { return self.videoPlayer.videoView.player; }
@@ -123,25 +124,47 @@ static void runFixture(ALBaseVideoViewController *owner) {
             CMTimeGetSeconds(owner.avPlayer.currentTime) > 0.1;
     }, deadline, ^{
         UIButton *button = skipButton();
+        UIWindow *overlay = button.window;
+        if (!check(!overlay.opaque && !overlay.rootViewController.view.opaque &&
+                   CGColorGetAlpha(overlay.backgroundColor.CGColor) == 0 &&
+                   CGColorGetAlpha(overlay.rootViewController.view.backgroundColor.CGColor) == 0,
+                   @"The floating overlay and its root view are explicitly transparent")) return;
+        if (!check([overlay hitTest:CGPointMake(20, 200) withEvent:nil] == nil,
+                   @"Taps outside the floating button reach the app")) return;
         if (!check(owner.avPlayer.rate == 1 && CMTimeGetSeconds(owner.avPlayer.currentTime) < 5,
                    @"Unpressed manual mode preserves native playback")) return;
         ASPAdSurface *surface = ASPFindAdSurface(@[owner.view.window], NO);
         if (!check(surface.owner == owner && [surface.players containsObject:owner.avPlayer] && !surface.incomplete,
                    @"Visible SDK-owned native player is discovered")) return;
+        double before = CMTimeGetSeconds(owner.avPlayer.currentTime);
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-        waitUntil(^BOOL { return owner.ended; }, deadline, ^{
-            if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) >= 11.95 && owner.avPlayer.rate == 0,
-                       @"Manual native seek reaches a real player end event")) return;
-            waitUntil(^BOOL { return [button.currentTitle isEqualToString:@"Skip current ad"]; }, deadline, ^{
-                [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-                if (!check(owner.closes == 0 && owner.rewardPending,
-                           @"Completed video cannot activate SDK Close while its reward is pending")) return;
-                if (!check([button.currentTitle isEqualToString:@"No eligible video"],
-                           @"A second press reports an ended video without closing it")) return;
-                // The normal SDK/app remains free to close on its own.
-                [owner.closeButton sendActionsForControlEvents:UIControlEventTouchUpInside];
-                if (!check(owner.closes == 1, @"The app's own Close control remains functional")) return;
-                result(nil);
+        if (!check(owner.avPlayer.rate == 2 && CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 0.5,
+                   @"Manual action requests 2x playback without a time jump")) return;
+        AVPlayerItem *replacement = [AVPlayerItem playerItemWithAsset:owner.avPlayer.currentItem.asset];
+        owner.currentAd = [NSObject new];
+        [owner.avPlayer replaceCurrentItemWithPlayerItem:replacement];
+        [owner.avPlayer playImmediatelyAtRate:2];
+        waitUntil(^BOOL {
+            return owner.avPlayer.rate == 1 && [button.currentTitle isEqualToString:@"Fast-forward ad"];
+        }, deadline, ^{
+            if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) < 4,
+                       @"Replacing a creative releases its prior manual rate")) return;
+            [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+            if (!check(owner.avPlayer.rate == 2, @"A new creative accepts a separate manual request")) return;
+            waitUntil(^BOOL { return owner.ended; }, deadline, ^{
+                if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) >= 11.95 && owner.avPlayer.rate == 0,
+                           @"Faster playback reaches a real player end event")) return;
+                waitUntil(^BOOL { return [button.currentTitle isEqualToString:@"Fast-forward ad"]; }, deadline, ^{
+                    [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+                    if (!check(owner.closes == 0 && owner.rewardPending,
+                               @"Completed video cannot activate SDK Close while its reward is pending")) return;
+                    if (!check([button.currentTitle isEqualToString:@"No eligible video"],
+                               @"A second press reports an ended video without closing it")) return;
+                    // The normal SDK/app remains free to close on its own.
+                    [owner.closeButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+                    if (!check(owner.closes == 1, @"The app's own Close control remains functional")) return;
+                    result(nil);
+                });
             });
         });
     });

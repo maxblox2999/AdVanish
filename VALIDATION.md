@@ -1,6 +1,6 @@
 # Verification
 
-The shared web engine has 58 Node VM regression tests covering manual-only behavior, media eligibility, source changes, failed and silently ignored seeks, asynchronous seeks, duplicate injection, timer/clock behavior, side-effect-free cross-frame discovery, single-use action tokens, stale/spoofed replies, token expiry, bounded retries, ambiguity, loop handling and the absence of generic MRAID closing. Run them with:
+The shared web engine has 67 Node VM regression tests covering production manual 2x playback without seeking, rate cleanup and rejected rates, unchanged completion state, source changes, legacy seeking and timer/clock behavior, duplicate injection, side-effect-free cross-frame discovery, single-use action tokens, stale/spoofed replies, token expiry, bounded retries, ambiguity and the absence of generic MRAID closing. Run them with:
 
 ```sh
 node scripts/embed-web.cjs
@@ -15,7 +15,7 @@ Native compilation results are recorded in public Actions logs. A passing build 
 
 ## Real-browser fixtures
 
-Twelve live Microsoft Edge 156.0.4314.42 cases passed with an isolated profile, real HTML video and cross-origin frames. The locally generated 12-second H264 clip sought once and naturally emitted ended, including in a child frame. Multiple targets abstained, stale snapshots invalidated, concurrent token reuse acted once, and no MRAID close or JavaScript error occurred. An ignored seek restored looping and reported failure; retrying through the native browser setter reached natural completion. This checks Chromium media behavior, not iOS WebKit or real SDK rewards.
+The real-browser suite has sixteen cases using an isolated profile, a locally generated 12-second H264 clip and cross-origin frames. Production cases request 2x without seeking, reach natural completion, preserve looping creatives and reject ignored rates. The remaining cases retain coverage of the legacy seek engine, ambiguity, stale snapshots, concurrent token reuse and absent MRAID closing. This checks Chromium media behavior, not iOS WebKit or real SDK rewards. Reports record the exact browser version and source hash.
 
 Run `node tests/browser/verify.cjs` with Node.js 22+ and Microsoft Edge on Windows, or set `BROWSER_PATH` to a Chromium browser executable. The runner uses two local HTTP origins and its own temporary browser profile, closes its browser afterward and writes `dist/browser.json`. It is included in the source so the browser checks can be repeated independently.
 
@@ -27,7 +27,7 @@ On macOS with an installed iOS Simulator runtime, run:
 python3 scripts/test-ios.py --video tests/ios/fixture.mp4
 ```
 
-This compiles the production native files into an isolated UIKit fixture, creates a temporary simulator, runs the checks, writes `dist/ios-simulator.json` and deletes its simulator. The rootless Actions job runs the same fixture and includes its result in the artifact. It checks visible AppLovin-style ownership, unchanged playback before pressing, a real AVPlayer seek/end event, a repeat press while a mocked reward is pending and the app's own working Close button. It does not test injection, a real ad SDK, remote reward validation or jailbreak compatibility. The 12-second H264 fixture is locally generated, has no audio and contains no proprietary media.
+This compiles the production native files into an isolated UIKit fixture, creates a temporary simulator, runs the checks, writes `dist/ios-simulator.json` and deletes its simulator. The rootless Actions job runs the same fixture and includes its result in the artifact. It checks transparent/pass-through windows, visible AppLovin-style ownership, unchanged playback before pressing, 2x playback without a jump, rate cleanup on creative replacement, real completion, a repeat press while a mocked reward is pending and the app's own working Close button. It does not test injection, a real ad SDK, remote reward validation or jailbreak compatibility. The 12-second H264 fixture is locally generated, has no audio and contains no proprietary media.
 
 ## Device checks still needed
 

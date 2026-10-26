@@ -1,9 +1,9 @@
 # AdVanish
 
 
-Enable an app in **Settings > AdVanish**, reopen it, then press the floating button during an ad. Drag the button to move it. Manual mode leaves normal playback, timers and clocks unchanged until you press it. Legacy blocking and acceleration remain available when the manual button is disabled.
+Enable an app in **Settings > AdVanish**, reopen it, then press the floating button during an ad. Drag the button to move it. Manual mode leaves normal playback, timers and clocks unchanged until you press it. It leaves SDK countdowns unchanged even after pressing. Legacy blocking and acceleration remain available when the manual button is disabled.
 
-Discovery makes no media changes. A request acts only after native players, webviews and child frames have been checked and their snapshots validated. Multiple candidates, missing frame responses, changed sources and incomplete discovery leave the ad alone. Ignored web seeks report failure and restore looping playback. After seeking, wait for the app's countdown or reward and use its own Close button when available. Playable ads, nonseekable media, app-controlled close gates and server-validated rewards can reject or ignore the request. The generic fallback cannot prove that visible media is an ad. Pressing the button during ordinary video can skip that video. This is not a promise that every ad can be removed or every reward preserved.
+Discovery makes no media changes. A request acts only after native players, webviews and child frames have been checked and their snapshots validated. Multiple candidates, missing frame responses, changed sources and incomplete discovery leave the ad alone. Looping web creatives are left unchanged; rejected speed changes report failure. Wait for the app's countdown or reward and use its own Close button when available. Playables, unsupported playback speeds, app-controlled close gates and server-validated rewards can reject or ignore the request. The generic fallback cannot prove that visible media is an ad. Pressing the button during ordinary video can accelerate that video. This is not a promise that every ad can be removed or every reward preserved.
 
 ## Compatibility
 

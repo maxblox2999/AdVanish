@@ -32,9 +32,9 @@
                                    footer:@"Settings for this app only. They apply next time the app is launched."]];
         [specs addObject:[self switchSpecifierNamed:@"Enabled" key:enableKey default:NO]];
         [specs addObject:[self groupNamed:@"Manual skipping"
-                                   footer:@"Shows a Skip current ad button in this app. Video and clocks stay unchanged "
-                                          @"until you press it. The button requests completion through shared media "
-                                          @"APIs; close gates and rewards still depend on the app."]];
+                                   footer:@"Shows a Fast-forward ad button. Pressing requests 2x video playback "
+                                          @"without jumping to the end. SDK countdowns stay unchanged. "
+                                          @"Wait for the app's reward or countdown and use its own Close button."]];
         [specs addObject:[self disable:[self switchSpecifierNamed:@"Show skip button" key:[self k:@"ManualSkip"] default:YES] when:!enabled]];
         [specs addObject:[self groupNamed:@"Legacy blocking"
                                    footer:@"Uses the older SDK list and can prevent rewarded ads from loading. "
