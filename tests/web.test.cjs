@@ -18,17 +18,19 @@ function environment(configuration = {}, options = {}) {
     const nativeCalls = [];
     const videos = [];
     const frameNodes = [];
+    const controls = [];
     const document = {
         hidden: !!options.hidden,
         visibilityState: options.hidden ? 'hidden' : 'visible',
         // Default fixtures model unobstructed media under one container. Tests
         // for occlusion replace this with the actual frontmost fixture node.
         elementFromPoint() {
-            return {contains(node) { return videos.includes(node) || frameNodes.includes(node); }};
+            return {contains(node) { return videos.includes(node) || frameNodes.includes(node) || controls.includes(node); }};
         },
         querySelectorAll(selector) {
-            assert.equal(selector, 'iframe,frame');
-            return frameNodes;
+            if (selector === 'iframe,frame') return frameNodes;
+            assert.equal(selector, 'button,[role="button"],[aria-label]');
+            return controls;
         },
         getElementsByTagName(name) {
             assert.equal(name, 'video');
@@ -89,17 +91,24 @@ function environment(configuration = {}, options = {}) {
     sandbox.setInterval = timer('interval');
     sandbox.clearTimeout = (handle) => tasks.delete(handle);
     sandbox.clearInterval = (handle) => tasks.delete(handle);
+    const nativeFrameTimer = sandbox.setTimeout;
+    sandbox.requestAnimationFrame = (callback) => nativeFrameTimer(() => callback(now), 16);
+    sandbox.cancelAnimationFrame = sandbox.clearTimeout;
+    sandbox.open = options.open || (() => 'opened');
+    sandbox.MouseEvent = class { constructor(type, options) { this.type = type; Object.assign(this, options); } };
+    sandbox.PointerEvent = sandbox.MouseEvent;
     if (options.noPerformance) {
         delete sandbox.performance;
     }
     vm.createContext(sandbox);
-    const config = Object.assign({rate: 8, speedVideo: true}, configuration);
+    const config = Object.assign({rate: 8, speedVideo: true, recognizedAd: true}, configuration);
     const script = source.replace('__ADSPEED_CONFIG__', JSON.stringify(config));
     const api = {
         sandbox,
         document,
         videos,
         frameNodes,
+        controls,
         tasks,
         listeners,
         windowListeners,
@@ -246,8 +255,8 @@ test('runs without browser globals and does not need to resolve configuration', 
     assert.doesNotThrow(() => vm.runInNewContext(source));
 });
 
-test('clamps finite rate and replaces malformed values with 8', () => {
-    for (const [input, expected] of [[0, 1], [-4, 1], [100, 16], [4, 4], [null, 8], ['bad', 8]]) {
+test('clamps finite rate and replaces malformed values with 16', () => {
+    for (const [input, expected] of [[0, 1], [-4, 1], [100, 16], [4, 4], [null, 16], ['bad', 16]]) {
         const env = environment({rate: input});
         const media = video(env);
         env.emit('play', media);
@@ -296,34 +305,7 @@ test('manual-only mode does not poll', () => {
     assert.equal(env.tasks.size, 0);
     const media = video(env);
     assert.equal(env.sandbox.__adspeed.skip(), 1);
-    assert.equal(media.seeks.length, 1);
-});
-
-test('explicit skip seeks to a short tail once and emits no fake media events', () => {
-    const env = environment({speedVideo: false});
-    const media = video(env);
     assert.equal(media.seeks.length, 0);
-    assert.equal(env.sandbox.__adspeed.skip(), 1);
-    assert.equal(media.currentTime, 29.75);
-    assert.equal(media.ended, false);
-    assert.equal(media.paused, false);
-    assert.equal(env.sandbox.__adspeed.skip(), 0);
-    assert.equal(media.seeks.length, 1);
-    assert.equal(env.sandbox.__adspeed.stats.skipped, 1);
-});
-
-test('automatic skip stays disabled by default and is independent of speed', () => {
-    const manual = environment();
-    const first = video(manual);
-    manual.emit('play', first);
-    manual.advance(1000);
-    assert.equal(first.seeks.length, 0);
-    const automatic = environment({speedVideo: false, autoSkip: true});
-    const second = video(automatic);
-    automatic.emit('play', second);
-    automatic.advance(1000);
-    assert.equal(second.seeks.length, 1);
-    assert.equal(second.playbackRate, 1);
 });
 
 test('paused, ended, seeking, hidden, disconnected, live and not-ready media are skipped safely', () => {
@@ -338,8 +320,6 @@ test('paused, ended, seeking, hidden, disconnected, live and not-ready media are
         {duration: 0},
         {duration: -1},
         {readyState: 1},
-        {ranges: []},
-        {ranges: [[0, 10]]},
         {style: {display: 'none'}},
         {style: {visibility: 'hidden'}},
         {style: {opacity: '0'}},
@@ -348,7 +328,7 @@ test('paused, ended, seeking, hidden, disconnected, live and not-ready media are
         {rectangle: {left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0}}
     ];
     for (const properties of cases) {
-        const env = environment({speedVideo: false, autoSkip: true});
+        const env = environment({speedVideo: false, recognizedAd: false});
         const media = video(env, properties);
         env.emit('play', media);
         assert.equal(env.sandbox.__adspeed.skip(), 0, JSON.stringify(properties));
@@ -357,7 +337,7 @@ test('paused, ended, seeking, hidden, disconnected, live and not-ready media are
 });
 
 test('pausing is preserved and resuming makes a video eligible', () => {
-    const env = environment({autoSkip: true});
+    const env = environment({recognizedAd: true});
     const media = video(env, {paused: true});
     env.emit('play', media);
     env.advance(250);
@@ -365,56 +345,13 @@ test('pausing is preserved and resuming makes a video eligible', () => {
     assert.equal(media.rates.length, 0);
     media.paused = false;
     env.emit('play', media);
-    assert.equal(media.seeks.length, 1);
+    assert.equal(media.seeks.length, 0);
     assert.equal(media.playbackRate, 8);
     media.paused = true;
     env.emit('pause', media);
     env.advance(250);
     assert.equal(media.paused, true);
-    assert.equal(media.seeks.length, 1);
-});
-
-test('source changes and same-source loadstart reset the bounded skip state', () => {
-    const env = environment({autoSkip: true});
-    const media = video(env);
-    env.emit('play', media);
-    media.currentSrc = 'https://example.invalid/second.mp4';
-    media.currentTime = 1;
-    media.seeks.length = 0;
-    env.emit('loadedmetadata', media);
-    assert.equal(media.seeks.length, 1);
-    media.currentTime = 1;
-    media.seeks.length = 0;
-    env.emit('loadstart', media);
-    assert.equal(media.seeks.length, 1);
-    env.advance(1000);
-    assert.equal(media.seeks.length, 1);
-});
-
-test('seek failure is bounded and leaves the independent speed fallback working', () => {
-    const env = environment({autoSkip: true});
-    const media = video(env, {throwSeek: true});
-    env.emit('play', media);
-    env.advance(2000);
-    assert.equal(media.seeks.length, 1);
-    assert.equal(env.sandbox.__adspeed.stats.seekFailures, 1);
-    assert.equal(env.sandbox.__adspeed.skip(), 0);
-    assert.equal(media.seeks.length, 2);
-    assert.equal(media.playbackRate, 8);
-    assert.equal(env.sandbox.__adspeed.stats.seekFailures, 2);
-    assert.equal(env.sandbox.__adspeed.stats.skipped, 0);
-});
-
-test('throwing or ignored playbackRate setters stop retrying without stopping skip', () => {
-    for (const properties of [{throwRate: true}, {ignoreRate: true}]) {
-        const env = environment({autoSkip: true});
-        const media = video(env, properties);
-        env.emit('play', media);
-        env.advance(2000);
-        assert.equal(media.rates.length, 1);
-        assert.equal(media.seeks.length, 1);
-        assert.equal(env.sandbox.__adspeed.stats.rateFailures, 1);
-    }
+    assert.equal(media.seeks.length, 0);
 });
 
 test('repeated SDK rate resets have a per-source correction limit', () => {
@@ -437,43 +374,6 @@ test('inline attributes are opt-in and do not resume media', () => {
     media.paused = true;
     env.emit('pause', media);
     assert.equal(media.paused, true);
-});
-
-test('dynamic timer gating resumes after video ends or is removed', () => {
-    const env = environment({compressTimers: true});
-    const calls = [];
-    env.sandbox.setInterval(() => calls.push(env.time()), 1000);
-    env.advance(125);
-    assert.deepEqual(calls, [125]);
-    const media = video(env);
-    env.emit('play', media);
-    env.advance(1000);
-    assert.deepEqual(calls, [125, 1125]);
-    media.ended = true;
-    env.emit('ended', media);
-    env.advance(125);
-    assert.deepEqual(calls, [125, 1125, 1250]);
-    media.ended = false;
-    env.emit('play', media);
-    env.videos.length = 0;
-    env.observers[0].callback([]);
-    env.advance(125);
-    assert.deepEqual(calls, [125, 1125, 1250, 1375]);
-});
-
-test('a scheduled function timeout follows mode changes and fires only once', () => {
-    const env = environment({compressTimers: true});
-    const calls = [];
-    env.sandbox.setTimeout(() => calls.push(env.time()), 1000);
-    env.advance(50);
-    const media = video(env);
-    env.emit('play', media);
-    env.advance(599);
-    assert.equal(calls.length, 0);
-    env.advance(101);
-    assert.deepEqual(calls, [750]);
-    env.advance(2000);
-    assert.equal(calls.length, 1);
 });
 
 test('timer callbacks, extra arguments, receiver and cancellation are preserved', () => {
@@ -514,7 +414,7 @@ test('string timer callbacks stay on native timer paths without evaluation', () 
 });
 
 test('live media is left at its original rate and hidden media does not disable timer compression', () => {
-    const env = environment({compressTimers: true, autoSkip: true});
+    const env = environment({compressTimers: true});
     const live = video(env, {duration: Infinity});
     env.emit('play', live);
     assert.equal(live.playbackRate, 1);
@@ -525,46 +425,6 @@ test('live media is left at its original rate and hidden media does not disable 
     env.sandbox.setTimeout(() => fired = true, 1000);
     env.advance(125);
     assert.equal(fired, true);
-});
-
-test('near-tail media does not repeatedly seek and metadata can make a pending item eligible', () => {
-    const env = environment({speedVideo: false, autoSkip: true});
-    const media = video(env, {readyState: 0});
-    env.emit('play', media);
-    assert.equal(media.seeks.length, 0);
-    media.readyState = 4;
-    media.currentTime = 29.9;
-    media.seeks.length = 0;
-    env.emit('loadedmetadata', media);
-    env.advance(500);
-    assert.equal(media.seeks.length, 0);
-    media.currentSrc = 'https://example.invalid/new.mp4';
-    media.currentTime = 1;
-    media.seeks.length = 0;
-    env.emit('loadedmetadata', media);
-    assert.equal(media.seeks.length, 1);
-});
-
-test('clock transitions settle old speed even without intermediate clock reads', () => {
-    const env = environment({accelerateClock: true});
-    const initialDate = env.sandbox.Date.now();
-    env.advance(100);
-    const media = video(env);
-    env.emit('play', media);
-    env.advance(100);
-    assert.equal(env.sandbox.Date.now() - initialDate, 900);
-    assert.equal(env.sandbox.performance.now(), 900);
-    media.ended = true;
-    env.emit('ended', media);
-    env.advance(100);
-    assert.equal(env.sandbox.Date.now() - initialDate, 1700);
-    assert.equal(env.sandbox.performance.now(), 1700);
-    env.hide(true);
-    env.advance(100);
-    assert.equal(env.sandbox.Date.now() - initialDate, 1800);
-    env.hide(false);
-    env.advance(100);
-    assert.equal(env.sandbox.Date.now() - initialDate, 2600);
 });
 
 test('virtual clocks never move backward when the system clock rolls back', () => {
@@ -587,27 +447,16 @@ test('clock acceleration remains optional and works without performance', () => 
     assert.equal(fallback.sandbox.Date.now() - before, 800);
 });
 
-test('hidden-page startup does not scan or seek until foregrounded', () => {
-    const env = environment({autoSkip: true}, {hidden: true});
+test('hidden-page startup does not scan or accelerate until foregrounded', () => {
+    const env = environment({recognizedAd: true}, {hidden: true});
     const media = video(env);
     env.emit('play', media);
     assert.equal(env.tasks.size, 0);
     assert.equal(env.sandbox.__adspeed.skip(), 0);
     assert.equal(env.sandbox.__adspeed.stats.scans, 0);
     env.hide(false);
-    assert.equal(media.seeks.length, 1);
+    assert.equal(media.seeks.length, 0);
     assert.equal(env.tasks.size, 1);
-});
-
-test('automatic media scans have a fixed upper bound and manual ambiguity abstains', () => {
-    const env = environment({speedVideo: false, autoSkip: true});
-    for (let index = 0; index < 80; index++) {
-        video(env);
-    }
-    env.emit('play', env.videos[0]);
-    assert.equal(env.sandbox.__adspeed.stats.skipped, 64);
-    assert.equal(env.sandbox.__adspeed.skip(), 0);
-    assert.equal(env.videos[64].seeks.length, 0);
 });
 
 test('generated C++ header embeds the exact JavaScript and one config token', () => {
@@ -619,7 +468,7 @@ test('generated C++ header embeds the exact JavaScript and one config token', ()
 });
 
 test('manual mode leaves video, native timers, and clocks unchanged until requested', () => {
-    const env = environment({speedVideo: false, autoSkip: false, manualClose: true});
+    const env = environment({speedVideo: false, recognizedAd: false});
     const media = video(env);
     env.emit('play', media);
     env.advance(2000);
@@ -633,8 +482,8 @@ test('manual mode leaves video, native timers, and clocks unchanged until reques
     env.advance(1);
     assert.equal(fired, 1);
     assert.equal(env.sandbox.__adspeed.skip(), 1);
-    assert.equal(media.seeks.length, 1);
-    assert.deepEqual(media.rates, []);
+    assert.equal(media.seeks.length, 0);
+    assert.equal(media.playbackRate, 8);
     assert.equal(env.sandbox.performance.now(), 3000);
     assert.equal(env.sandbox.Date.now(), 1700000003000);
 });
@@ -691,7 +540,7 @@ function installClose(env) {
     return () => closes;
 }
 
-const manualConfig = {speedVideo: false, manualClose: true, skipChannel: 'session-token'};
+const manualConfig = {rate: 16, speedVideo: false, recognizedAd: false, skipChannel: 'session-token'};
 
 async function settle() {
     for (let index = 0; index < 20; index++) await Promise.resolve();
@@ -702,7 +551,7 @@ function inspectionReply(request, overrides = {}) {
         count: 0, unresolved: 0, token: '123:456:9'}, overrides);
 }
 
-test('inspection and validation are side-effect free and tokens authorize one local seek', async () => {
+test('inspection and validation are side-effect free and tokens authorize one local speed request', async () => {
     const env = environment(manualConfig);
     const media = video(env);
     const inspected = await env.sandbox.__adspeed.inspectAsync();
@@ -714,10 +563,11 @@ test('inspection and validation are side-effect free and tokens authorize one lo
     assert.equal(await env.sandbox.__adspeed.validateAsync(inspected.token), true);
     const result = await env.sandbox.__adspeed.skipAsync(inspected.token);
     assert.equal(result.handled, 1);
-    assert.equal(media.currentTime, 29.75);
+    assert.equal(media.currentTime, 1);
+    assert.equal(media.playbackRate, 16);
     assert.equal(media.ended, false);
     assert.equal((await env.sandbox.__adspeed.skipAsync(inspected.token)).handled, 0);
-    assert.equal(media.seeks.length, 1);
+    assert.equal(media.seeks.length, 0);
 });
 
 test('empty snapshots are tokenized for native fallback and invalidate when media arrives', async () => {
@@ -740,24 +590,10 @@ test('manual APIs never invoke generic MRAID close, including empty and finished
     assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
     assert.equal(closes(), 0);
     assert.equal(media.seeks.length, 0);
-    assert.equal(env.sandbox.__adspeed.stats.closeRequests, 0);
+    assert.equal('closeRequests' in env.sandbox.__adspeed.stats, false);
 });
 
-test('a second press never closes a video whose seek has not ended', async () => {
-    const env = environment(manualConfig);
-    const media = video(env);
-    const closes = installClose(env);
-    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
-    env.advance(1100);
-    const second = await env.sandbox.__adspeed.skipAsync();
-    assert.equal(second.handled, 0);
-    assert.equal(second.unresolved, 1);
-    assert.equal(media.ended, false);
-    assert.equal(media.seeks.length, 1);
-    assert.equal(closes(), 0);
-});
-
-test('two local videos are ambiguous and neither is sought', async () => {
+test('two local videos are ambiguous and neither is accelerated', async () => {
     const env = environment(manualConfig);
     const first = video(env);
     const second = video(env, {currentSrc: 'https://example.invalid/other.mp4'});
@@ -799,7 +635,8 @@ test('frame discovery authorizes only one video and never closes a sibling frame
     const result = await parent.sandbox.__adspeed.skipAsync(inspected.token);
     assert.equal(result.handled, 1);
     assert.equal(result.unresolved, 0);
-    assert.equal(ad.seeks.length, 1);
+    assert.equal(ad.seeks.length, 0);
+    assert.equal(ad.playbackRate, 16);
     assert.equal(closes(), 0);
     assert.equal(parent.tasks.size + videoFrame.tasks.size + closeFrame.tasks.size, 0);
 });
@@ -873,90 +710,6 @@ test('one token cannot perform two concurrent actions', async () => {
         env.sandbox.__adspeed.skipAsync(inspected.token)
     ]);
     assert.equal(results.reduce((sum, result) => sum + result.handled, 0), 1);
-    assert.equal(media.seeks.length, 1);
-});
-
-test('failed seeks can be explicitly retried with a fixed per-source attempt bound', async () => {
-    const env = environment(manualConfig);
-    const media = video(env, {throwSeek: true});
-    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
-    media.throwSeek = false;
-    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
-    media.currentTime = 1;
-    media.seeks.length = 0;
-    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
-    media.currentTime = 1;
-    media.seeks.length = 0;
-    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
-    assert.equal(media.seeks.length, 0);
-    assert.equal(env.sandbox.__adspeed.stats.skipAttempts, 3);
-});
-
-test('silently ignored seeks report failure and preserve looping playback', async () => {
-    const env = environment(manualConfig);
-    const media = video(env, {loop: true, ignoreSeek: true});
-    const closes = installClose(env);
-    const result = await env.sandbox.__adspeed.skipAsync();
-    assert.equal(result.handled, 0);
-    assert.equal(result.unresolved, 1);
-    assert.equal(media.currentTime, 1);
-    assert.equal(media.loop, true);
-    assert.equal(media.paused, false);
-    assert.equal(env.sandbox.__adspeed.stats.skipped, 0);
-    assert.equal(env.sandbox.__adspeed.stats.seekFailures, 1);
-    assert.equal(closes(), 0);
-    media.ignoreSeek = false;
-    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
-    assert.equal(media.currentTime, 29.75);
-    assert.equal(media.loop, false);
-});
-
-test('an asynchronous seek is accepted while the media element reports seeking', async () => {
-    const env = environment(manualConfig);
-    const media = video(env, {deferSeek: true});
-    const result = await env.sandbox.__adspeed.skipAsync();
-    assert.equal(result.handled, 1);
-    assert.equal(media.seeking, true);
-    assert.equal(media.seeks.length, 1);
-    assert.equal(env.sandbox.__adspeed.stats.seekFailures, 0);
-});
-
-test('immutable loops and failed seeks cannot authorize close and restore loop state', async () => {
-    const frozen = environment(manualConfig);
-    const immutable = video(frozen);
-    const frozenCloses = installClose(frozen);
-    Object.defineProperty(immutable, 'loop', {get: () => true, set() {}});
-    assert.equal((await frozen.sandbox.__adspeed.skipAsync()).handled, 0);
-    assert.equal(immutable.loop, true);
-    assert.equal(immutable.seeks.length, 0);
-    assert.equal(frozenCloses(), 0);
-    const failing = environment(manualConfig);
-    const media = video(failing, {loop: true, throwSeek: true});
-    assert.equal((await failing.sandbox.__adspeed.skipAsync()).handled, 0);
-    assert.equal(media.loop, true);
-    assert.equal(media.seeks.length, 1);
-});
-
-test('explicit looping video seeks only after the click and lets actual playback end', async () => {
-    const env = environment(manualConfig);
-    const media = video(env, {loop: true});
-    env.emit('play', media);
-    env.advance(2000);
-    assert.equal(media.loop, true);
-    assert.equal(media.seeks.length, 0);
-    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
-    assert.equal(media.loop, false);
-    assert.equal(media.currentTime, 29.75);
-    assert.equal(media.ended, false);
-    assert.equal(media.paused, false);
-});
-
-test('automatic scans leave looping media untouched', () => {
-    const env = environment({speedVideo: false, autoSkip: true});
-    const media = video(env, {loop: true});
-    env.emit('play', media);
-    env.advance(2000);
-    assert.equal(media.loop, true);
     assert.equal(media.seeks.length, 0);
 });
 
@@ -1039,7 +792,7 @@ test('duplicate parent action messages consume one snapshot only', async () => {
     await settle();
     message(env, parent, request);
     await settle();
-    assert.equal(media.seeks.length, 1);
+    assert.equal(media.seeks.length, 0);
     assert.ok(replies.filter((reply) => reply.phase === 'act').length >= 1);
 });
 
@@ -1148,9 +901,9 @@ test('new occlusion invalidates a previously discovered video snapshot', async (
     assert.equal(media.seeks.length, 0);
 });
 
-const playbackConfig = Object.assign({}, manualConfig, {manualPlayback: true});
+const playbackConfig = manualConfig;
 
-test('production manual playback preserves time and clocks and requests only 2x after pressing', async () => {
+test('production manual playback preserves time and clocks and requests configured 16x after pressing', async () => {
     const env = environment(playbackConfig);
     const media = video(env, {ranges: []});
     env.emit('play', media);
@@ -1159,7 +912,7 @@ test('production manual playback preserves time and clocks and requests only 2x 
     assert.equal(media.currentTime, 1);
     assert.equal(env.tasks.size, 0);
     assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
-    assert.equal(media.playbackRate, 2);
+    assert.equal(media.playbackRate, 16);
     assert.equal(media.currentTime, 1);
     assert.deepEqual(media.seeks, []);
     assert.equal(env.sandbox.Date.now(), 1700000002000);
@@ -1193,7 +946,7 @@ test('production playback restores the original rate on source reload and hiding
         const media = video(env);
         media.playbackRate = 1.25;
         assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
-        assert.equal(media.playbackRate, 2);
+        assert.equal(media.playbackRate, 16);
         if (event === 'hidden') env.hide(true);
         else env.emit(event, media);
         assert.equal(media.playbackRate, 1.25, event);
@@ -1211,7 +964,7 @@ test('production playback leaves completion state untouched and resets when the 
     media.paused = true;
     env.emit('ended', media);
     assert.equal(media.rates.length, rateWrites);
-    assert.equal(media.playbackRate, 2);
+    assert.equal(media.playbackRate, 16);
     assert.equal(media.ended, true);
     assert.equal(media.paused, true);
     media.ended = false;
@@ -1239,7 +992,7 @@ test('source replacement without loadstart releases the prior manual rate', asyn
     const next = await env.sandbox.__adspeed.inspectAsync();
     assert.equal(media.playbackRate, 1);
     assert.equal((await env.sandbox.__adspeed.skipAsync(next.token)).handled, 1);
-    assert.equal(media.playbackRate, 2);
+    assert.equal(media.playbackRate, 16);
     env.emit('ended', media);
     assert.equal(media.playbackRate, 1);
 });
@@ -1255,7 +1008,7 @@ test('production playback selects only one validated child and never closes a si
     const inspected = await parent.sandbox.__adspeed.inspectAsync();
     assert.equal(inspected.count, 1);
     assert.equal((await parent.sandbox.__adspeed.skipAsync(inspected.token)).handled, 1);
-    assert.equal(media.playbackRate, 2);
+    assert.equal(media.playbackRate, 16);
     assert.deepEqual(media.seeks, []);
     assert.equal(closes(), 0);
 });
@@ -1305,7 +1058,7 @@ test('manual cleanup batches mutations and does not poll when nothing changed', 
     assert.equal(env.tasks.size, 1);
     env.advance(300);
     assert.equal(env.tasks.size, 0);
-    assert.equal(media.playbackRate, 2);
+    assert.equal(media.playbackRate, 16);
     assert.equal(env.observers[0].settings.attributes, true);
 });
 
@@ -1318,4 +1071,369 @@ test('pausing manually accelerated web playback restores speed without resuming 
     assert.equal(media.playbackRate, 1);
     assert.equal(media.paused, true);
     assert.deepEqual(media.seeks, []);
+});
+
+const adConfig = {rate: 16, speedVideo: true, compressTimers: true, accelerateClock: true,
+    recognizedAd: false, autoComplete: true, preventRedirects: true, skipChannel: 'session-token'};
+
+function control(env, label, overrides = {}) {
+    const events = [];
+    const node = Object.assign({tagName: 'BUTTON', textContent: label, isConnected: true,
+        parentElement: null, style: {}, disabled: false,
+        getAttribute() { return null; },
+        getBoundingClientRect() { return {left: 20, top: 40, right: 320, bottom: 340, width: 300, height: 300}; },
+        dispatchEvent(event) { events.push(event); return true; }
+    }, overrides);
+    node.events = events;
+    env.controls.push(node);
+    return node;
+}
+
+test('recognized ad context enables 16x video and timers together without a seek', () => {
+    const env = environment(adConfig);
+    const media = video(env);
+    env.emit('play', media);
+    env.advance(100);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(env.sandbox.performance.now(), 100);
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal(media.playbackRate, 16);
+    let fired = 0;
+    env.sandbox.setTimeout(() => fired++, 1600);
+    env.advance(100);
+    assert.equal(fired, 1);
+    assert.equal(env.sandbox.performance.now(), 1700);
+    assert.deepEqual(media.seeks, []);
+    env.sandbox.__adspeed.setAdContext(false);
+    assert.equal(media.playbackRate, 1);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1800);
+});
+
+test('existing scheduled timeout follows context transitions and fires once', () => {
+    const env = environment(adConfig);
+    let fired = 0;
+    env.sandbox.setTimeout(() => fired++, 1600);
+    env.advance(100);
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(100);
+    assert.equal(fired, 1);
+    env.sandbox.__adspeed.setAdContext(false);
+    env.advance(2000);
+    assert.equal(fired, 1);
+});
+
+test('16x clocks remain monotonic across hiding and returning to ordinary content', () => {
+    const env = environment(adConfig);
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1600);
+    env.hide(true);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1700);
+    env.hide(false);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 3300);
+    env.sandbox.__adspeed.setAdContext(false);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 3400);
+});
+
+test('animation frame timestamps share the accelerated monotonic performance clock', () => {
+    const env = environment(adConfig);
+    const frames = [];
+    env.sandbox.__adspeed.setAdContext(true);
+    env.sandbox.requestAnimationFrame(value => frames.push(value));
+    env.advance(16);
+    assert.deepEqual(frames, [256]);
+    assert.equal(frames[0], env.sandbox.performance.now());
+    const canceled = env.sandbox.requestAnimationFrame(value => frames.push(value));
+    env.sandbox.cancelAnimationFrame(canceled);
+    env.advance(16);
+    assert.equal(frames.length, 1);
+    env.hide(true);
+    env.sandbox.requestAnimationFrame(value => frames.push(value));
+    env.advance(16);
+    assert.equal(frames[1], 528);
+});
+
+test('automatic and manual acceleration coexist without resetting time or duplicating rate writes', async () => {
+    const env = environment(adConfig);
+    const media = video(env);
+    env.sandbox.__adspeed.setAdContext(true);
+    const writes = media.rates.length;
+    const first = await env.sandbox.__adspeed.skipAsync();
+    const second = await env.sandbox.__adspeed.skipAsync();
+    assert.equal(first.handled, 1);
+    assert.equal(second.handled, 1);
+    assert.equal(media.rates.length, writes);
+    assert.equal(media.playbackRate, 16);
+    assert.equal(media.currentTime, 1);
+    assert.deepEqual(media.seeks, []);
+});
+
+test('automatic rate rejection is bounded and never substitutes seeking or completion', () => {
+    for (const properties of [{throwRate: true}, {ignoreRate: true}]) {
+        const env = environment(adConfig);
+        const media = video(env, properties);
+        const closes = installClose(env);
+        env.sandbox.__adspeed.setAdContext(true);
+        env.advance(3000);
+        assert.equal(media.rates.length, 1);
+        assert.equal(media.playbackRate, 1);
+        assert.equal(media.ended, false);
+        assert.equal(media.paused, false);
+        assert.deepEqual(media.seeks, []);
+        assert.equal(closes(), 0);
+    }
+});
+
+test('automatic scans bound media work and preserve live and looping lifecycles', () => {
+    const env = environment(adConfig);
+    const looping = video(env, {loop: true});
+    const live = video(env, {duration: Infinity});
+    for (let index = 0; index < 70; index++) video(env);
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal(looping.playbackRate, 16);
+    assert.equal(looping.loop, true);
+    assert.equal(live.playbackRate, 1);
+    assert.equal(env.videos[64].playbackRate, 1);
+    assert.equal(env.videos.reduce((sum, item) => sum + item.seeks.length, 0), 0);
+});
+
+test('automatic context removal and source reload restore the original video rate', () => {
+    const env = environment(adConfig);
+    const media = video(env);
+    media.playbackRate = 1.25;
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal(media.playbackRate, 16);
+    env.sandbox.__adspeed.setAdContext(false);
+    assert.equal(media.playbackRate, 1.25);
+    env.emit('loadstart', media);
+    assert.equal(media.playbackRate, 1.25);
+    assert.deepEqual(media.seeks, []);
+});
+
+test('unrecognized content receives no automatic actions, redirects block, or acceleration', () => {
+    const env = environment(adConfig);
+    installClose(env);
+    const node = control(env, 'Tap to play');
+    env.observers[0].callback([]);
+    env.advance(1000);
+    assert.equal(node.events.length, 0);
+    assert.equal(env.sandbox.open('https://example.invalid'), 'opened');
+    assert.equal(env.sandbox.performance.now(), 1000);
+});
+
+test('supported semantic start control receives a single tap while acceleration remains active', () => {
+    const env = environment(adConfig);
+    const closes = installClose(env);
+    const node = control(env, 'Tap to play');
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(1000);
+    assert.deepEqual(node.events.map(event => event.type), ['pointerdown', 'pointerup', 'click']);
+    assert.equal(env.sandbox.__adspeed.stats.interactions, 1);
+    assert.equal(env.sandbox.performance.now(), 16000);
+    assert.equal(closes(), 0);
+});
+
+for (const direction of ['left', 'right', 'up', 'down']) {
+    test('supported swipe ' + direction + ' produces bounded movement without completion calls', () => {
+        const env = environment(adConfig);
+        const closes = installClose(env);
+        const node = control(env, 'Swipe ' + direction);
+        env.sandbox.__adspeed.setAdContext(true);
+        env.advance(200);
+        assert.equal(node.events[0].type, 'pointerdown');
+        assert.equal(node.events.at(-1).type, 'pointerup');
+        assert.equal(node.events.filter(event => event.type === 'pointermove').length, 6);
+        const start = node.events[0];
+        const end = node.events.at(-1);
+        if (direction === 'left') assert.ok(end.clientX < start.clientX);
+        if (direction === 'right') assert.ok(end.clientX > start.clientX);
+        if (direction === 'up') assert.ok(end.clientY < start.clientY);
+        if (direction === 'down') assert.ok(end.clientY > start.clientY);
+        assert.equal(node.events.some(event => event.type === 'click'), false);
+        assert.equal(closes(), 0);
+    });
+}
+
+test('interactive actions wait for MRAID ready and actual viewability', () => {
+    const env = environment(adConfig);
+    installClose(env);
+    let state = 'loading';
+    let viewable = false;
+    env.sandbox.mraid.getState = () => state;
+    env.sandbox.mraid.isViewable = () => viewable;
+    const node = control(env, 'Start game');
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(300);
+    assert.equal(node.events.length, 0);
+    state = 'default';
+    env.advance(300);
+    assert.equal(node.events.length, 0);
+    viewable = true;
+    env.advance(300);
+    assert.equal(node.events.at(-1).type, 'click');
+});
+
+test('unknown canvas, install controls, links, disabled and covered controls remain untouched', () => {
+    const env = environment(adConfig);
+    installClose(env);
+    const controls = [control(env, 'Install'), control(env, 'Play'),
+        control(env, 'Start game', {disabled: true}),
+        control(env, 'Tap to play', {parentElement: {tagName: 'A'}}),
+        control(env, 'Tap to play', {hidden: true})];
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(1000);
+    assert.equal(controls.reduce((sum, node) => sum + node.events.length, 0), 0);
+    const covered = control(env, 'Continue playing');
+    env.document.elementFromPoint = () => ({tagName: 'CANVAS'});
+    env.advance(500);
+    assert.equal(covered.events.length, 0);
+});
+
+test('interaction work is bounded across changing creatives within one ad context', () => {
+    const env = environment(adConfig);
+    installClose(env);
+    for (let index = 0; index < 30; index++) control(env, 'Continue playing');
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(10000);
+    assert.equal(env.sandbox.__adspeed.stats.interactions, 12);
+    assert.equal(env.controls.filter(node => node.events.length).length, 12);
+});
+
+test('leaving ad context cancels an in-progress swipe without a click', () => {
+    const env = environment(adConfig);
+    installClose(env);
+    const node = control(env, 'Swipe left');
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(32);
+    env.sandbox.__adspeed.setAdContext(false);
+    env.advance(100);
+    assert.equal(node.events.at(-1).type, 'pointercancel');
+    assert.equal(node.events.some(event => event.type === 'pointerup' || event.type === 'click'), false);
+});
+
+test('redirect prevention is scoped to an active ad and preserves original receivers and results', () => {
+    const calls = [];
+    const receiver = {owner: true};
+    const env = environment(adConfig, {open(...args) { calls.push({receiver: this, args}); return 'original'; }});
+    installClose(env);
+    const mraid = env.sandbox.mraid;
+    mraid.open = function (...args) { calls.push({receiver: this, args}); return 'mraid'; };
+    assert.equal(env.sandbox.open.call(receiver, 'ordinary'), 'original');
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal(env.sandbox.open('blocked'), null);
+    assert.equal(mraid.open('blocked'), undefined);
+    assert.equal(calls.length, 1);
+    env.sandbox.__adspeed.setAdContext(false);
+    assert.equal(mraid.open('ordinary'), 'mraid');
+    assert.equal(calls[0].receiver, receiver);
+    assert.equal(calls[1].receiver, mraid);
+    assert.equal(env.sandbox.__adspeed.stats.redirectsBlocked, 2);
+});
+
+test('ad context messages require the actual parent and matching session channel', () => {
+    const env = environment(adConfig);
+    const parent = {postMessage() {}};
+    env.sandbox.parent = parent;
+    const media = video(env);
+    message(env, {}, {adSpeedContext: 'session-token', active: true});
+    message(env, parent, {adSpeedContext: 'wrong', active: true});
+    assert.equal(media.playbackRate, 1);
+    message(env, parent, {adSpeedContext: 'session-token', active: true});
+    assert.equal(media.playbackRate, 16);
+    message(env, parent, {adSpeedContext: 'session-token', active: false});
+    assert.equal(media.playbackRate, 1);
+});
+
+test('visible child frames inherit ad context and lose it when covered', () => {
+    const parent = environment(adConfig);
+    const child = environment(adConfig);
+    const media = video(child);
+    connect(parent, child);
+    parent.sandbox.__adspeed.setAdContext(true);
+    assert.equal(media.playbackRate, 16);
+    parent.document.elementFromPoint = () => ({tagName: 'DIV'});
+    parent.observers[0].callback([]);
+    assert.equal(media.playbackRate, 1);
+});
+
+test('visible unknown surfaces recognize only ready viewable interstitial MRAID and honor explicit inactivity', () => {
+    const env = environment(adConfig);
+    const media = video(env);
+    env.sandbox.__adspeed.setAdContext(null);
+    env.advance(250);
+    assert.equal(media.playbackRate, 1);
+    installClose(env);
+    env.sandbox.mraid.getPlacementType = () => 'inline';
+    env.advance(250);
+    assert.equal(media.playbackRate, 1);
+    env.sandbox.mraid.getPlacementType = () => 'interstitial';
+    env.advance(250);
+    assert.equal(media.playbackRate, 16);
+    env.sandbox.__adspeed.setAdContext(false);
+    env.advance(500);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(env.tasks.size, 0);
+});
+
+test('automatic acceleration restores a newer rate chosen by the SDK', () => {
+    const env = environment(adConfig);
+    const media = video(env);
+    env.sandbox.__adspeed.setAdContext(true);
+    media.playbackRate = 2;
+    assert.equal(media.playbackRate, 16);
+    env.sandbox.__adspeed.setAdContext(false);
+    assert.equal(media.playbackRate, 2);
+});
+
+test('a label change on the same playable control permits its next semantic action once', () => {
+    const env = environment(adConfig);
+    installClose(env);
+    const node = control(env, 'Tap to play');
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(100);
+    node.textContent = 'Swipe left';
+    env.observers[0].callback([]);
+    env.advance(200);
+    assert.equal(env.sandbox.__adspeed.stats.interactions, 2);
+    env.advance(1000);
+    assert.equal(env.sandbox.__adspeed.stats.interactions, 2);
+});
+
+test('ordinary pages retain unmodified animation frame timing', () => {
+    const env = environment(adConfig);
+    let timestamp = 0;
+    env.sandbox.requestAnimationFrame(value => timestamp = value);
+    env.advance(16);
+    assert.equal(timestamp, 16);
+});
+
+test('initial nullable context detects a late ready MRAID bridge without native polling', () => {
+    const env = environment({...adConfig, recognizedAd: null});
+    const media = video(env);
+    env.advance(250);
+    assert.equal(media.playbackRate, 1);
+    installClose(env);
+    env.advance(250);
+    assert.equal(media.playbackRate, 16);
+});
+
+test('an old gesture cannot cancel or release a new context gesture', () => {
+    const env = environment(adConfig);
+    installClose(env);
+    const old = control(env, 'Swipe left');
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(32);
+    env.sandbox.__adspeed.setAdContext(false);
+    assert.equal(old.events.at(-1).type, 'pointercancel');
+    old.hidden = true;
+    const next = control(env, 'Swipe right');
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(200);
+    assert.equal(next.events.at(-1).type, 'pointerup');
+    assert.notEqual(old.events[0].pointerId, next.events[0].pointerId);
+    assert.equal(next.events.some(event => event.type === 'pointercancel'), false);
 });

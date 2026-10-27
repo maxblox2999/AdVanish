@@ -1,10 +1,25 @@
 #import "ASPUniversalSkip.h"
 #import "ASPAdSurface.h"
+#import "ASPSpeed.h"
 #import <CoreMedia/CoreMedia.h>
 #import <objc/runtime.h>
 #include <math.h>
 
 static char kStateKey;
+static thread_local BOOL internalRateChange;
+
+float ASPSpeedRate(void) { return 16.0f; }
+BOOL ASPSpeedInternalChange(void) { return internalRateChange; }
+
+void ASPSpeedSetRate(AVPlayer *player, float rate) {
+    BOOL previous = internalRateChange;
+    internalRateChange = YES;
+    @try {
+        player.rate = rate;
+    } @finally {
+        internalRateChange = previous;
+    }
+}
 
 @interface ASPSkipRequest : NSObject
 @property (nonatomic, weak) AVPlayerItem *item;
@@ -15,10 +30,12 @@ static char kStateKey;
 @property (nonatomic) BOOL pending;
 @property (nonatomic) BOOL mayWait;
 @property (nonatomic) NSUInteger attempts;
+@property (nonatomic) NSUInteger speedAttempts;
 @property (nonatomic) NSTimeInterval lastAttempt;
 @property (nonatomic) NSUInteger rateGeneration;
 @property (nonatomic) BOOL manualRateActive;
 @property (nonatomic) float originalRate;
+@property (nonatomic) float appliedRate;
 @property (nonatomic, copy) void (^completion)(NSString *);
 @property (nonatomic, copy) BOOL (^isCurrent)(void);
 @end
@@ -41,17 +58,22 @@ static ASPSkipRequest *stateFor(AVPlayer *player) {
     }
     if (state.item != player.currentItem) {
         state.rateGeneration += 1;
-        if (state.manualRateActive && player.rate > 0 && fabsf(player.rate - 2.0f) <= 0.01f) {
-            player.rate = state.originalRate;
+        if (state.manualRateActive && player.rate > 0 && fabsf(player.rate - state.appliedRate) <= 0.01f) {
+            ASPSpeedSetRate(player, state.originalRate);
         }
         state.manualRateActive = NO;
         state.generation += 1;
         state.attempts = 0;
+        state.speedAttempts = 0;
         state.lastAttempt = 0;
         state.item = player.currentItem;
         finish(state, @"Media changed");
     }
     return state;
+}
+
+void ASPSpeedPrepareRate(AVPlayer *player) {
+    if ([NSThread isMainThread]) stateFor(player);
 }
 
 static BOOL playing(AVPlayer *player) {
@@ -90,11 +112,11 @@ static void releaseManualRate(AVPlayer *player, ASPSkipRequest *state, AVPlayerI
                               NSUInteger generation, float originalRate, NSTimeInterval deadline) {
     if (state.rateGeneration != generation) return;
     if (player.currentItem != item || !playing(player) || !visibleOwner(player, state) ||
-        NSProcessInfo.processInfo.systemUptime >= deadline || fabsf(player.rate - 2.0f) > 0.01f) {
+        NSProcessInfo.processInfo.systemUptime >= deadline || fabsf(player.rate - state.appliedRate) > 0.01f) {
         state.rateGeneration += 1;
         state.manualRateActive = NO;
         // Never resume a player paused by the app or at its natural end.
-        if (player.rate > 0 && fabsf(player.rate - 2.0f) <= 0.01f) player.rate = originalRate;
+        if (player.rate > 0 && fabsf(player.rate - state.appliedRate) <= 0.01f) ASPSpeedSetRate(player, originalRate);
         return;
     }
     __weak AVPlayer *weakPlayer = player;
@@ -103,6 +125,43 @@ static void releaseManualRate(AVPlayer *player, ASPSkipRequest *state, AVPlayerI
         AVPlayer *current = weakPlayer;
         if (current) releaseManualRate(current, state, weakItem, generation, originalRate, deadline);
     });
+}
+
+void ASPSpeedTrackRate(AVPlayer *player, UIView *root, float originalRate, float appliedRate) {
+    if (![NSThread isMainThread] || !root || !isfinite(originalRate) || originalRate <= 0 ||
+        !isfinite(appliedRate) || appliedRate <= 0 || !ASPSurfaceOwnsPlayer(root, player)) return;
+    ASPSkipRequest *state = stateFor(player);
+    if (fabsf(player.rate - appliedRate) > 0.01f) return;
+    state.root = root;
+    state.window = root.window;
+    state.originalRate = originalRate;
+    state.appliedRate = appliedRate;
+    state.manualRateActive = YES;
+    NSUInteger generation = ++state.rateGeneration;
+    double duration = CMTIME_IS_NUMERIC(player.currentItem.duration) ?
+        CMTimeGetSeconds(player.currentItem.duration) : 300;
+    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime +
+        fmin(300.0, fmax(10.0, duration / appliedRate + 10.0));
+    releaseManualRate(player, state, player.currentItem, generation, state.originalRate, deadline);
+}
+
+void ASPSpeedAcceleratePlayer(AVPlayer *player, UIView *root) {
+    if (![NSThread isMainThread] || !playing(player) || !ASPSurfaceOwnsPlayer(root, player)) return;
+    AVPlayerItem *item = player.currentItem;
+    if (item.status != AVPlayerItemStatusReadyToPlay || !videoItem(item) || !finiteVideo(item) ||
+        player.timeControlStatus != AVPlayerTimeControlStatusPlaying || player.rate >= ASPSpeedRate()) return;
+    ASPSkipRequest *state = stateFor(player);
+    if (state.speedAttempts >= 8) return;
+    state.speedAttempts += 1;
+    float original = state.manualRateActive ? state.originalRate : player.rate;
+    ASPSpeedSetRate(player, ASPSpeedRate());
+    if (player.currentItem != item) return;
+    if (fabsf(player.rate - ASPSpeedRate()) <= 0.01f) {
+        state.speedAttempts = 0;
+        ASPSpeedTrackRate(player, root, original, ASPSpeedRate());
+    } else if (player.rate > 0 && player.rate != original) {
+        ASPSpeedSetRate(player, original);
+    }
 }
 
 static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation) {
@@ -139,29 +198,15 @@ static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation)
         });
         return;
     }
-    if (player.rate >= 2.0f) {
-        finish(state, @"Already faster");
+    if (player.rate >= ASPSpeedRate()) {
+        finish(state, @"Already at 16x");
         return;
     }
     state.attempts += 1;
-    state.lastAttempt = [NSProcessInfo processInfo].systemUptime;
-    // Do not seek across SDK progress callbacks or force a video-end transition.
-    float original = player.rate;
-    player.rate = 2.0f;
-    if (player.currentItem != item) {
-        finish(state, @"Media changed");
-    } else if (fabsf(player.rate - 2.0f) <= 0.01f) {
-        state.originalRate = original;
-        state.manualRateActive = YES;
-        NSUInteger rateGeneration = ++state.rateGeneration;
-        NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime +
-            fmin(300.0, CMTimeGetSeconds(item.duration) / 2.0 + 10.0);
-        releaseManualRate(player, state, item, rateGeneration, original, deadline);
-        finish(state, @"Playing at 2x");
-    } else {
-        if (player.rate > 0 && player.rate != original) player.rate = original;
-        finish(state, @"Speed unsupported");
-    }
+    state.lastAttempt = NSProcessInfo.processInfo.systemUptime;
+    state.speedAttempts = 0;
+    ASPSpeedAcceleratePlayer(player, state.root);
+    finish(state, state.manualRateActive ? @"Playing at 16x" : @"Speed unsupported");
 }
 
 NSArray<AVPlayer *> *ASPUniversalSkipCandidates(NSArray<AVPlayer *> *players, UIView *root,

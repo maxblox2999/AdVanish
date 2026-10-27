@@ -1,11 +1,13 @@
-# AdVanish 0.2.2
+# AdVanish 0.3.0
 
-- Restores normal speed when manually accelerated video is hidden, removed or covered.
-- Restores web playback speed on pause without resuming the video.
-- Batches web cleanup after DOM changes; no continuous manual-mode polling.
-- Adds cleanup regressions and prevents stale browser results from being reused.
-- Shorter README, cleaner Settings text and documentation under `docs/`.
+- Shared 16x speed for automatic acceleration and the manual button.
+- Gameplay timing and bounded tap/swipe assistance for supported playable controls.
+- Reward-gated SDK Close actions for supported Google and MAX sessions.
+- SDK Close after real playback-end events for supported Google native-video interstitials.
+- Supported ad redirect blocking; no fabricated reward or completion callbacks.
+- Removed legacy SDK blocking and seek-to-tail modes.
+- Rootless/rootful packages and a self-contained jailed injection framework, with complete source and rebuild instructions.
 
-Rootless and rootful packages, complete source, test runners and checksums are included. Targets iOS 15–18. iOS 26 is experimental with a low chance of working.
+Targets iOS 15–18. iOS 26 is experimental with a low chance of working.
 
-Test build. Actual game rewards still need phone testing.
+Test release. Unknown playables may still need interaction. Real SDKs, game rewards and signed-device injection remain unverified. See [support and limits](https://github.com/maxblox2999/AdVanish/blob/main/docs/SUPPORT.md).

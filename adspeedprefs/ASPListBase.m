@@ -85,21 +85,4 @@ static NSString *const kNotify = @"com.34306-sr.adspeed/reloadPrefs";
     return g;
 }
 
-- (PSSpecifier *)numberFieldNamed:(NSString *)name key:(NSString *)key default:(id)def {
-    PSSpecifier *s = [PSSpecifier preferenceSpecifierNamed:name
-                                                   target:self
-                                                      set:@selector(setPreferenceValue:specifier:)
-                                                      get:@selector(readPreferenceValue:)
-                                                   detail:nil
-                                                     cell:PSEditTextCell
-                                                     edit:nil];
-    [s setProperty:kDomain forKey:@"defaults"];
-    [s setProperty:kNotify forKey:@"PostNotification"];
-    [s setProperty:key forKey:@"key"];
-    [s setProperty:def forKey:@"default"];
-    [s setProperty:@YES forKey:@"isNumeric"];
-    [s setProperty:@(UIKeyboardTypeNumberPad) forKey:@"keyboardType"];
-    return s;
-}
-
 @end

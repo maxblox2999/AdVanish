@@ -9,25 +9,27 @@ const root = __dirname;
 const source = fs.readFileSync(path.join(root, '../../web/adspeed.js'), 'utf8');
 const sourceSha256 = crypto.createHash('sha256').update(source).digest('hex');
 const config = {
-    speedVideo: false,
-    compressTimers: false,
-    accelerateClock: false,
+    rate: 16,
+    recognizedAd: false,
+    autoComplete: true,
+    preventRedirects: true,
+    speedVideo: true,
+    compressTimers: true,
+    accelerateClock: true,
     forceInline: false,
-    autoSkip: false,
-    manualClose: true,
     skipChannel: 'browser-verification-session'
 };
 const engine = source.replace('__ADSPEED_CONFIG__', JSON.stringify(config));
 let portA;
 let portB;
 function html(child, playback) {
-    return `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#eee}video{display:block;width:320px;height:180px}iframe{width:360px;height:210px;border:0}</style><script src="/engine.js?playback=${playback ? 1 : 0}"></script><script>
+    return `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#eee}video{display:block;width:320px;height:180px}iframe{width:360px;height:210px;border:0}</style><script>window.realNow=performance.now.bind(performance);window.realTimeout=setTimeout.bind(window);</script><script src="/engine.js?playback=${playback ? 1 : 0}"></script><script>
     window.fixture = {messages:[],closes:0,errors:[]};
     window.addEventListener('error',e=>fixture.errors.push(String(e.message)));
     window.addEventListener('unhandledrejection',e=>fixture.errors.push(String(e.reason)));
     window.mraid={close(){fixture.closes++},getState(){return 'default'},getPlacementType(){return 'interstitial'},isViewable(){return true}};
-    window.sleep=ms=>new Promise(r=>setTimeout(r,ms));
-    window.until=async (fn,label,ms=6000)=>{const end=performance.now()+ms;while(performance.now()<end){if(fn())return;await sleep(20)}throw Error('Timeout: '+label)};
+    window.sleep=ms=>new Promise(r=>realTimeout(r,ms));
+    window.until=async (fn,label,ms=6000)=>{const end=realNow()+ms;while(realNow()<end){if(fn())return;await sleep(20)}throw Error('Timeout: '+label)};
     window.addVideo=async (loop=false)=>{const v=document.createElement('video');v.muted=true;v.playsInline=true;v.loop=loop;v.src='/fixture.mp4?n='+Math.random();v.preload='auto';v.dataset.seeks='0';v.addEventListener('seeking',()=>{v.dataset.seeks=String(Number(v.dataset.seeks)+1);if(parent!==window)report('seeking')});v.addEventListener('ended',()=>{if(parent!==window)report('ended')});document.body.append(v);await v.play();await until(()=>v.readyState>=3&&Number.isFinite(v.duration)&&v.seekable.length&&!v.paused&&!v.seeking&&v.currentTime>0.1,'video ready');return v};
     window.state=()=>({closes:fixture.closes,videos:Array.from(document.querySelectorAll('video')).map(v=>({ended:v.ended,seeks:Number(v.dataset.seeks),current:v.currentTime,duration:v.duration,loop:v.loop,paused:v.paused,rate:v.playbackRate})),errors:fixture.errors});
     window.report=phase=>parent.postMessage({fixtureReport:true,phase,state:state()},'*');
@@ -41,7 +43,7 @@ function serve(req, res) {
     if (url.pathname === '/engine.js') {
         const script =
             url.searchParams.get('playback') === '1'
-                ? source.replace('__ADSPEED_CONFIG__', JSON.stringify({ ...config, manualPlayback: true }))
+                ? source.replace('__ADSPEED_CONFIG__', JSON.stringify(config))
                 : engine;
         res.writeHead(200, { 'Content-Type': 'text/javascript' });
         res.end(script);
@@ -183,7 +185,7 @@ async function main() {
                 assert.equal(r.valid, true);
                 assert.equal(r.action.handled, 1);
                 assert.equal(r.videos[0].ended, true);
-                assert.equal(r.videos[0].seeks, 1);
+                assert.equal(r.videos[0].seeks, 0);
                 assert.equal(r.closes, 0);
                 assert.equal(r.repeat.handled, 0);
                 assert.deepEqual(r.errors, []);
@@ -208,14 +210,14 @@ async function main() {
     );
     cases.push(
         await runCase(
-            'cross-origin-child-seek-ended',
+            'cross-origin-child-speed-ended',
             `const f=await addFrame(true);const inspection=await __adspeed.inspectAsync();const valid=await __adspeed.validateAsync(inspection.token);const action=await __adspeed.skipAsync(inspection.token);await until(()=>fixture.messages.some(m=>m.source===f.contentWindow&&m.phase==='ended'),'child ended',3000);return {inspection,valid,action,child:fixture.messages.filter(m=>m.source===f.contentWindow).at(-1).state,...state()};`,
             (r) => {
                 assert.equal(r.inspection.count, 1);
                 assert.equal(r.valid, true);
                 assert.equal(r.action.handled, 1);
                 assert.equal(r.child.videos[0].ended, true);
-                assert.equal(r.child.videos[0].seeks, 1);
+                assert.equal(r.child.videos[0].seeks, 0);
                 assert.equal(r.child.closes, 0);
                 assert.equal(r.closes, 0);
             }
@@ -228,7 +230,7 @@ async function main() {
             (r) => {
                 assert.equal(r.inspection.count, 1);
                 assert.equal(r.action.handled, 1);
-                assert.equal(r.videoChild.videos[0].seeks, 1);
+                assert.equal(r.videoChild.videos[0].seeks, 0);
                 assert.equal(r.emptyChild.closes, 0);
                 assert.equal(r.closes, 0);
             }
@@ -269,19 +271,7 @@ async function main() {
                     r.actions.reduce((n, a) => n + a.handled, 0),
                     1
                 );
-                assert.equal(r.videos[0].seeks, 1);
-                assert.equal(r.closes, 0);
-            }
-        )
-    );
-    cases.push(
-        await runCase(
-            'loop-video-natural-ended',
-            `const v=await addVideo(true);const inspection=await __adspeed.inspectAsync();const action=await __adspeed.skipAsync(inspection.token);await until(()=>v.ended,'loop disabled ended',3000);return {inspection,action,...state()};`,
-            (r) => {
-                assert.equal(r.action.handled, 1);
-                assert.equal(r.videos[0].loop, false);
-                assert.equal(r.videos[0].ended, true);
+                assert.equal(r.videos[0].seeks, 0);
                 assert.equal(r.closes, 0);
             }
         )
@@ -342,39 +332,6 @@ async function main() {
     );
     cases.push(
         await runCase(
-            'ignored-seek-restores-loop',
-            `
-        const v = await addVideo(true);
-        const before = v.currentTime;
-        Object.defineProperty(v, 'currentTime', {
-            configurable: true,
-            get() { return before; },
-            set(value) {}
-        });
-        const action = await __adspeed.skipAsync();
-        const rejected = {action, loop: v.loop, skipped: __adspeed.stats.skipped,
-            failures: __adspeed.stats.seekFailures};
-        delete v.currentTime;
-        const retry = await __adspeed.skipAsync();
-        await until(() => v.ended, 'retry naturally ended', 3000);
-        return {rejected, retry, ...state()};
-    `,
-            (result) => {
-                assert.equal(result.rejected.action.handled, 0);
-                assert.equal(result.rejected.action.unresolved, 1);
-                assert.equal(result.rejected.loop, true);
-                assert.equal(result.rejected.skipped, 0);
-                assert.equal(result.rejected.failures, 1);
-                assert.equal(result.retry.handled, 1);
-                assert.equal(result.videos[0].ended, true);
-                assert.equal(result.videos[0].seeks, 1);
-                assert.equal(result.closes, 0);
-                assert.deepEqual(result.errors, []);
-            }
-        )
-    );
-    cases.push(
-        await runCase(
             'production-manual-playback-without-seek',
             `
         const v = await addVideo();
@@ -389,11 +346,11 @@ async function main() {
     `,
             (result) => {
                 assert.equal(result.action.handled, 1);
-                assert.equal(result.requested.rate, 2);
+                assert.equal(result.requested.rate, 16);
                 assert.ok(result.requested.time < result.requested.before + 0.25);
                 assert.equal(result.videos[0].seeks, 0);
                 assert.equal(result.videos[0].ended, true);
-                assert.equal(result.videos[0].rate, 2);
+                assert.equal(result.videos[0].rate, 16);
                 assert.equal(result.closes, 0);
                 assert.deepEqual(result.errors, []);
             },
@@ -416,7 +373,7 @@ async function main() {
                 assert.equal(result.action.handled, 1);
                 assert.equal(result.child.videos[0].seeks, 0);
                 assert.equal(result.child.videos[0].ended, true);
-                assert.equal(result.child.videos[0].rate, 2);
+                assert.equal(result.child.videos[0].rate, 16);
                 assert.equal(result.child.closes, 0);
                 assert.deepEqual(result.child.errors, []);
             },
@@ -491,6 +448,142 @@ async function main() {
             )
         );
     }
+    cases.push(await runCase('recognized-video-16x-timers-natural-completion', `
+        const v = await addVideo();
+        const started = realNow();
+        const virtualStarted = performance.now();
+        let timerFinished = false;
+        __adspeed.setAdContext(true);
+        setTimeout(() => timerFinished = true, 4000);
+        const requestedRate = v.playbackRate;
+        const manual = await __adspeed.skipAsync();
+        await until(() => v.ended && timerFinished, 'actual video and timer completion', 4000);
+        const elapsed = realNow() - started;
+        const virtualElapsed = performance.now() - virtualStarted;
+        __adspeed.setAdContext(false);
+        return {requestedRate, manual, elapsed, virtualElapsed, timerFinished, ...state()};
+    `, result => {
+        assert.equal(result.requestedRate, 16);
+        assert.equal(result.manual.handled, 1);
+        assert.equal(result.videos[0].ended, true);
+        assert.equal(result.videos[0].seeks, 0);
+        assert.equal(result.timerFinished, true);
+        assert.ok(result.elapsed < 4000);
+        assert.ok(result.virtualElapsed > result.elapsed * 10);
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }));
+    cases.push(await runCase('mraid-semantic-tap-swipe-playable-progression', `
+        let redirectCalls = 0;
+        let rewardCalls = 0;
+        let complete = false;
+        let movements = 0;
+        let startX = 0;
+        mraid.open = () => redirectCalls++;
+        window.gameEnd = () => rewardCalls++;
+        const started = realNow();
+        function button(label) {
+            const node = document.createElement('button');
+            node.textContent = label;
+            node.style.cssText = 'display:block;position:fixed;left:20px;top:40px;width:300px;height:300px';
+            document.body.append(node);
+            return node;
+        }
+        const start = button('Tap to play');
+        start.addEventListener('click', () => {
+            start.remove();
+            const swipe = button('Swipe left');
+            swipe.addEventListener('pointerdown', event => startX = event.clientX);
+            swipe.addEventListener('pointermove', () => movements++);
+            swipe.addEventListener('pointerup', event => {
+                if (event.clientX >= startX - 50 || movements !== 6) return;
+                swipe.remove();
+                const next = button('Continue playing');
+                next.addEventListener('click', () => {
+                    next.remove();
+                    mraid.open('https://apps.apple.com/app/id0');
+                    window.open('https://apps.apple.com/app/id0');
+                    setTimeout(() => complete = true, 4000);
+                });
+            });
+        });
+        await sleep(100);
+        const unrecognizedActions = __adspeed.stats.interactions;
+        __adspeed.setAdContext(true);
+        await until(() => complete, 'playable actual input and timer completion', 5000);
+        return {unrecognizedActions, complete, movements, redirectCalls, rewardCalls,
+            elapsed: realNow() - started, stats: {...__adspeed.stats}, ...state()};
+    `, result => {
+        assert.equal(result.unrecognizedActions, 0);
+        assert.equal(result.complete, true);
+        assert.equal(result.movements, 6);
+        assert.equal(result.stats.interactions, 3);
+        assert.equal(result.stats.redirectsBlocked, 2);
+        assert.equal(result.redirectCalls, 0);
+        assert.equal(result.rewardCalls, 0);
+        assert.equal(result.closes, 0);
+        assert.ok(result.elapsed < 5000);
+        assert.deepEqual(result.errors, []);
+    }));
+    cases.push(await runCase('unknown-canvas-and-install-actions-abstain', `
+        document.body.innerHTML = '<canvas width="320" height="320"></canvas><button>Install</button><button>Play</button>';
+        let inputs = 0;
+        document.addEventListener('click', () => inputs++);
+        document.addEventListener('pointerdown', () => inputs++);
+        __adspeed.setAdContext(true);
+        await sleep(700);
+        return {inputs, stats: {...__adspeed.stats}, ...state()};
+    `, result => {
+        assert.equal(result.inputs, 0);
+        assert.equal(result.stats.interactions, 0);
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }));
+    cases.push(await runCase('16x-animation-clock-and-native-cancellation', `
+        __adspeed.setAdContext(true);
+        let canceled = false;
+        const handle = requestAnimationFrame(() => canceled = true);
+        cancelAnimationFrame(handle);
+        const frames = [];
+        await new Promise(resolve => {
+            requestAnimationFrame(first => {
+                const real = realNow();
+                requestAnimationFrame(second => {
+                    frames.push({delta: second - first, realDelta: realNow() - real});
+                    resolve();
+                });
+            });
+        });
+        __adspeed.setAdContext(false);
+        return {canceled, frames, ...state()};
+    `, result => {
+        assert.equal(result.canceled, false);
+        assert.ok(result.frames[0].delta > result.frames[0].realDelta * 8);
+        assert.ok(result.frames[0].delta < result.frames[0].realDelta * 24);
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }));
+    cases.push(await runCase('interactive-context-loss-cancels-swipe', `
+        const node = document.createElement('button');
+        node.textContent = 'Swipe right';
+        node.style.cssText = 'width:300px;height:300px';
+        const events = [];
+        for (const type of ['pointerdown','pointermove','pointerup','pointercancel','click']) {
+            node.addEventListener(type, () => events.push(type));
+        }
+        document.body.append(node);
+        __adspeed.setAdContext(true);
+        await sleep(40);
+        __adspeed.setAdContext(false);
+        await sleep(150);
+        return {events, ...state()};
+    `, result => {
+        assert.equal(result.events[0], 'pointerdown');
+        assert.equal(result.events.at(-1), 'pointercancel');
+        assert.equal(result.events.includes('pointerup'), false);
+        assert.equal(result.events.includes('click'), false);
+        assert.deepEqual(result.errors, []);
+    }));
     const report = {
         sourceSha256,
         browser: version,

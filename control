@@ -1,12 +1,12 @@
 Package: com.maxblox2999.advanish
 Name: AdVanish
-Version: 0.2.2
+Version: 0.3.0
 Architecture: iphoneos-arm
 Depends: firmware (>= 15.0), ellekit | mobilesubstrate, preferenceloader
 Conflicts: com.34306-sr.adspeed, com.34306.adspeed, com.soulrune.adspeed
 Replaces: com.34306-sr.adspeed, com.34306.adspeed, com.soulrune.adspeed
 Provides: com.34306-sr.adspeed
-Description: Manual 2x ad playback with per-app controls.
+Description: 16x ad playback with manual and automatic controls.
 Maintainer: maxblox2999
 Author: 34306, SoulRune, maxblox2999
 Section: Tweaks

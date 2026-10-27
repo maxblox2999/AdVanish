@@ -2,7 +2,7 @@
 
 # AdVanish
 
-Manual ad fast-forwarding for jailbroken iOS.
+16x ad fast-forwarding for iOS.
 
 [![Build](https://github.com/maxblox2999/AdVanish/actions/workflows/build.yml/badge.svg)](https://github.com/maxblox2999/AdVanish/actions)
 [![Test release](https://img.shields.io/github/v/release/maxblox2999/AdVanish?include_prereleases&style=flat-square&color=8957e5)](https://github.com/maxblox2999/AdVanish/releases)
@@ -14,15 +14,19 @@ Manual ad fast-forwarding for jailbroken iOS.
 
 ## Use
 
-Enable an app in **Settings → AdVanish**, reopen it and press **Fast-forward ad**. Drag the button to move it.
+**Jailbreak:** install the rootless or rootful package, enable an app in **Settings → AdVanish** and reopen it.
 
-Requests **2× playback**. The app still controls its countdown, Close button and rewards. Press only during an ad; ordinary video can also be accelerated.
+**Jailed:** inject the framework into an authorized decrypted IPA, then re-sign it. [Instructions](BUILD.md#ipa-injection).
+
+Detected ads use **16x video and gameplay timing**. The floating **Fast-forward ad** button uses the same system. Drag it to move it; press only during an ad.
+
+Supported playable controls receive automatic input. Closing waits for supported SDK completion signals. Rewards and server validation stay with the app.
 
 ## Support
 
-Rootless and rootful. Targets **iOS 15–18**, arm64 and arm64e. **iOS 26 is experimental, with a low chance of working.**
+Rootless, rootful and jailed injection. Targets **iOS 15–18**. **iOS 26 is experimental, with a low chance of working.**
 
-Test release. Real-game rewards are not yet verified.
+Test release. Unknown playables may still need input. Real-game rewards and signed-device injection are not yet verified. [Support](docs/SUPPORT.md) · [Tests](docs/VALIDATION.md).
 
 ---
 

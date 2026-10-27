@@ -9,7 +9,7 @@ FOR_RELEASE = 1
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = advanish
-advanish_FILES = Tweak.xm ASPUniversalSkip.mm ASPManualSkip.mm ASPAdSurface.mm
+advanish_FILES = Tweak.xm ASPUniversalSkip.mm ASPManualSkip.mm ASPAdSurface.mm ASPAdCompletion.mm
 advanish_CFLAGS = -fobjc-arc
 advanish_CCFLAGS = -std=c++11 -fno-rtti -fno-exceptions -DNDEBUG
 advanish_FRAMEWORKS = UIKit QuartzCore CoreGraphics AVFoundation CoreMedia WebKit
@@ -17,3 +17,7 @@ SUBPROJECTS = adspeedprefs
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/aggregate.mk
+
+.PHONY: jailed
+jailed:
+	python3 scripts/build-jailed.py

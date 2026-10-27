@@ -10,5 +10,4 @@
 - (PSSpecifier *)switchSpecifierNamed:(NSString *)name key:(NSString *)key default:(BOOL)def;
 - (PSSpecifier *)subSwitchNamed:(NSString *)name key:(NSString *)key default:(BOOL)def;
 - (PSSpecifier *)groupNamed:(NSString *)name footer:(NSString *)footer;
-- (PSSpecifier *)numberFieldNamed:(NSString *)name key:(NSString *)key default:(id)def;
 @end
