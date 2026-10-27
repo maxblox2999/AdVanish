@@ -1272,3 +1272,50 @@ test('production playback abstains on ambiguous videos or a stale token', async 
     assert.deepEqual(first.seeks, []);
     assert.deepEqual(second.seeks, []);
 });
+
+test('hidden or detached manually accelerated videos release their original rate', async () => {
+    for (const change of [media => { media.hidden = true; }, media => { media.isConnected = false; }]) {
+        const env = environment(playbackConfig);
+        const media = video(env);
+        assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+        change(media);
+        env.observers[0].callback([]);
+        env.advance(300);
+        assert.equal(media.playbackRate, 1);
+        assert.deepEqual(media.seeks, []);
+    }
+});
+
+test('covering foreground content releases an earlier manual acceleration', async () => {
+    const env = environment(playbackConfig);
+    const media = video(env);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    env.document.elementFromPoint = () => ({contains() { return false; }});
+    env.observers[0].callback([]);
+    env.advance(300);
+    assert.equal(media.playbackRate, 1);
+    assert.deepEqual(media.seeks, []);
+});
+
+test('manual cleanup batches mutations and does not poll when nothing changed', async () => {
+    const env = environment(playbackConfig);
+    const media = video(env);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    for (let i = 0; i < 100; i += 1) env.observers[0].callback([]);
+    assert.equal(env.tasks.size, 1);
+    env.advance(300);
+    assert.equal(env.tasks.size, 0);
+    assert.equal(media.playbackRate, 2);
+    assert.equal(env.observers[0].settings.attributes, true);
+});
+
+test('pausing manually accelerated web playback restores speed without resuming it', async () => {
+    const env = environment(playbackConfig);
+    const media = video(env);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    media.paused = true;
+    env.emit('pause', media);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(media.paused, true);
+    assert.deepEqual(media.seeks, []);
+});

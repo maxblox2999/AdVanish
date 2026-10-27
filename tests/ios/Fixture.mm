@@ -6,6 +6,7 @@
 
 static NSMutableArray<NSString *> *checks;
 static BOOL finished;
+static __weak UIWindow *fixtureOverlay;
 
 static void result(NSString *failure) {
     if (finished) return;
@@ -104,13 +105,44 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 @end
 
 static UIButton *skipButton(void) {
-    for (UIWindow *window in UIApplication.sharedApplication.windows) {
-        if (![window isKindOfClass:NSClassFromString(@"ASPSkipWindow")] || window.hidden) continue;
-        for (UIView *view in window.rootViewController.view.subviews) {
-            if ([view isKindOfClass:UIButton.class]) return (UIButton *)view;
-        }
+    if (fixtureOverlay.hidden) return nil;
+    for (UIView *view in fixtureOverlay.rootViewController.view.subviews) {
+        if ([view isKindOfClass:UIButton.class]) return (UIButton *)view;
     }
     return nil;
+}
+
+static void testCompletion(ALBaseVideoViewController *owner, UIButton *button, NSTimeInterval deadline) {
+    waitUntil(^BOOL { return owner.ended; }, deadline, ^{
+        if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) >= 11.95 && owner.avPlayer.rate == 0,
+                   @"Faster playback reaches a real player end event")) return;
+        waitUntil(^BOOL { return [button.currentTitle isEqualToString:@"Fast-forward ad"]; }, deadline, ^{
+            [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+            if (!check(owner.closes == 0 && owner.rewardPending,
+                       @"Completed video cannot activate SDK Close while its reward is pending")) return;
+            if (!check([button.currentTitle isEqualToString:@"No eligible video"],
+                       @"A second press reports an ended video without closing it")) return;
+            [owner.closeButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+            if (!check(owner.closes == 1, @"The app's own Close control remains functional")) return;
+            result(nil);
+        });
+    });
+}
+
+static void testReplacement(ALBaseVideoViewController *owner, UIButton *button, NSTimeInterval deadline) {
+    AVPlayerItem *replacement = [AVPlayerItem playerItemWithAsset:owner.avPlayer.currentItem.asset];
+    owner.currentAd = [NSObject new];
+    [owner.avPlayer replaceCurrentItemWithPlayerItem:replacement];
+    [owner.avPlayer playImmediatelyAtRate:2];
+    waitUntil(^BOOL {
+        return owner.avPlayer.rate == 1 && [button.currentTitle isEqualToString:@"Fast-forward ad"];
+    }, deadline, ^{
+        if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) < 4,
+                   @"Replacing a creative releases its prior manual rate")) return;
+        [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+        if (!check(owner.avPlayer.rate == 2, @"A new creative accepts a separate manual request")) return;
+        testCompletion(owner, button, deadline);
+    });
 }
 
 static void runFixture(ALBaseVideoViewController *owner) {
@@ -140,32 +172,15 @@ static void runFixture(ALBaseVideoViewController *owner) {
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
         if (!check(owner.avPlayer.rate == 2 && CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 0.5,
                    @"Manual action requests 2x playback without a time jump")) return;
-        AVPlayerItem *replacement = [AVPlayerItem playerItemWithAsset:owner.avPlayer.currentItem.asset];
-        owner.currentAd = [NSObject new];
-        [owner.avPlayer replaceCurrentItemWithPlayerItem:replacement];
-        [owner.avPlayer playImmediatelyAtRate:2];
+        owner.videoPlayer.videoView.hidden = YES;
         waitUntil(^BOOL {
             return owner.avPlayer.rate == 1 && [button.currentTitle isEqualToString:@"Fast-forward ad"];
         }, deadline, ^{
-            if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) < 4,
-                       @"Replacing a creative releases its prior manual rate")) return;
+            if (!check(owner.avPlayer.rate == 1, @"Hiding the video releases its manual rate")) return;
+            owner.videoPlayer.videoView.hidden = NO;
             [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-            if (!check(owner.avPlayer.rate == 2, @"A new creative accepts a separate manual request")) return;
-            waitUntil(^BOOL { return owner.ended; }, deadline, ^{
-                if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) >= 11.95 && owner.avPlayer.rate == 0,
-                           @"Faster playback reaches a real player end event")) return;
-                waitUntil(^BOOL { return [button.currentTitle isEqualToString:@"Fast-forward ad"]; }, deadline, ^{
-                    [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-                    if (!check(owner.closes == 0 && owner.rewardPending,
-                               @"Completed video cannot activate SDK Close while its reward is pending")) return;
-                    if (!check([button.currentTitle isEqualToString:@"No eligible video"],
-                               @"A second press reports an ended video without closing it")) return;
-                    // The normal SDK/app remains free to close on its own.
-                    [owner.closeButton sendActionsForControlEvents:UIControlEventTouchUpInside];
-                    if (!check(owner.closes == 1, @"The app's own Close control remains functional")) return;
-                    result(nil);
-                });
-            });
+            if (!check(owner.avPlayer.rate == 2, @"Visible playback accepts a new manual request")) return;
+            testReplacement(owner, button, deadline);
         });
     });
 }
@@ -176,6 +191,10 @@ static void runFixture(ALBaseVideoViewController *owner) {
 @implementation FixtureDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     checks = [NSMutableArray array];
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIWindowDidBecomeVisibleNotification
+        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *notification) {
+        if ([notification.object isKindOfClass:NSClassFromString(@"ASPSkipWindow")]) fixtureOverlay = notification.object;
+    }];
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     ALBaseVideoViewController *owner = [ALBaseVideoViewController new];
     self.window.rootViewController = owner;

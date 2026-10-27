@@ -34,7 +34,7 @@ def main(video, output):
     if not types:
         raise RuntimeError("No compatible iPhone simulator type")
     device = run("xcrun", "simctl", "create", "AdVanish fixture", types[-1]["identifier"], runtime["identifier"])
-    booted = False;
+    booted = False
     try:
         with tempfile.TemporaryDirectory(prefix="advanish-ios-") as directory:
             app = Path(directory) / "AdVanishFixture.app"

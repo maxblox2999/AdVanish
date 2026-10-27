@@ -31,23 +31,20 @@
         [specs addObject:[self groupNamed:nil
                                    footer:@"Settings for this app only. They apply next time the app is launched."]];
         [specs addObject:[self switchSpecifierNamed:@"Enabled" key:enableKey default:NO]];
-        [specs addObject:[self groupNamed:@"Manual skipping"
-                                   footer:@"Shows a Fast-forward ad button. Pressing requests 2x video playback "
-                                          @"without jumping to the end. SDK countdowns stay unchanged. "
-                                          @"Wait for the app's reward or countdown and use its own Close button."]];
-        [specs addObject:[self disable:[self switchSpecifierNamed:@"Show skip button" key:[self k:@"ManualSkip"] default:YES] when:!enabled]];
+        [specs addObject:[self groupNamed:@"Manual playback"
+                                   footer:@"Press Fast-forward ad for 2x playback. Countdown, Close and reward "
+                                          @"rules stay with the app."]];
+        [specs addObject:[self disable:[self switchSpecifierNamed:@"Show fast-forward button" key:[self k:@"ManualSkip"] default:YES] when:!enabled]];
         [specs addObject:[self groupNamed:@"Legacy blocking"
-                                   footer:@"Uses the older SDK list and can prevent rewarded ads from loading. "
-                                          @"Turn off the skip button to use legacy blocking or acceleration."]];
+                                   footer:@"Can prevent rewarded ads from loading. Available with the manual button off."]];
         [specs addObject:[self disable:[self switchSpecifierNamed:@"Block ads by SDK" key:[self k:@"BlockAds"] default:NO] when:speedOff]];
         [specs addObject:[self disable:[self switchSpecifierNamed:@"Bypass ads jailbreak detection" key:[self k:@"BypassJailbreak"] default:YES] when:!enabled]];
 
         [specs addObject:[self groupNamed:@"Fast-forward ads"
                                    footer:!enabled ? @"Enable this app first."
                                    : manual ? @"Automatic acceleration is off while the manual skip button is enabled."
-                                   : @"Accelerates video automatically. “Force inline video” helps "
-                                     @"stuck fullscreen video but can break some ads (e.g. AppLovin) — leave it off "
-                                     @"unless a video won't speed up. “Include native video” also speeds in-game cutscenes."]];
+                                   : @"Automatic video acceleration. Force inline can break ads. "
+                                     @"Include native video also speeds in-game cutscenes."]];
         [specs addObject:[self disable:[self switchSpecifierNamed:@"Fast-forward ads" key:[self k:@"SpeedUpVideo"] default:YES] when:speedOff]];
         if (speedOn) {
             [specs addObject:[self disable:[self subSwitchNamed:@"Force inline video" key:[self k:@"ForceInline"] default:NO] when:speedOff]];
@@ -56,18 +53,15 @@
 
         // Independent of Fast-forward: speeds the countdown even when the video can't be sped.
         [specs addObject:[self groupNamed:@"Ad countdowns"
-                                   footer:@"Speeds the countdown to the close/reward — works on its own, without "
-                                          @"video fast-forward. For timer-gated playables, or video ads whose "
-                                          @"picture won't speed up. “Accelerate clock” also speeds wall-clock "
-                                          @"timers. It pauses while a video is on screen to avoid freezing it."]];
+                                   footer:@"Speeds web ad timers. Accelerate clock also changes wall-clock timing. "
+                                          @"With video acceleration enabled, both pause while video plays."]];
         [specs addObject:[self disable:[self switchSpecifierNamed:@"Rush web countdowns" key:[self k:@"CompressTimers"] default:NO] when:speedOff]];
         if (timersOn) {
             [specs addObject:[self disable:[self subSwitchNamed:@"Accelerate clock" key:[self k:@"AccelerateClock"] default:NO] when:speedOff]];
         }
 
         [specs addObject:[self groupNamed:@"Speed"
-                                   footer:@"How many times faster (default 8). If a reward stops counting, "
-                                          @"lower it to 3–4 — high speeds can skip the ad's completion event."]];
+                                   footer:@"Automatic playback multiplier: 1-16, default 8. Higher speeds can break rewards."]];
         [specs addObject:[self disable:[self numberFieldNamed:@"Multiplier" key:[self k:@"VideoRate"] default:@(8)] when:speedOff]];
 
         _specifiers = [specs copy];

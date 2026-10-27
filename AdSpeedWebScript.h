@@ -31,6 +31,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
     var nativePerformanceNow = nativePerformance && nativePerformance.now;
     var states = new WeakMap();
     var manuallyAccelerated = new Set();
+    var manualCleanupHandle = null;
     var pollHandle = null;
     var refreshing = false;
     var fast = false;
@@ -313,6 +314,20 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
         }
     }
 
+    function queueManualCleanup() {
+        if (!manuallyAccelerated.size || manualCleanupHandle !== null || pageHidden()) return;
+        manualCleanupHandle = nativeTimeout.call(window, function () {
+            manualCleanupHandle = null;
+            manuallyAccelerated.forEach(function (video) {
+                try {
+                    if (!visible(video) || !exposed(video)) restoreManualRate(video);
+                } catch (error) {
+                    stats.mediaFailures += 1;
+                }
+            });
+        }, 250);
+    }
+
     function scan(shouldSkip, explicit) {
         if (refreshing || pageHidden()) {
             if (pageHidden()) {
@@ -385,6 +400,10 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
     function visibilityChanged() {
         if (pageHidden()) {
             manuallyAccelerated.forEach(restoreManualRate);
+            if (manualCleanupHandle !== null) {
+                nativeClearTimeout.call(window, manualCleanupHandle);
+                manualCleanupHandle = null;
+            }
             changeMode(false);
             if (pollHandle !== null && typeof nativeClearTimeout === 'function') {
                 nativeClearTimeout.call(window, pollHandle);
@@ -827,6 +846,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
         document.addEventListener('loadstart', sourceChanged, true);
         document.addEventListener('emptied', sourceChanged, true);
         document.addEventListener('ended', function (event) { restoreManualRate(event.target); }, true);
+        document.addEventListener('pause', function (event) { restoreManualRate(event.target); }, true);
         document.addEventListener('play', function (event) {
             var state = states.get(event.target);
             if (state && state.manualEnded) restoreManualRate(event.target);
@@ -834,8 +854,16 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS((function () {
         document.addEventListener('visibilitychange', visibilityChanged, false);
     }
     if (typeof window.MutationObserver === 'function') {
-        var observer = new window.MutationObserver(refresh);
-        observer.observe(document, {childList: true, subtree: true});
+        var observer = new window.MutationObserver(function () {
+            refresh();
+            queueManualCleanup();
+        });
+        var observed = {childList: true, subtree: true};
+        if (manualPlayback) {
+            observed.attributes = true;
+            observed.attributeFilter = ['hidden', 'style', 'class'];
+        }
+        observer.observe(document, observed);
     }
     refresh();
     schedulePoll();

@@ -61,8 +61,7 @@
         NSMutableArray *specs = [NSMutableArray array];
 
         [specs addObject:[self groupNamed:@"AdVanish"
-                                   footer:@"Tap an app to configure it. Enabled apps are highlighted and listed on "
-                                          @"top. Changes apply next time the app is launched."]];
+                                   footer:@"Choose which apps use AdVanish. Reopen an app after changing its settings."]];
         [specs addObject:[self switchSpecifierNamed:@"Enabled (master)" key:@"Enabled" default:YES]];
 
         NSMutableArray *on = [NSMutableArray array], *off = [NSMutableArray array];

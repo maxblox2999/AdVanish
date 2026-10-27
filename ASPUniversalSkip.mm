@@ -74,20 +74,22 @@ static BOOL finiteVideo(AVPlayerItem *item) {
     return YES;
 }
 
-static BOOL stillOwned(AVPlayer *player, ASPSkipRequest *state) {
+static BOOL visibleOwner(AVPlayer *player, ASPSkipRequest *state) {
     UIView *root = state.root;
     UIWindow *window = state.window;
     return root && window && root.window == window && !window.hidden &&
-        state.isCurrent && state.isCurrent() &&
         (!window.windowScene || window.windowScene.activationState == UISceneActivationStateForegroundActive) &&
         ASPSurfaceOwnsPlayer(root, player);
+}
+
+static BOOL stillOwned(AVPlayer *player, ASPSkipRequest *state) {
+    return state.isCurrent && state.isCurrent() && visibleOwner(player, state);
 }
 
 static void releaseManualRate(AVPlayer *player, ASPSkipRequest *state, AVPlayerItem *item,
                               NSUInteger generation, float originalRate, NSTimeInterval deadline) {
     if (state.rateGeneration != generation) return;
-    if (player.currentItem != item || !playing(player) || !state.root.window ||
-        !ASPViewVisibleInSurface(state.root, state.root) ||
+    if (player.currentItem != item || !playing(player) || !visibleOwner(player, state) ||
         NSProcessInfo.processInfo.systemUptime >= deadline || fabsf(player.rate - 2.0f) > 0.01f) {
         state.rateGeneration += 1;
         state.manualRateActive = NO;
