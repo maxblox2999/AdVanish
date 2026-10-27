@@ -1,14 +1,5 @@
-// Ads Speed - rewritten 2.1
-//
-// Two ways to ship this:
-//   1) As a .deb  -> injected into every UIKit app via the filter (adspeed.plist),
-//                    then gated at runtime per-app from the Settings panel.
-//   2) Statically injected into a single .ipa (e.g. TrollFools). For that build,
-//      compile with -DADSPEED_FORCE_ON so it is always active and ignores prefs.
-//
-// Manual skipping uses AVPlayer and HTML video interfaces inside enabled apps.
-// It does not depend on an ad SDK's class names. The older SDK blocking and
-// context-based acceleration remain separate options.
+// AdVanish. See NOTICE.md for upstream attribution.
+// ADSPEED_FORCE_ON enables standalone injection without per-app preferences.
 
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
@@ -26,7 +17,7 @@
 #pragma mark - Preferences
 
 static NSString *const kKeyMaster     = @"Enabled";        // master on/off, default YES
-static NSString *const kKeyBlockAds   = @"BlockAds";       // SDK ad blocking, default YES
+static NSString *const kKeyBlockAds   = @"BlockAds";       // legacy SDK blocking, default NO
 static NSString *const kKeySpeedVideo = @"SpeedUpVideo";   // speed up ad video, default YES
 static NSString *const kKeyVideoRate  = @"VideoRate";      // playback multiplier, default 8.0
 static NSString *const kKeyWebTimers  = @"CompressTimers"; // compress JS setTimeout/setInterval, default NO
