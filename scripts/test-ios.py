@@ -4,6 +4,7 @@ import platform
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -17,7 +18,7 @@ def run(*command, timeout=120):
     return subprocess.check_output(command, text=True, timeout=timeout).strip()
 
 
-def main(video, output):
+def main(video, output, injected=False):
     sdk = run("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
     devices = json.loads(run("xcrun", "simctl", "list", "-j"))
     runtimes = [item for item in devices["runtimes"]
@@ -57,7 +58,13 @@ def main(video, output):
             shutil.copyfile(video, app / "fixture.mp4")
             command = ["xcrun", "--sdk", "iphonesimulator", "clang++", "-fobjc-arc", "-fblocks", "-std=c++11",
                        "-isysroot", sdk, "-target", platform.machine() + "-apple-ios15.0-simulator", "-I", str(ROOT)]
-            command += [str(ROOT / name) for name in ["tests/ios/Fixture.mm", "ASPManualSkip.mm", "ASPAdSurface.mm", "ASPUniversalSkip.mm"]]
+            if injected:
+                frameworks = app / "Frameworks"
+                subprocess.run([sys.executable, str(ROOT / "scripts/build-jailed.py"), "--simulator", "--output", str(frameworks)], check=True, timeout=300)
+                command += [str(ROOT / "tests/ios/InjectedFixture.mm"), "-F", str(frameworks), "-framework", "AdVanish",
+                            "-Wl,-rpath,@executable_path/Frameworks"]
+            else:
+                command += [str(ROOT / name) for name in ["tests/ios/Fixture.mm", "ASPManualSkip.mm", "ASPAdSurface.mm", "ASPUniversalSkip.mm", "ASPAdCompletion.mm"]]
             for framework in ["Foundation", "UIKit", "AVFoundation", "CoreMedia", "QuartzCore", "CoreGraphics", "WebKit"]:
                 command += ["-framework", framework]
             command += ["-o", str(app / "AdVanishFixture")]
@@ -69,15 +76,29 @@ def main(video, output):
             run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
             run("xcrun", "simctl", "install", device, str(app))
             container = Path(run("xcrun", "simctl", "get_app_container", device, BUNDLE, "data"))
-            run("xcrun", "simctl", "launch", device, BUNDLE)
             report_path = container / "Documents/result.json"
-            deadline = time.monotonic() + 45
-            while not report_path.exists() and time.monotonic() < deadline:
-                time.sleep(0.25)
+            with tempfile.TemporaryFile(mode="w+t") as launch_log:
+                launcher = subprocess.Popen(["xcrun", "simctl", "launch", device, BUNDLE], stdout=launch_log, stderr=subprocess.STDOUT, text=True)
+                try:
+                    deadline = time.monotonic() + 90
+                    while not report_path.exists() and time.monotonic() < deadline:
+                        if launcher.poll() not in (None, 0):
+                            launch_log.seek(0)
+                            raise RuntimeError("Simulator launch failed: " + launch_log.read())
+                        time.sleep(0.25)
+                finally:
+                    if launcher.poll() is None:
+                        launcher.terminate()
+                        try:
+                            launcher.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            launcher.kill()
+                            launcher.wait(timeout=10)
             if not report_path.exists():
                 raise RuntimeError("Native fixture did not write a result")
             report = json.loads(report_path.read_text())
             report["runtime"] = runtime["version"]
+            report["injected_framework"] = injected
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(json.dumps(report, indent=2) + "\n")
             print(json.dumps(report))
@@ -95,5 +116,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--video", required=True, type=Path)
     parser.add_argument("--output", type=Path, default=ROOT / "dist/ios-simulator.json")
+    parser.add_argument("--injected", action="store_true")
     args = parser.parse_args()
-    main(args.video, args.output)
+    main(args.video, args.output, args.injected)

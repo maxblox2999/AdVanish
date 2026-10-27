@@ -12,13 +12,15 @@
     var requestedRate = configuration && configuration.rate;
     var rate = typeof requestedRate === 'number' && isFinite(requestedRate)
         ? Math.max(1, Math.min(16, requestedRate))
-        : 8;
+        : 16;
     var speedVideo = !!(configuration && configuration.speedVideo);
     var compressTimers = !!(configuration && configuration.compressTimers);
     var accelerateClock = !!(configuration && configuration.accelerateClock);
     var forceInline = !!(configuration && configuration.forceInline);
-    var autoSkip = !!(configuration && configuration.autoSkip);
-    var manualPlayback = !!(configuration && configuration.manualPlayback);
+    var recognizedAd = !!(configuration && configuration.recognizedAd);
+    var contextPolicy = configuration && configuration.recognizedAd === null ? null : recognizedAd;
+    var autoComplete = !!(configuration && configuration.autoComplete);
+    var preventRedirects = !!(configuration && configuration.preventRedirects);
     var skipChannel = configuration && configuration.skipChannel;
     var nativeTimeout = window.setTimeout;
     var nativeInterval = window.setInterval;
@@ -41,13 +43,12 @@
         scans: 0,
         rateChanges: 0,
         rateFailures: 0,
-        skipAttempts: 0,
-        skipped: 0,
-        seekFailures: 0,
+        manualRequests: 0,
+        interactions: 0,
+        interactionFailures: 0,
+        redirectsBlocked: 0,
         mediaFailures: 0,
         clockFailures: 0,
-        closeRequests: 0,
-        closeFailures: 0,
         frameRequests: 0
     };
 
@@ -164,7 +165,7 @@
         var state = states.get(video);
         if (!state || state.source !== source) {
             if (state) restoreManualRate(video);
-            state = {source: source, attempted: false, manualAttempts: 0, rateAttempts: 0, rateFailed: false};
+            state = {source: source, manualAttempts: 0, rateAttempts: 0, rateFailed: false};
             states.set(video, state);
         }
         return state;
@@ -180,10 +181,18 @@
         if (Math.abs(video.playbackRate - rate) < 0.001) {
             return;
         }
+        manuallyAccelerated.forEach(function (existing) {
+            if (existing.isConnected === false) restoreManualRate(existing);
+        });
+        if (!manuallyAccelerated.has(video) && manuallyAccelerated.size >= maximumVideos) return;
         state.rateAttempts += 1;
+        var original = video.playbackRate;
         try {
             video.playbackRate = rate;
             if (Math.abs(video.playbackRate - rate) < 0.001) {
+                if (!manuallyAccelerated.has(video) || original !== state.manualRate) state.originalRate = original;
+                state.manualRate = rate;
+                manuallyAccelerated.add(video);
                 stats.rateChanges += 1;
             } else {
                 state.rateFailed = true;
@@ -192,63 +201,6 @@
         } catch (error) {
             state.rateFailed = true;
             stats.rateFailures += 1;
-        }
-    }
-
-    function skipVideo(video, state, explicit) {
-        if ((!explicit && state.attempted) || (explicit && state.manualAttempts >= 3)) {
-            return false;
-        }
-        var duration = video.duration;
-        var current = video.currentTime;
-        if (typeof duration !== 'number' || !isFinite(duration) || duration <= 0
-            || typeof current !== 'number' || !isFinite(current) || current < 0) {
-            return false;
-        }
-        var target = duration - Math.min(0.25, duration / 10);
-        if (target <= current + 0.05) {
-            return false;
-        }
-        var ranges = video.seekable;
-        var seekable = false;
-        var count = ranges ? Math.min(ranges.length, 32) : 0;
-        for (var index = 0; index < count; index += 1) {
-            if (ranges.start(index) <= target && ranges.end(index) >= target) {
-                seekable = true;
-                break;
-            }
-        }
-        if (!seekable) {
-            return false;
-        }
-        var looping = video.loop === true;
-        if (looping && !explicit) return false;
-        state.attempted = true;
-        if (explicit) state.manualAttempts += 1;
-        stats.skipAttempts += 1;
-        try {
-            if (looping) {
-                video.loop = false;
-                if (video.loop) throw new Error('Loop cannot be disabled');
-            }
-            video.currentTime = target;
-            var position = video.currentTime;
-            if (!video.seeking && (typeof position !== 'number' || !isFinite(position)
-                || Math.abs(position - target) > 0.05)) {
-                throw new Error('Seek was not accepted');
-            }
-            stats.skipped += 1;
-            return true;
-        } catch (error) {
-            if (looping) {
-                try {
-                    video.loop = true;
-                } catch (restoreError) {
-                    stats.mediaFailures += 1;
-                }
-            }
-            stats.seekFailures += 1;
-            return false;
         }
     }
 
@@ -272,7 +224,6 @@
     }
 
     function manualEligible(video) {
-        if (!manualPlayback) return seekableTarget(video) !== null;
         return playing(video) && !video.loop && typeof video.duration === 'number'
             && isFinite(video.duration) && video.duration > 0
             && typeof video.currentTime === 'number' && isFinite(video.currentTime)
@@ -282,22 +233,22 @@
 
     function manualAction(video) {
         var state = mediaState(video);
-        if (!manualPlayback) return skipVideo(video, state, true);
         if (!manualEligible(video) || state.manualAttempts >= 3) return false;
-        if (video.playbackRate >= 2) return true;
+        if (video.playbackRate >= rate) return true;
         manuallyAccelerated.forEach(function (existing) {
             if (existing.isConnected === false) restoreManualRate(existing);
         });
         if (!manuallyAccelerated.has(video) && manuallyAccelerated.size >= maximumVideos) return false;
         var original = video.playbackRate;
         state.manualAttempts += 1;
+        stats.manualRequests += 1;
         try {
-            video.playbackRate = 2;
-            if (Math.abs(video.playbackRate - 2) > 0.001 || !isFinite(video.playbackRate)) {
+            video.playbackRate = rate;
+            if (Math.abs(video.playbackRate - rate) > 0.001 || !isFinite(video.playbackRate)) {
                 throw new Error('Playback rate was not accepted');
             }
             if (!manuallyAccelerated.has(video) || original !== state.manualRate) state.originalRate = original;
-            state.manualRate = 2;
+            state.manualRate = rate;
             manuallyAccelerated.add(video);
             stats.rateChanges += 1;
             return true;
@@ -326,7 +277,7 @@
         }, 250);
     }
 
-    function scan(shouldSkip, explicit) {
+    function scan() {
         if (refreshing || pageHidden()) {
             if (pageHidden()) {
                 changeMode(false);
@@ -334,8 +285,7 @@
             return 0;
         }
         refreshing = true;
-        var hasVideo = false;
-        var skipped = 0;
+
         try {
             var videos = typeof document.getElementsByTagName === 'function'
                 ? document.getElementsByTagName('video')
@@ -345,12 +295,11 @@
             for (var index = 0; index < count; index += 1) {
                 var video = videos[index];
                 try {
-                    if (!playing(video)) {
+                    if (!playing(video) || !exposed(video)) {
                         continue;
                     }
-                    hasVideo = true;
                     var state = mediaState(video);
-                    if (forceInline) {
+                    if (recognizedAd && forceInline) {
                         if (!video.hasAttribute('playsinline')) {
                             video.setAttribute('playsinline', '');
                         }
@@ -359,28 +308,27 @@
                         }
                         video.playsInline = true;
                     }
-                    applyRate(video, state);
-                    if (shouldSkip && skipVideo(video, state, explicit)) {
-                        skipped += 1;
-                    }
+                    if (recognizedAd) applyRate(video, state);
                 } catch (error) {
                     stats.mediaFailures += 1;
                 }
             }
-            changeMode(!(speedVideo && hasVideo));
+            changeMode(recognizedAd);
         } finally {
             refreshing = false;
         }
-        return skipped;
     }
 
     function refresh() {
-        if (speedVideo || compressTimers || accelerateClock || autoSkip) scan(autoSkip);
+        if (contextPolicy === null) changeAdContext(recognizedMraid());
+        if (speedVideo || compressTimers || accelerateClock || autoComplete) scan();
+        if (recognizedAd) interact();
+        syncFrames();
     }
 
     function schedulePoll() {
         if (pollHandle !== null || pageHidden() || typeof nativeTimeout !== 'function'
-            || !(speedVideo || compressTimers || accelerateClock || autoSkip)) {
+            || !((recognizedAd || contextPolicy === null) && (speedVideo || compressTimers || accelerateClock || autoComplete))) {
             return;
         }
         pollHandle = nativeTimeout.call(window, function () {
@@ -500,6 +448,236 @@
         }
     }
 
+
+    var frameContexts = new WeakMap();
+    var interacted = new WeakMap();
+    var interactionCount = 0;
+    var interactionBusy = false;
+    var cancelInteraction = null;
+    var gestureSequence = 0;
+    var contextGeneration = 0;
+    var wrappedMraid = new WeakSet();
+
+    function syncFrames() {
+        if (typeof skipChannel !== 'string' || !skipChannel.length) return;
+        var nodes = document.querySelectorAll('iframe,frame');
+        for (var index = 0; index < Math.min(nodes.length, 64); index += 1) {
+            var node = nodes[index];
+            var child = node.contentWindow;
+            var visibleFrame = !pageHidden() && visible(node) && exposed(node);
+            var active = visibleFrame && contextPolicy === null ? null : recognizedAd && visibleFrame;
+            if (!child || frameContexts.get(child) === active) continue;
+            try {
+                child.postMessage({adSpeedContext: skipChannel, active: active}, '*');
+                frameContexts.set(child, active);
+            } catch (error) {
+                stats.mediaFailures += 1;
+            }
+        }
+    }
+
+    function changeAdContext(active) {
+        if (recognizedAd !== active) {
+            if (cancelInteraction) cancelInteraction();
+            recognizedAd = active;
+            contextGeneration += 1;
+            interacted = new WeakMap();
+            interactionCount = 0;
+            interactionBusy = false;
+            if (!active) {
+                manuallyAccelerated.forEach(restoreManualRate);
+                if (pollHandle !== null) nativeClearTimeout.call(window, pollHandle);
+                pollHandle = null;
+            }
+        }
+    }
+
+    function setAdContext(active) {
+        if (active !== null && typeof active !== 'boolean') return false;
+        contextPolicy = active;
+        changeAdContext(active === null ? recognizedMraid() : active);
+        refresh();
+        schedulePoll();
+        return true;
+    }
+
+    function blockRedirect() {
+        if (!recognizedAd || !preventRedirects) return false;
+        stats.redirectsBlocked += 1;
+        return true;
+    }
+
+    if (typeof window.open === 'function') {
+        var nativeOpen = window.open;
+        window.open = function () {
+            if (blockRedirect()) return null;
+            return nativeOpen.apply(this, arguments);
+        };
+    }
+
+    function readyMraid() {
+        var mraid = window.mraid;
+        if (!mraid || typeof mraid.getState !== 'function' || typeof mraid.isViewable !== 'function') return false;
+        try {
+            if (recognizedAd && preventRedirects && !wrappedMraid.has(mraid) && typeof mraid.open === 'function') {
+                var originalOpen = mraid.open;
+                var guardedOpen = function () {
+                    if (blockRedirect()) return;
+                    return originalOpen.apply(this, arguments);
+                };
+                try {
+                    mraid.open = guardedOpen;
+                    if (mraid.open === guardedOpen) wrappedMraid.add(mraid);
+                } catch (error) {
+                    stats.interactionFailures += 1;
+                }
+            }
+            var state = mraid.getState();
+            return (state === 'default' || state === 'expanded' || state === 'resized')
+                && mraid.isViewable() === true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function recognizedMraid() {
+        try {
+            return readyMraid() && typeof window.mraid.getPlacementType === 'function'
+                && window.mraid.getPlacementType() === 'interstitial';
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function controlAction(node) {
+        if (!node || node.disabled || (node.getAttribute && node.getAttribute('aria-disabled') === 'true')) return null;
+        var parent = node;
+        for (var depth = 0; parent && depth < 16; depth += 1) {
+            if (String(parent.tagName).toLowerCase() === 'a') return null;
+            parent = parent.parentElement;
+        }
+        var label = String(node.getAttribute && node.getAttribute('aria-label') || node.textContent || '')
+            .trim().toLowerCase().replace(/\s+/g, ' ');
+        if (label === 'tap to play' || label === 'start game' || label === 'continue playing') return 'tap';
+        return /^swipe (left|right|up|down)$/.test(label) ? label.slice(6) : null;
+    }
+
+    function dispatchInput(node, type, x, y, down, gesture) {
+        var options = {bubbles: true, cancelable: true, clientX: x, clientY: y,
+            button: 0, buttons: down ? 1 : 0, pointerId: gesture, pointerType: 'touch', isPrimary: true};
+        var pointer = typeof window.PointerEvent === 'function';
+        if (pointer) {
+            node.dispatchEvent(new window.PointerEvent(type, options));
+        }
+        if (typeof window.Touch === 'function' && typeof window.TouchEvent === 'function') {
+            var touch = new window.Touch({identifier: gesture, target: node, clientX: x, clientY: y,
+                pageX: x, pageY: y, screenX: x, screenY: y});
+            var touchType = {pointerdown: 'touchstart', pointermove: 'touchmove',
+                pointerup: 'touchend', pointercancel: 'touchcancel'}[type];
+            node.dispatchEvent(new window.TouchEvent(touchType, {bubbles: true, cancelable: true,
+                touches: down ? [touch] : [], targetTouches: down ? [touch] : [], changedTouches: [touch]}));
+            return;
+        }
+        if (!pointer && typeof window.MouseEvent === 'function') {
+            var mouseType = {pointerdown: 'mousedown', pointermove: 'mousemove',
+                pointerup: 'mouseup', pointercancel: 'mouseleave'}[type];
+            node.dispatchEvent(new window.MouseEvent(mouseType, options));
+        }
+    }
+
+    function performInteraction(node, action) {
+        var rect = node.getBoundingClientRect();
+        var startX = rect.left + rect.width / 2;
+        var startY = rect.top + rect.height / 2;
+        var deltaX = action === 'left' ? -rect.width / 3 : action === 'right' ? rect.width / 3 : 0;
+        var deltaY = action === 'up' ? -rect.height / 3 : action === 'down' ? rect.height / 3 : 0;
+        var started = contextGeneration;
+        var gesture = ++gestureSequence;
+        var canceled = false;
+        var step = 0;
+        interactionBusy = true;
+        function cancel() {
+            canceled = true;
+            try {
+                dispatchInput(node, 'pointercancel', startX, startY, false, gesture);
+            } catch (error) {
+                stats.interactionFailures += 1;
+            }
+            if (cancelInteraction === cancel) {
+                cancelInteraction = null;
+                interactionBusy = false;
+            }
+        }
+        cancelInteraction = cancel;
+        dispatchInput(node, 'pointerdown', startX, startY, true, gesture);
+        function finish() {
+            try {
+                if (canceled) return;
+                if (started !== contextGeneration || !recognizedAd || pageHidden() || !visible(node)
+                    || !exposed(node) || !readyMraid()) {
+                    cancel();
+                    return;
+                }
+                step += 1;
+                if (action !== 'tap' && step <= 6) {
+                    dispatchInput(node, 'pointermove', startX + deltaX * step / 6,
+                        startY + deltaY * step / 6, true, gesture);
+                    nativeTimeout.call(window, finish, 16);
+                    return;
+                }
+                dispatchInput(node, 'pointerup', startX + deltaX, startY + deltaY, false, gesture);
+                if (action === 'tap' && typeof window.MouseEvent === 'function') {
+                    node.dispatchEvent(new window.MouseEvent('click', {bubbles: true, cancelable: true,
+                        clientX: startX, clientY: startY, button: 0, detail: 1}));
+                }
+                if (cancelInteraction === cancel) {
+                    cancelInteraction = null;
+                    interactionBusy = false;
+                }
+                stats.interactions += 1;
+            } catch (error) {
+                cancel();
+                stats.interactionFailures += 1;
+            }
+        }
+        nativeTimeout.call(window, finish, 16);
+    }
+
+    function interact() {
+        readyMraid();
+        if (!autoComplete || !recognizedAd || pageHidden() || interactionBusy || interactionCount >= 12 || !readyMraid()) return;
+        var controls = document.querySelectorAll('button,[role="button"],[aria-label]');
+        for (var index = 0; index < Math.min(controls.length, 128); index += 1) {
+            var node = controls[index];
+            var action = controlAction(node);
+            if (!action || interacted.get(node) === action || !visible(node) || !exposed(node)) continue;
+            interacted.set(node, action);
+            interactionCount += 1;
+            try {
+                performInteraction(node, action);
+            } catch (error) {
+                interactionBusy = false;
+                stats.interactionFailures += 1;
+            }
+            break;
+        }
+    }
+
+    if (accelerateClock && typeof window.requestAnimationFrame === 'function' && performanceClock) {
+        var nativeAnimationFrame = window.requestAnimationFrame;
+        try {
+            window.requestAnimationFrame = function (callback) {
+                if (typeof callback !== 'function') return nativeAnimationFrame.apply(this, arguments);
+                return nativeAnimationFrame.call(this, function () {
+                    if (pageHidden()) changeMode(false);
+                    callback.call(window, advance(performanceClock));
+                });
+            };
+        } catch (error) {
+            stats.clockFailures += 1;
+        }
+    }
+
     var requestSequence = 0;
     var requestPrefix = String(dateNow()) + ':' + String(Math.floor(Math.random() * 0x100000000)) + ':';
     var generation = 0;
@@ -553,22 +731,6 @@
             result.unresolved = window.frames && window.frames.length ? 1 : 0;
         }
         return result;
-    }
-
-    function seekableTarget(video) {
-        if (!playing(video)) return null;
-        var duration = video.duration;
-        var current = video.currentTime;
-        if (typeof duration !== 'number' || !isFinite(duration) || duration <= 0
-            || typeof current !== 'number' || !isFinite(current) || current < 0) return null;
-        var target = duration - Math.min(0.25, duration / 10);
-        if (target <= current + 0.05) return null;
-        var ranges = video.seekable;
-        var count = ranges ? Math.min(ranges.length, 32) : 0;
-        for (var index = 0; index < count; index += 1) {
-            if (ranges.start(index) <= target && ranges.end(index) >= target) return target;
-        }
-        return null;
     }
 
     function capture() {
@@ -753,7 +915,8 @@
     }
 
     var api = Object.freeze({
-        version: 3,
+        version: 4,
+        setAdContext: setAdContext,
         skip: requestSkip,
         inspectAsync: function () { return inspect(0); },
         validateAsync: function (token) { return validate(token, 0); },
@@ -784,6 +947,22 @@
     if (typeof window.addEventListener === 'function' && typeof skipChannel === 'string' && skipChannel.length) {
         window.addEventListener('message', function (event) {
             var data = event.data;
+            if (data && data.adSpeedContextRequest === skipChannel) {
+                var nodes = document.querySelectorAll('iframe,frame');
+                for (var index = 0; index < Math.min(nodes.length, 64); index += 1) {
+                    var frame = nodes[index];
+                    if (frame.contentWindow !== event.source) continue;
+                    frameContexts.delete(event.source);
+                    syncFrames();
+                    return;
+                }
+                return;
+            }
+            if (event.source === window.parent && event.source !== window && data
+                && data.adSpeedContext === skipChannel && (data.active === null || typeof data.active === 'boolean')) {
+                setAdContext(data.active);
+                return;
+            }
             if (!data) return;
             var record = pendingMessages.get(data.id);
             if (record && data.adSpeedReply === skipChannel && record.source === event.source
@@ -826,6 +1005,13 @@
                 replyToParent(parent, data, result);
             });
         }, false);
+        if (window.parent !== window) {
+            try {
+                window.parent.postMessage({adSpeedContextRequest: skipChannel}, '*');
+            } catch (error) {
+                stats.mediaFailures += 1;
+            }
+        }
     }
 
     if (typeof document.addEventListener === 'function') {
@@ -857,10 +1043,8 @@
             queueManualCleanup();
         });
         var observed = {childList: true, subtree: true};
-        if (manualPlayback) {
-            observed.attributes = true;
-            observed.attributeFilter = ['hidden', 'style', 'class'];
-        }
+        observed.attributes = true;
+        observed.attributeFilter = ['hidden', 'style', 'class', 'aria-label', 'disabled'];
         observer.observe(document, observed);
     }
     refresh();

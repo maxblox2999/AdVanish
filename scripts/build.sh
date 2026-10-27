@@ -8,7 +8,11 @@ variant="${1:-rootless}"
 case "$variant" in
     rootless) scheme=rootless; architecture=iphoneos-arm64 ;;
     rootful) scheme=; architecture=iphoneos-arm ;;
-    *) printf 'Usage: bash scripts/build.sh rootless|rootful\n' >&2; exit 2 ;;
+    jailed)
+        node scripts/embed-web.cjs
+        exec python3 scripts/build-jailed.py
+        ;;
+    *) printf 'Usage: bash scripts/build.sh rootless|rootful|jailed\n' >&2; exit 2 ;;
 esac
 : "${THEOS:?Set THEOS to the directory printed by scripts/setup-theos.sh}"
 make_command="${MAKE:-make}"

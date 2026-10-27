@@ -20,7 +20,8 @@ jobs:
           node --test tests/web.test.cjs
           git diff --exit-code -- AdSpeedWebScript.h
           bash -n scripts/setup-theos.sh scripts/build.sh
-          python3 -m py_compile scripts/verify-package.py scripts/test-ios.py
+          python3 -m py_compile scripts/*.py
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Archive complete source
         run: |
           mkdir -p dist/source "$RUNNER_TEMP/source-id"
@@ -42,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [rootless, rootful]
+        variant: [rootless, rootful, jailed]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install build tools
@@ -58,6 +59,9 @@ jobs:
       - name: Exercise native skipping and pending reward protection in iOS Simulator
         if: matrix.variant == 'rootless'
         run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --output dist/rootless/ios-simulator.json
+      - name: Exercise injected initialization and production hooks in iOS Simulator
+        if: matrix.variant == 'jailed'
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --output dist/jailed/ios-injected.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: advanish-${{ matrix.variant }}-${{ github.sha }}

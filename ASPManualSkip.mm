@@ -62,15 +62,40 @@ static ASPAdSurface *currentSurface(UIWindowScene *scene) {
 }
 
 BOOL ASPManualSkipIsAdPlayer(AVPlayer *player) {
-    if (![NSThread isMainThread]) return NO;
-    for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-        if (![scene isKindOfClass:[UIWindowScene class]] ||
+    return ASPManualSkipSurfaceForPlayer(player, YES) != nil;
+}
+
+static NSArray<ASPAdSurface *> *activeSurfaces(BOOL recognizedOnly) {
+    NSMutableArray<ASPAdSurface *> *surfaces = [NSMutableArray array];
+    if (![NSThread isMainThread] || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return surfaces;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class] ||
             scene.activationState != UISceneActivationStateForegroundActive) continue;
-        ASPAdSurface *surface = ASPFindAdSurface(contentWindows((UIWindowScene *)scene), YES);
-        if (surface && !surface.incomplete && ASPSurfaceOwnsPlayer(surface.root, player)) return YES;
+        ASPAdSurface *surface = ASPFindAdSurface(contentWindows((UIWindowScene *)scene), recognizedOnly);
+        if (surface && !surface.incomplete) [surfaces addObject:surface];
     }
-    ASPAdSurface *legacy = ASPFindAdSurface(contentWindows(nil), YES);
-    return legacy && !legacy.incomplete && ASPSurfaceOwnsPlayer(legacy.root, player);
+    ASPAdSurface *legacy = ASPFindAdSurface(contentWindows(nil), recognizedOnly);
+    if (legacy && !legacy.incomplete) [surfaces addObject:legacy];
+    return surfaces;
+}
+
+NSArray<ASPAdSurface *> *ASPManualSkipAdSurfaces(void) {
+    return activeSurfaces(YES);
+}
+
+ASPAdSurface *ASPManualSkipSurfaceForPlayer(AVPlayer *player, BOOL recognizedOnly) {
+    if (![NSThread isMainThread]) return nil;
+    for (ASPAdSurface *surface in activeSurfaces(recognizedOnly)) {
+        if (ASPSurfaceOwnsPlayer(surface.root, player)) return surface;
+    }
+    return nil;
+}
+
+BOOL ASPManualSkipIsAdWebView(WKWebView *view) {
+    for (ASPAdSurface *surface in ASPManualSkipAdSurfaces()) {
+        if ([surface.webViews containsObject:view]) return YES;
+    }
+    return NO;
 }
 
 @interface ASPWebSnapshot : NSObject

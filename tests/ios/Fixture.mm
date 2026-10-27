@@ -3,6 +3,8 @@
 #import <QuartzCore/QuartzCore.h>
 #import "ASPAdSurface.h"
 #import "ASPManualSkip.h"
+#import "ASPAdCompletion.h"
+#import "ASPSpeed.h"
 
 static NSMutableArray<NSString *> *checks;
 static BOOL finished;
@@ -60,6 +62,12 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 @implementation FixtureVideoOwner
 @end
 
+@interface MARewardedAd : NSObject
+@property (nonatomic, weak) id delegate;
+@end
+@implementation MARewardedAd
+@end
+
 // Only the ownership getters and completion flag are mocked. AVPlayer, views,
 // window discovery and the floating button run the production implementation.
 @interface ALBaseVideoViewController : UIViewController
@@ -69,6 +77,9 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 @property (nonatomic) NSUInteger closes;
 @property (nonatomic) BOOL ended;
 @property (nonatomic) BOOL rewardPending;
+@property (nonatomic) NSUInteger rewardEvents;
+@property (nonatomic) NSUInteger displayEvents;
+@property (nonatomic, strong) id rewardAd;
 - (AVPlayer *)avPlayer;
 - (BOOL)isVideoFullyWatched;
 @end
@@ -82,7 +93,17 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
     FixtureVideoView *video = [[FixtureVideoView alloc] initWithFrame:self.view.bounds];
     video.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     NSURL *url = [[NSBundle mainBundle] URLForResource:@"fixture" withExtension:@"mp4"];
-    video.player = [AVPlayer playerWithURL:url];
+    AVAsset *source = [AVAsset assetWithURL:url];
+    AVMutableComposition *composition = [AVMutableComposition composition];
+    for (AVAssetTrack *track in [source tracksWithMediaType:AVMediaTypeVideo]) {
+        AVMutableCompositionTrack *target = [composition addMutableTrackWithMediaType:AVMediaTypeVideo
+            preferredTrackID:kCMPersistentTrackID_Invalid];
+        for (NSUInteger repeat = 0; repeat < 8; repeat++) {
+            [target insertTimeRange:CMTimeRangeMake(kCMTimeZero, source.duration) ofTrack:track
+                atTime:CMTimeMultiply(source.duration, (int32_t)repeat) error:nil];
+        }
+    }
+    video.player = [AVPlayer playerWithPlayerItem:[AVPlayerItem playerItemWithAsset:composition]];
     video.player.muted = YES;
     self.videoPlayer.videoView = video;
     [self.view addSubview:video];
@@ -102,7 +123,90 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 - (AVPlayer *)avPlayer { return self.videoPlayer.videoView.player; }
 - (BOOL)isVideoFullyWatched { return self.ended; }
 - (void)closeAd { self.closes += 1; }
+- (void)didDisplayAd:(id)ad { self.displayEvents += 1; }
+- (void)didRewardUserForAd:(id)ad withReward:(id)reward {
+    self.rewardEvents += 1;
+    self.rewardPending = NO;
+}
 @end
+
+@interface GADFullScreenAdViewController : ALBaseVideoViewController
+@end
+@implementation GADFullScreenAdViewController
+@end
+
+@interface GADInterstitialAd : NSObject
+@property (nonatomic, strong) GADFullScreenAdViewController *controller;
+@property (nonatomic) NSUInteger presentations;
+- (void)presentFromRootViewController:(UIViewController *)presenter;
+@end
+@implementation GADInterstitialAd
+- (void)presentFromRootViewController:(UIViewController *)presenter {
+    self.presentations += 1;
+    self.controller = [GADFullScreenAdViewController new];
+    [presenter addChildViewController:self.controller];
+    self.controller.view.frame = presenter.view.bounds;
+    [presenter.view addSubview:self.controller.view];
+    [self.controller didMoveToParentViewController:presenter];
+    NSURL *url = [NSBundle.mainBundle URLForResource:@"fixture" withExtension:@"mp4"];
+    [self.controller.avPlayer replaceCurrentItemWithPlayerItem:[AVPlayerItem playerItemWithURL:url]];
+}
+@end
+
+static void runOrdinaryCase(UIViewController *presenter, NSUInteger kind, NSTimeInterval deadline) {
+    GADInterstitialAd *ad = [GADInterstitialAd new];
+    [ad presentFromRootViewController:presenter];
+    [ad.controller.avPlayer play];
+    waitUntil(^BOOL { return ad.controller.avPlayer.timeControlStatus == AVPlayerTimeControlStatusPlaying; }, deadline, ^{
+        ASPAdCompletionTrackController(ad.controller);
+        if (!check(ad.presentations == 1 && ad.controller.closes == 0,
+                   @"An available ordinary-ad Close stays untouched before playback completes")) return;
+        if (kind == 0) {
+            WKWebView *interactive = [[WKWebView alloc] initWithFrame:CGRectMake(0, 200, 100, 100)];
+            [ad.controller.view addSubview:interactive];
+        } else if (kind == 1) {
+            FixtureVideoView *additional = [[FixtureVideoView alloc] initWithFrame:CGRectMake(0, 200, 100, 100)];
+            additional.player = [AVPlayer playerWithPlayerItem:[AVPlayerItem playerItemWithAsset:ad.controller.avPlayer.currentItem.asset]];
+            [ad.controller.view addSubview:additional];
+        }
+        ASPAdCompletionTrackController(ad.controller);
+        ASPSpeedAcceleratePlayer(ad.controller.avPlayer, ad.controller.view);
+        waitUntil(^BOOL { return ad.controller.ended; }, deadline, ^{
+            if (kind < 2) {
+                NSString *name = kind == 0 ? @"A mixed web phase prevents ordinary-video auto-dismissal" :
+                    @"A newly admitted native player prevents ordinary-video auto-dismissal";
+                if (!check(ad.controller.closes == 0, name)) return;
+                [ad.controller.view removeFromSuperview];
+                [ad.controller removeFromParentViewController];
+                runOrdinaryCase(presenter, kind + 1, deadline);
+                return;
+            }
+            if (!check(ad.controller.closes == 1 && ad.controller.avPlayer.rate == 0,
+                       @"A real ordinary-ad video end activates the eligible SDK Close")) return;
+            ASPAdCompletionTrackController(ad.controller);
+            if (!check(ad.controller.closes == 1, @"Ordinary-ad completion cannot dismiss twice")) return;
+            result(nil);
+        });
+    });
+}
+
+static void testOrdinaryInterstitial(UIViewController *presenter) {
+    GADInterstitialAd *staleAd = [GADInterstitialAd new];
+    [staleAd presentFromRootViewController:presenter];
+    [staleAd.controller.avPlayer play];
+    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 8;
+    waitUntil(^BOOL { return staleAd.controller.avPlayer.currentItem.status == AVPlayerItemStatusReadyToPlay; }, deadline, ^{
+        ASPAdCompletionTrackController(staleAd.controller);
+        AVPlayerItem *oldItem = staleAd.controller.avPlayer.currentItem;
+        AVPlayerItem *replacement = [AVPlayerItem playerItemWithAsset:oldItem.asset];
+        [staleAd.controller.avPlayer replaceCurrentItemWithPlayerItem:replacement];
+        [NSNotificationCenter.defaultCenter postNotificationName:AVPlayerItemDidPlayToEndTimeNotification object:oldItem];
+        if (!check(staleAd.controller.closes == 0, @"A stale item end cannot dismiss an ordinary interstitial")) return;
+        [staleAd.controller.view removeFromSuperview];
+        [staleAd.controller removeFromParentViewController];
+        runOrdinaryCase(presenter, 0, deadline);
+    });
+}
 
 static UIButton *skipButton(void) {
     if (fixtureOverlay.hidden) return nil;
@@ -114,7 +218,7 @@ static UIButton *skipButton(void) {
 
 static void testCompletion(ALBaseVideoViewController *owner, UIButton *button, NSTimeInterval deadline) {
     waitUntil(^BOOL { return owner.ended; }, deadline, ^{
-        if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) >= 11.95 && owner.avPlayer.rate == 0,
+        if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) >= CMTimeGetSeconds(owner.avPlayer.currentItem.duration) - 0.05 && owner.avPlayer.rate == 0,
                    @"Faster playback reaches a real player end event")) return;
         waitUntil(^BOOL { return [button.currentTitle isEqualToString:@"Fast-forward ad"]; }, deadline, ^{
             [button sendActionsForControlEvents:UIControlEventTouchUpInside];
@@ -122,16 +226,31 @@ static void testCompletion(ALBaseVideoViewController *owner, UIButton *button, N
                        @"Completed video cannot activate SDK Close while its reward is pending")) return;
             if (!check([button.currentTitle isEqualToString:@"No eligible video"],
                        @"A second press reports an ended video without closing it")) return;
+            [owner didRewardUserForAd:[NSObject new] withReward:[NSObject new]];
+            if (!check(owner.closes == 0, @"An unrelated reward cannot close the current ad")) return;
+            owner.rewardPending = YES;
+            [owner didRewardUserForAd:owner.rewardAd withReward:[NSObject new]];
+            if (!check(owner.rewardEvents == 3 && owner.closes == 1 && !owner.rewardPending,
+                       @"The genuine matching reward is forwarded and activates SDK Close once")) return;
+            ASPAdCompletionTrackController(owner);
+            if (!check(owner.closes == 1, @"Repeated completion polling cannot duplicate dismissal")) return;
             [owner.closeButton sendActionsForControlEvents:UIControlEventTouchUpInside];
-            if (!check(owner.closes == 1, @"The app's own Close control remains functional")) return;
-            result(nil);
+            if (!check(owner.closes == 2, @"The app's own Close control remains functional")) return;
+            testOrdinaryInterstitial(owner);
         });
     });
 }
 
 static void testReplacement(ALBaseVideoViewController *owner, UIButton *button, NSTimeInterval deadline) {
     AVPlayerItem *replacement = [AVPlayerItem playerItemWithAsset:owner.avPlayer.currentItem.asset];
+    id previousAd = owner.rewardAd;
     owner.currentAd = [NSObject new];
+    owner.rewardAd = owner.currentAd;
+    [owner didDisplayAd:previousAd];
+    [owner didRewardUserForAd:previousAd withReward:[NSObject new]];
+    if (!check(owner.closes == 0, @"A delayed old display and reward cannot close a new creative")) return;
+    owner.rewardPending = YES;
+    [owner didDisplayAd:owner.rewardAd];
     [owner.avPlayer replaceCurrentItemWithPlayerItem:replacement];
     [owner.avPlayer playImmediatelyAtRate:2];
     waitUntil(^BOOL {
@@ -140,7 +259,7 @@ static void testReplacement(ALBaseVideoViewController *owner, UIButton *button, 
         if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) < 4,
                    @"Replacing a creative releases its prior manual rate")) return;
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-        if (!check(owner.avPlayer.rate == 2, @"A new creative accepts a separate manual request")) return;
+        if (!check(owner.avPlayer.rate == 16, @"A new creative accepts a separate manual request")) return;
         testCompletion(owner, button, deadline);
     });
 }
@@ -148,6 +267,12 @@ static void testReplacement(ALBaseVideoViewController *owner, UIButton *button, 
 static void runFixture(ALBaseVideoViewController *owner) {
     ASPManualSkipTrackController(owner);
     ASPManualSkipConfigure(YES);
+    ASPAdCompletionConfigure(YES);
+    ASPAdCompletionInstallHooks();
+    MARewardedAd *sdk = [MARewardedAd new];
+    sdk.delegate = owner;
+    owner.rewardAd = owner.currentAd;
+    [owner didDisplayAd:owner.rewardAd];
     [owner.avPlayer play];
     NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 20;
     waitUntil(^BOOL {
@@ -168,10 +293,11 @@ static void runFixture(ALBaseVideoViewController *owner) {
         ASPAdSurface *surface = ASPFindAdSurface(@[owner.view.window], NO);
         if (!check(surface.owner == owner && [surface.players containsObject:owner.avPlayer] && !surface.incomplete,
                    @"Visible SDK-owned native player is discovered")) return;
+        if (!check(owner.displayEvents == 1, @"The SDK display callback is forwarded unchanged")) return;
         double before = CMTimeGetSeconds(owner.avPlayer.currentTime);
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-        if (!check(owner.avPlayer.rate == 2 && CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 0.5,
-                   @"Manual action requests 2x playback without a time jump")) return;
+        if (!check(owner.avPlayer.rate == 16 && CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 0.5,
+                   @"Manual action requests 16x playback without a time jump")) return;
         owner.videoPlayer.videoView.hidden = YES;
         waitUntil(^BOOL {
             return owner.avPlayer.rate == 1 && [button.currentTitle isEqualToString:@"Fast-forward ad"];
@@ -179,7 +305,7 @@ static void runFixture(ALBaseVideoViewController *owner) {
             if (!check(owner.avPlayer.rate == 1, @"Hiding the video releases its manual rate")) return;
             owner.videoPlayer.videoView.hidden = NO;
             [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-            if (!check(owner.avPlayer.rate == 2, @"Visible playback accepts a new manual request")) return;
+            if (!check(owner.avPlayer.rate == 16, @"Visible playback accepts a new manual request")) return;
             testReplacement(owner, button, deadline);
         });
     });
