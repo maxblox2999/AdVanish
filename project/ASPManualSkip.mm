@@ -107,10 +107,14 @@ ASPAdSurface *ASPManualSkipSurfaceForPlayer(AVPlayer *player, BOOL recognizedOnl
 }
 
 BOOL ASPManualSkipIsAdWebView(WKWebView *view) {
-    for (ASPAdSurface *surface in ASPManualSkipAdSurfaces()) {
-        if ([surface.webViews containsObject:view]) return YES;
+    return ASPManualSkipWebViewContext(view) > 0;
+}
+
+NSInteger ASPManualSkipWebViewContext(WKWebView *view) {
+    for (ASPAdSurface *surface in activeSurfaces(NO)) {
+        if ([surface.webViews containsObject:view]) return surface.recognized ? 1 : 0;
     }
-    return NO;
+    return -1;
 }
 
 @interface ASPWebSnapshot : NSObject
@@ -146,7 +150,7 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
     button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     button.layer.cornerRadius = 18;
     button.accessibilityLabel = @"Fast-forward ad";
-    button.accessibilityHint = @"Requests faster playback of one visible video. The app controls closing and rewards. Drag to reposition.";
+    button.accessibilityHint = @"Requests faster video or supported ad timing. The app controls closing and rewards. Drag to reposition.";
     [button addTarget:self action:@selector(skipCurrentAd) forControlEvents:UIControlEventTouchUpInside];
     [button addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(moveButton:)]];
     [self.view addSubview:button];
@@ -221,7 +225,7 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
         if (snapshot.count == 1) selected = snapshot;
     }
     if (count == 0) {
-        [self finishRequest:@"No eligible video" generation:generation];
+        [self finishRequest:@"No supported media" generation:generation];
         return;
     }
     if (count > 1) {
@@ -258,7 +262,8 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
                    !boundedInteger(result[@"handled"], 1) || !boundedInteger(result[@"unresolved"], 1)) {
             [controller finishRequest:@"Web unavailable" generation:generation];
         } else if ([result[@"handled"] unsignedIntegerValue] == 1) {
-            [controller finishRequest:@"Playback requested" generation:generation];
+            BOOL timing = [result[@"kind"] isKindOfClass:NSString.class] && [result[@"kind"] isEqualToString:@"timing"];
+            [controller finishRequest:timing ? @"Timing requested" : @"Playback requested" generation:generation];
         } else {
             [controller finishRequest:@"Media unavailable" generation:generation];
         }

@@ -12,6 +12,8 @@ static NSMutableArray<NSString *> *checks;
 static BOOL finished;
 static BOOL nativeFinished;
 static BOOL webFinished;
+static BOOL manualMode;
+static __weak UIWindow *fixtureOverlay;
 static NSMutableDictionary<NSString *, id> *diagnostics;
 
 static void result(NSString *failure) {
@@ -160,11 +162,92 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 @property (nonatomic, strong) UIWindow *window;
 @property (nonatomic, strong) AVPlayer *ordinaryPlayer;
 @property (nonatomic, strong) WKWebView *web;
+@property (nonatomic) BOOL manualWebReady;
+@property (nonatomic) BOOL manualWebStarted;
+- (void)startManualWebIfReady;
+- (void)runManualNative:(ALBaseVideoViewController *)owner;
 @end
 @implementation InjectedDelegate
+- (UIButton *)manualButton {
+    if (fixtureOverlay.hidden) return nil;
+    for (UIView *view in fixtureOverlay.rootViewController.view.subviews) {
+        if ([view isKindOfClass:UIButton.class]) return (UIButton *)view;
+    }
+    return nil;
+}
+- (void)startManualWebIfReady {
+    if (!manualMode || !nativeFinished || !self.manualWebReady || self.manualWebStarted || finished) return;
+    self.manualWebStarted = YES;
+    self.web.hidden = NO;
+    NSString *baseline = @"return await new Promise(resolve=>{const real=fixtureNativeNow();const virtual=performance.now();"
+        "fixtureNativeTimeout(async()=>resolve({elapsed:fixtureNativeNow()-real,virtual:performance.now()-virtual,"
+        "interactions:window.__adspeed.stats.interactions,inspection:await window.__adspeed.inspectAsync()}),750);});";
+    [self.web callAsyncJavaScript:baseline arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld
+        completionHandler:^(id value, NSError *error) {
+        diagnostics[@"manualBaseline"] = value ?: errorDetails(error);
+        if (!check(!error && [value isKindOfClass:NSDictionary.class], @"Manual WebKit baseline executes")) return;
+        NSDictionary *baselineResult = value;
+        double real = [baselineResult[@"elapsed"] doubleValue];
+        double virtualTime = [baselineResult[@"virtual"] doubleValue];
+        if (!check(real >= 700 && virtualTime < real * 2 && [baselineResult[@"interactions"] integerValue] == 0,
+                   @"Unpressed manual mode preserves playable time and performs no input")) return;
+        if (!check([baselineResult[@"inspection"][@"count"] integerValue] == 1,
+                   @"A non-video playable is a supported manual timing candidate")) return;
+        UIButton *button = [self manualButton];
+        if (!check(button != nil, @"Manual mode exposes the production floating button")) return;
+        [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+        NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 5;
+        waitUntil(^BOOL { return [button.currentTitle isEqualToString:@"Timing requested"]; }, deadline, ^{
+            NSString *timing = @"return await new Promise(resolve=>{const real=fixtureNativeNow();const virtual=performance.now();"
+                "setTimeout(()=>resolve({elapsed:fixtureNativeNow()-real,virtual:performance.now()-virtual,"
+                "interactions:window.__adspeed.stats.interactions,rewards:fixture.rewardCalls,closes:fixture.closes,stage:fixture.stage}),4000);});";
+            [self.web callAsyncJavaScript:timing arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld
+                completionHandler:^(id measured, NSError *timingError) {
+                diagnostics[@"manualTiming"] = measured ?: errorDetails(timingError);
+                if (!check(!timingError && [measured isKindOfClass:NSDictionary.class], @"Manually requested WebKit timing executes")) return;
+                if (!check([measured[@"elapsed"] doubleValue] < 2000 && [measured[@"virtual"] doubleValue] >= 3000,
+                           @"The manual button accelerates the playable's original four-second timer")) return;
+                if (!check([measured[@"interactions"] integerValue] == 0 && [measured[@"rewards"] integerValue] == 0 &&
+                           [measured[@"closes"] integerValue] == 0 && [measured[@"stage"] isEqualToString:@"tap-ready"],
+                           @"Manual playable timing never generates gameplay, reward or Close actions")) return;
+                webFinished = YES;
+                finishIfReady();
+            }];
+        });
+    }];
+}
+- (void)runManualNative:(ALBaseVideoViewController *)owner {
+    owner.avPlayer.rate = 1;
+    NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (!check(owner.avPlayer.rate == 1 && CMTimeGetSeconds(owner.avPlayer.currentTime) <=
+                   (NSProcessInfo.processInfo.systemUptime - started) * 2 + 1,
+                   @"The production manual-mode AVPlayer hook never accelerates before a press")) return;
+        UIButton *button = [self manualButton];
+        if (!check(button != nil, @"The manual native request uses the production floating button")) return;
+        double before = CMTimeGetSeconds(owner.avPlayer.currentTime);
+        [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+        NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 15;
+        waitUntil(^BOOL { return owner.avPlayer.rate == 16; }, deadline, ^{
+            if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 1,
+                       @"A manual press retains 16x native playback without a seek")) return;
+            waitUntil(^BOOL { return owner.ended; }, deadline, ^{
+                if (!check(owner.closes == 0 && owner.avPlayer.rate == 0,
+                           @"Manual native completion leaves the SDK Close control untouched")) return;
+                nativeFinished = YES;
+                [self startManualWebIfReady];
+            });
+        });
+    });
+}
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
     diagnostics[@"webNavigation"] = @"finished";
     diagnostics[@"nativeWebAtNavigation"] = nativeWebState(webView);
+    if (manualMode) {
+        self.manualWebReady = YES;
+        [self startManualWebIfReady];
+        return;
+    }
     NSString *script = [NSString stringWithFormat:@"return await new Promise((resolve) => {"
         "const snapshot=()=>({...%@,bridgeBooleanType:typeof bridgeBoolean,bridgeBooleanValue:bridgeBoolean});"
         "const now=typeof fixtureNativeNow==='function'?fixtureNativeNow:Date.now.bind(Date);"
@@ -230,6 +313,12 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     checks = [NSMutableArray array];
     diagnostics = [NSMutableDictionary dictionary];
+    manualMode = [NSBundle.mainBundle.infoDictionary[@"AdVanishManualFixture"] boolValue];
+    diagnostics[@"manualMode"] = @(manualMode);
+    [NSNotificationCenter.defaultCenter addObserverForName:UIWindowDidBecomeVisibleNotification
+        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *notification) {
+        if ([notification.object isKindOfClass:NSClassFromString(@"ASPSkipWindow")]) fixtureOverlay = notification.object;
+    }];
     float (*rate)(void) = (float (*)(void))dlsym(RTLD_DEFAULT, "ASPSpeedRate");
     if (!check(rate && rate() == 16, @"The jailed framework loads and exposes the shared 16x policy")) return YES;
     WKWebViewConfiguration *config = [WKWebViewConfiguration new];
@@ -256,6 +345,7 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
     web.frame = CGRectMake(0, CGRectGetHeight(area) - 260, CGRectGetWidth(area), 240);
     web.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
     [owner.view addSubview:web];
+    web.hidden = manualMode;
     NSString *html = @"<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<style>body{margin:0;background:#eee}button{display:block;position:fixed;left:10px;top:20px;width:280px;height:180px}</style>"
         "<script>window.fixture={complete:false,movements:0,rewardCalls:0,redirectCalls:0,closes:0,startedAt:0,finishedAt:0,stage:'script'};"
@@ -284,6 +374,10 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
         self.ordinaryPlayer.rate = 1;
         if (!check(self.ordinaryPlayer.rate == 1, @"The production AVPlayer hook preserves ordinary playback")) return;
         [self.ordinaryPlayer pause];
+        if (manualMode) {
+            [self runManualNative:owner];
+            return;
+        }
         owner.avPlayer.rate = 1;
         waitUntil(^BOOL { return owner.avPlayer.rate == 16 || owner.ended; }, deadline, ^{
             if (!check(owner.avPlayer.rate == 16, @"Recognized SDK playback reaches 16x through the production hook")) return;

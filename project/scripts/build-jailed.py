@@ -15,6 +15,7 @@ from pathlib import Path
 from ipa_tools import framework_report
 
 ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY = ROOT.parent
 NATIVE = ["ASPUniversalSkip.mm", "ASPManualSkip.mm", "ASPAdSurface.mm", "ASPAdCompletion.mm"]
 FRAMEWORKS = ["Foundation", "UIKit", "QuartzCore", "CoreGraphics", "AVFoundation", "CoreMedia", "WebKit"]
 
@@ -61,7 +62,7 @@ def build(output, simulator=False):
         report = framework_report(framework)
         report["signature"] = "ad-hoc; re-sign with the app before installation"
         (output / "framework-check.json").write_text(json.dumps(report, indent=2) + "\n")
-        commit_file = ROOT / "SOURCE_COMMIT"
+        commit_file = REPOSITORY / "SOURCE_COMMIT"
         commit = commit_file.read_text().strip() if commit_file.is_file() else subprocess.check_output(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
         toolchain = {
@@ -84,7 +85,7 @@ def build(output, simulator=False):
             for name in ["framework-check.json", "build-info.json", "inject-ipa.py", "sign-ipa.py", "ipa_tools.py"]:
                 shutil.copy2(output / name, staging / name)
             for name in ["LICENSE", "NOTICE.md"]:
-                shutil.copy2(ROOT / name, staging / name)
+                shutil.copy2(REPOSITORY / name, staging / name)
             archive = shutil.make_archive(str((output / "AdVanish-jailed").resolve()), "zip", staging)
         files = [Path(archive), output / "framework-check.json", output / "build-info.json", output / "inject-ipa.py", output / "sign-ipa.py", output / "ipa_tools.py"]
         (output / "SHA256SUMS").write_text("".join(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n" for path in files))

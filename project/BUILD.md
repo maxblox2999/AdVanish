@@ -8,7 +8,7 @@ Download the rootless, rootful, jailed and source artifacts from the completed r
 
 ## macOS
 
-Requires Xcode, its command-line tools, Node.js 18+ and Python 3.9+. Complete Xcode's setup before building.
+Requires Xcode, its command-line tools, Node.js 18+ and Python 3.9+. Complete Xcode's setup before building. Run these commands from `project/`:
 
 ```sh
 brew install make ldid dpkg node python
@@ -27,7 +27,7 @@ cd dist/rootless
 shasum -a 256 -c SHA256SUMS
 ```
 
-Jailbreak packages contain arm64/arm64e builds with an iOS 15 minimum. Choose the package matching your jailbreak layout. Existing app enablement and feature preferences are retained. The old blocking mode and custom multiplier are retired; acceleration now targets 16x and the manual button no longer disables it.
+Jailbreak packages contain arm64/arm64e builds with an iOS 15 minimum. Choose the package matching your jailbreak layout. Existing app enablement and feature preferences are retained. Acceleration targets 16x. **Automatic ads** controls automatic acceleration, input and dismissal; turn it off for button-only acceleration. Existing explicit manual-button preferences default to manual mode until you choose otherwise.
 
 ## IPA injection
 
@@ -52,12 +52,13 @@ Embedded libraries and frameworks are signed before the app. Apps with extension
 
 Jailed settings use `AdVanish.plist` in the app bundle, with optional overrides from the app's `NSUserDefaults` dictionary named `AdVanish`. They never read jailbreak preference paths. All features default on except force-inline and broad native-video acceleration. The same detection, speed and manual controls initialize inside the app.
 
-Pass `--config AdVanish.plist` to the injector to embed a configuration. It accepts boolean keys `Enabled`, `ManualSkip`, `SpeedUpVideo`, `CompressTimers`, `AccelerateClock`, `ForceInline`, `SpeedNativeVideo`, `AutoInteract`, `AutoDismiss` and `BlockRedirects`. The speed target remains 16x. For example, this keeps acceleration and completion but hides the manual button:
+Pass `--config AdVanish.plist` to the injector to embed a configuration. It accepts boolean keys `Enabled`, `AutomaticAds`, `ManualSkip`, `SpeedUpVideo`, `CompressTimers`, `AccelerateClock`, `ForceInline`, `SpeedNativeVideo`, `AutoInteract`, `AutoDismiss` and `BlockRedirects`. The speed target remains 16x. For example, this enables automatic behavior and hides the manual button:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
+  <key>AutomaticAds</key><true/>
   <key>ManualSkip</key><false/>
 </dict></plist>
 ```

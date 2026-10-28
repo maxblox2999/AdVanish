@@ -215,6 +215,7 @@ ASPAdSurface *ASPFindAdSurface(NSArray<UIWindow *> *windows, BOOL recognizedOnly
         ASPAdSurface *surface = [ASPAdSurface new];
         surface.root = root;
         surface.owner = owner ?: front;
+        surface.recognized = owner != nil;
         surface.incomplete = incompleteOwners || remaining == 0 || webViews.count > 16;
         surface.creative = kindOfNamedClass(owner, @"ALBaseVideoViewController") ? objectGetter(owner, @"currentAd") : nil;
         surface.webViews = webViews;

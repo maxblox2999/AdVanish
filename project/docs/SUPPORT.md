@@ -6,12 +6,14 @@
 | Detected MRAID playables | Existing timer/clock acceleration plus animation timestamps; bounded input on explicit gameplay controls | Unknown canvas logic and trusted-touch checks cannot be solved generically |
 | Google rewarded / rewarded interstitial | Observe the original reward handler; eligible SDK Close action after the matching reward | Requires a recognized controller and accessible SDK-owned control |
 | Google interstitial / app-open with native video | Observe real player-end notifications for the captured items, then request eligible SDK Close | HTML-only, static and unknown completion paths abstain |
-| MAX rewarded with direct creative identity | Observe real display/reward delegate events only when the callback ad is the controller's current creative; eligible SDK Close action | Wrapper objects and other mediated surfaces abstain without an exact identity match |
+| MAX rewarded through the AppLovin adapter | Observe genuine display/reward events after validating the callback ad, adapter wrapper and loaded AppLovin creative against the controller's creative | Other mediation adapters abstain unless an exact ownership relation is available |
 | Unity / LevelPlay / other reward callbacks | Original SDK and app behavior preserved | No automatic reward-based dismissal adapter unless exact session ownership is established |
 | Ad redirects | Block supported MRAID/window and external URL opens inside the active ad context | Direct navigation and SDK-specific store presentations may remain unsupported |
-| Manual button | Same 16x playback target; validated selection across native players and web frames | Ambiguous, hidden, stale or inaccessible media abstains |
+| Manual button | Same 16x playback target plus selected recognized playable timing; validated selection across native players and web frames | Ambiguous, hidden, stale or inaccessible surfaces abstain |
 
 Detection uses ad surfaces and SDK ownership, not a list of game bundle identifiers. The manual fallback can act on ordinary video when pressed outside an ad.
+
+**Automatic ads** enables automatic acceleration, input and supported Close actions. With it off, the button is required for acceleration and automatic input/Close stay disabled. **Show fast-forward button** independently controls visibility in automatic mode. Existing explicit manual preferences default to manual mode until overridden.
 
 Playable input recognizes `Tap to play`, `Start game`, `Continue playing` and `Swipe left/right/up/down` on visible semantic controls. It checks at most 128 controls per scan and performs at most 12 actions per ad context. Unknown canvas coordinates, install controls and links are not guessed. MRAID discovery requires a ready, viewable interstitial; hidden or covered frames lose authorization.
 

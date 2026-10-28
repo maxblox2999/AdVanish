@@ -1,6 +1,6 @@
 # Tests
 
-Run commands from the repository root.
+Run commands from `project/`.
 
 ## Web engine
 
@@ -35,9 +35,10 @@ With the pinned Theos environment configured, also run the actual injected frame
 
 ```sh
 python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --output dist/ios-injected.json
+python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --manual --output dist/ios-injected-manual.json
 ```
 
-This compiles and loads the same jailed framework, including its constructor and Objective-C hooks. It checks ordinary playback, recognized playback and WebKit script installation. It does not use a real ad SDK or Apple provisioning profile.
+These compile and load the same jailed framework, including its constructor and Objective-C hooks. Automatic and manual-only configurations run separately. The runner removes stale reports before startup and records the source revision. It does not use a real ad SDK or Apple provisioning profile.
 
 ## IPA tooling
 

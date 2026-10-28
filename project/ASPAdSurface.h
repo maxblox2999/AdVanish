@@ -11,6 +11,7 @@
 @property (nonatomic, weak) UIViewController *owner;
 @property (nonatomic, strong) id creative;
 @property (nonatomic) BOOL incomplete;
+@property (nonatomic) BOOL recognized;
 @property (nonatomic, copy) NSArray<WKWebView *> *webViews;
 @property (nonatomic, copy) NSArray<AVPlayer *> *players;
 @property (nonatomic, strong) NSMapTable<AVPlayer *, AVPlayerItem *> *items;

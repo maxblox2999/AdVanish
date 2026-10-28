@@ -71,11 +71,47 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 @implementation MARewardedAd
 @end
 
+@interface ALAd : NSObject
+@end
+@implementation ALAd
+@end
+
+@class ALMediationAdapterWrapper;
+@interface MAAd : NSObject
+@end
+@implementation MAAd
+@end
+@interface ALMediatedAd : MAAd
+@property (nonatomic, strong) ALMediationAdapterWrapper *adapterWrapper;
+@end
+@implementation ALMediatedAd
+@end
+@interface ALAppLovinMediationAdapter : NSObject
+@property (nonatomic, strong) ALAd *loadedRewardedAd;
+@end
+@implementation ALAppLovinMediationAdapter
+@end
+@interface ALMediationAdapterWrapper : NSObject
+@property (nonatomic, weak) ALMediatedAd *ad;
+@property (nonatomic, strong) ALAppLovinMediationAdapter *adapter;
+@end
+@implementation ALMediationAdapterWrapper
+@end
+
+static ALMediatedAd *rewardDescriptor(ALAd *creative) {
+    ALMediatedAd *ad = [ALMediatedAd new];
+    ad.adapterWrapper = [ALMediationAdapterWrapper new];
+    ad.adapterWrapper.ad = ad;
+    ad.adapterWrapper.adapter = [ALAppLovinMediationAdapter new];
+    ad.adapterWrapper.adapter.loadedRewardedAd = creative;
+    return ad;
+}
+
 // Only the ownership getters and completion flag are mocked. AVPlayer, views,
 // window discovery and the floating button run the production implementation.
 @interface ALBaseVideoViewController : UIViewController
 @property (nonatomic, strong) FixtureVideoOwner *videoPlayer;
-@property (nonatomic, strong) NSObject *currentAd;
+@property (nonatomic, strong) ALAd *currentAd;
 @property (nonatomic, strong) UIButton *closeButton;
 @property (nonatomic) NSUInteger closes;
 @property (nonatomic) BOOL ended;
@@ -90,7 +126,7 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 - (void)loadView {
     self.view = [[UIView alloc] initWithFrame:[UIScreen mainScreen].bounds];
     self.view.backgroundColor = UIColor.blackColor;
-    self.currentAd = [NSObject new];
+    self.currentAd = [ALAd new];
     self.rewardPending = YES;
     self.videoPlayer = [FixtureVideoOwner new];
     FixtureVideoView *video = [[FixtureVideoView alloc] initWithFrame:self.view.bounds];
@@ -178,7 +214,7 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
     self.controller.view.frame = actualPresenter.view.bounds;
     [actualPresenter.view addSubview:self.controller.view];
     [self.controller didMoveToParentViewController:actualPresenter];
-    self.controller.currentAd = [NSObject new];
+    self.controller.currentAd = [ALAd new];
     self.controller.closes = 0;
 }
 - (void)emitSDKReward {
@@ -304,13 +340,14 @@ static void testCompletion(ALBaseVideoViewController *owner, UIButton *button, N
             [button sendActionsForControlEvents:UIControlEventTouchUpInside];
             if (!check(owner.closes == 0 && owner.rewardPending,
                        @"Completed video cannot activate SDK Close while its reward is pending")) return;
-            if (!check([button.currentTitle isEqualToString:@"No eligible video"],
+            if (!check([button.currentTitle isEqualToString:@"No supported media"],
                        @"A second press reports an ended video without closing it")) return;
+            NSUInteger priorRewards = owner.rewardEvents;
             [owner didRewardUserForAd:[NSObject new] withReward:[NSObject new]];
             if (!check(owner.closes == 0, @"An unrelated reward cannot close the current ad")) return;
             owner.rewardPending = YES;
             [owner didRewardUserForAd:owner.rewardAd withReward:[NSObject new]];
-            if (!check(owner.rewardEvents == 3 && owner.closes == 1 && !owner.rewardPending,
+            if (!check(owner.rewardEvents == priorRewards + 2 && owner.closes == 1 && !owner.rewardPending,
                        @"The genuine matching reward is forwarded and activates SDK Close once")) return;
             ASPAdCompletionTrackController(owner);
             if (!check(owner.closes == 1, @"Repeated completion polling cannot duplicate dismissal")) return;
@@ -324,8 +361,8 @@ static void testCompletion(ALBaseVideoViewController *owner, UIButton *button, N
 static void testReplacement(ALBaseVideoViewController *owner, UIButton *button, NSTimeInterval deadline) {
     AVPlayerItem *replacement = [AVPlayerItem playerItemWithAsset:owner.avPlayer.currentItem.asset];
     id previousAd = owner.rewardAd;
-    owner.currentAd = [NSObject new];
-    owner.rewardAd = owner.currentAd;
+    owner.currentAd = [ALAd new];
+    owner.rewardAd = rewardDescriptor(owner.currentAd);
     [owner didDisplayAd:previousAd];
     [owner didRewardUserForAd:previousAd withReward:[NSObject new]];
     if (!check(owner.closes == 0, @"A delayed old display and reward cannot close a new creative")) return;
@@ -351,17 +388,71 @@ static BOOL testCreativeOwnership(ALBaseVideoViewController *owner) {
     id originalRewardAd = owner.rewardAd;
     __weak NSObject *releasedCreative;
     @autoreleasepool {
-        NSObject *creative = [NSObject new];
+        ALAd *creative = [ALAd new];
         releasedCreative = creative;
         owner.currentAd = creative;
-        owner.rewardAd = creative;
-        [owner didDisplayAd:creative];
+        owner.rewardAd = rewardDescriptor(creative);
+        [owner didDisplayAd:owner.rewardAd];
         owner.currentAd = originalCreative;
         owner.rewardAd = originalRewardAd;
     }
     BOOL released = check(releasedCreative == nil, @"Completion observation does not retain a discarded SDK creative");
     ASPAdCompletionTrackController(owner);
     return released;
+}
+
+static BOOL testMediatedOwnership(ALBaseVideoViewController *owner) {
+    ALMediatedAd *ad = owner.rewardAd;
+    if (!check(ad != (id)owner.currentAd && ad.adapterWrapper.adapter.loadedRewardedAd == owner.currentAd,
+               @"MAX callback descriptors and AppLovin creative objects have distinct identities")) return NO;
+    ALAd *creative = owner.currentAd;
+    [owner didDisplayAd:ad];
+    ad.adapterWrapper.adapter.loadedRewardedAd = [ALAd new];
+    [owner didRewardUserForAd:ad withReward:[NSObject new]];
+    ad.adapterWrapper.adapter.loadedRewardedAd = creative;
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.closes == 0, @"A reward after adapter retargeting cannot authorize a restored creative")) return NO;
+    [owner didDisplayAd:ad];
+    ASPAdCompletionConfigure(NO);
+    [owner didRewardUserForAd:ad withReward:[NSObject new]];
+    if (!check(owner.closes == 0, @"Manual-only completion policy forwards rewards without pressing Close")) return NO;
+    owner.rewardAd = rewardDescriptor(creative);
+    [owner didDisplayAd:owner.rewardAd];
+    ASPAdCompletionConfigure(YES);
+    [owner didRewardUserForAd:ad withReward:[NSObject new]];
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.closes == 0, @"A replaced MAX descriptor cannot close the current presentation")) return NO;
+    owner.rewardPending = YES;
+    return YES;
+}
+
+static BOOL testWebWindowExposure(ALBaseVideoViewController *owner) {
+    UIWindow *window = [[UIWindow alloc] initWithFrame:owner.view.window.bounds];
+    window.windowLevel = owner.view.window.windowLevel + 1;
+    window.rootViewController = [UIViewController new];
+    [window makeKeyAndVisible];
+    WKWebView *web = [[WKWebView alloc] initWithFrame:window.bounds];
+    [window.rootViewController.view addSubview:web];
+    ASPManualSkipTrackWebView(web);
+    if (!check(ASPManualSkipWebViewContext(web) == 0,
+               @"An exposed unknown SDK web surface retains MRAID discovery")) return NO;
+    web.hidden = YES;
+    if (!check(ASPManualSkipWebViewContext(web) < 0, @"A hidden unknown SDK web surface is inactive")) return NO;
+    web.hidden = NO;
+    UIWindow *cover = [[UIWindow alloc] initWithFrame:window.bounds];
+    cover.windowLevel = window.windowLevel + 1;
+    cover.rootViewController = [UIViewController new];
+    cover.rootViewController.view.backgroundColor = UIColor.blackColor;
+    [cover makeKeyAndVisible];
+    ASPManualSkipTrackController(cover.rootViewController);
+    if (!check(ASPManualSkipWebViewContext(web) < 0,
+               @"A separate opaque window prevents underlying web authorization")) return NO;
+    cover.hidden = YES;
+    if (!check(ASPManualSkipWebViewContext(web) == 0,
+               @"Removing a covering window restores unknown web discovery")) return NO;
+    window.hidden = YES;
+    [owner.view.window makeKeyWindow];
+    return YES;
 }
 
 static void runFixture(ALBaseVideoViewController *owner) {
@@ -371,7 +462,7 @@ static void runFixture(ALBaseVideoViewController *owner) {
     ASPAdCompletionInstallHooks();
     MARewardedAd *sdk = [MARewardedAd new];
     sdk.delegate = owner;
-    owner.rewardAd = owner.currentAd;
+    owner.rewardAd = rewardDescriptor(owner.currentAd);
     [owner didDisplayAd:owner.rewardAd];
     [owner.avPlayer play];
     NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 20;
@@ -397,6 +488,8 @@ static void runFixture(ALBaseVideoViewController *owner) {
                    @"A window root includes its visible content")) return;
         if (!check(owner.displayEvents == 1, @"The SDK display callback is forwarded unchanged")) return;
         if (!testCreativeOwnership(owner)) return;
+        if (!testMediatedOwnership(owner)) return;
+        if (!testWebWindowExposure(owner)) return;
         double before = CMTimeGetSeconds(owner.avPlayer.currentTime);
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
         if (!check(owner.avPlayer.rate == 16 && CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 0.5,

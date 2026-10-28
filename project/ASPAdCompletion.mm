@@ -47,6 +47,18 @@ static id objectValue(id object, SEL selector) {
     }
 }
 
+static id maxCreative(id ad) {
+    if (namedKind(ad, @"ALAd")) return ad;
+    if (!namedKind(ad, @"ALMediatedAd") || !namedKind(ad, @"MAAd")) return nil;
+    id wrapper = objectValue(ad, NSSelectorFromString(@"adapterWrapper"));
+    if (!namedKind(wrapper, @"ALMediationAdapterWrapper") ||
+        objectValue(wrapper, NSSelectorFromString(@"ad")) != ad) return nil;
+    id adapter = objectValue(wrapper, NSSelectorFromString(@"adapter"));
+    if (!namedKind(adapter, @"ALAppLovinMediationAdapter")) return nil;
+    id creative = objectValue(adapter, NSSelectorFromString(@"loadedRewardedAd"));
+    return namedKind(creative, @"ALAd") ? creative : nil;
+}
+
 static void retireSession(ASPRewardSession *session) {
     session.invalidated = YES;
     session.videoItems = nil;
@@ -62,7 +74,8 @@ static void pruneSessions(void) {
         UIViewController *owner = session.owner;
         BOOL detached = session.ownerBound && (!owner || !owner.viewIfLoaded.window);
         BOOL changedCreative = !session.google && (!session.creative ||
-            objectValue(owner, NSSelectorFromString(@"currentAd")) != session.creative);
+            objectValue(owner, NSSelectorFromString(@"currentAd")) != session.creative ||
+            maxCreative(session.ad) != session.creative);
         return !session.ad || session.expires <= now || session.closeRequested || session.invalidated ||
             detached || changedCreative;
     }];
@@ -80,7 +93,7 @@ static BOOL sameOwner(ASPRewardSession *session, ASPAdSurface *surface) {
     if (surface.owner != session.owner || !ASPAdSurfaceUnchanged(surface)) return NO;
     if (session.google) return YES;
     id creative = session.creative;
-    return creative && session.ad == creative && surface.creative == creative;
+    return creative && maxCreative(session.ad) == creative && surface.creative == creative;
 }
 
 static BOOL belongsToPresenter(UIViewController *owner, UIViewController *presenter) {
@@ -172,17 +185,23 @@ static ASPRewardSession *googleSession(id ad, UIViewController *presenter, BOOL 
 
 static void observeMAXDisplay(id ad) {
     pruneSessions();
+    id creative = maxCreative(ad);
+    if (!creative) return;
     NSArray<ASPAdSurface *> *surfaces = ASPManualSkipAdSurfaces();
     // A mediated ad without a concrete owned AppLovin surface is unsupported here.
     ASPAdSurface *owned = nil;
     for (ASPAdSurface *surface in surfaces) {
-        if (!namedKind(surface.owner, @"ALBaseVideoViewController") || surface.creative != ad) continue;
+        if (!namedKind(surface.owner, @"ALBaseVideoViewController") || surface.creative != creative) continue;
         if (owned) return;
         owned = surface;
     }
     if (!owned) return;
-    for (ASPRewardSession *existing in sessions) {
+    for (ASPRewardSession *existing in sessions.copy) {
         if (existing.ad == ad && sameOwner(existing, owned)) return;
+        if (!existing.google && existing.owner == owned.owner) {
+            retireSession(existing);
+            [sessions removeObjectIdenticalTo:existing];
+        }
     }
     ASPRewardSession *session = [ASPRewardSession new];
     session.ad = ad;
@@ -195,6 +214,7 @@ static void observeMAXDisplay(id ad) {
 }
 
 static void observeMAXReward(id ad) {
+    pruneSessions();
     for (ASPRewardSession *session in sessions.copy) {
         if (!session.google && session.ad == ad) observeReward(session);
     }

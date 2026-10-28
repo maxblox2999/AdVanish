@@ -5,6 +5,7 @@ import importlib.util
 import plistlib
 import stat
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,6 +23,9 @@ spec.loader.exec_module(inject_module)
 sign_spec = importlib.util.spec_from_file_location("sign_ipa", ROOT / "scripts/sign-ipa.py")
 sign_module = importlib.util.module_from_spec(sign_spec)
 sign_spec.loader.exec_module(sign_module)
+runner_spec = importlib.util.spec_from_file_location("ios_runner", ROOT / "scripts/test-ios.py")
+runner_module = importlib.util.module_from_spec(runner_spec)
+runner_spec.loader.exec_module(runner_module)
 
 
 def dylib_command(name, command=0xC):
@@ -201,7 +205,7 @@ class ArchiveTests(unittest.TestCase):
     def test_embeds_validated_jailed_configuration(self):
         ipa(self.source)
         config = self.root / "settings.plist"
-        values = {"ManualSkip": True, "AutoInteract": False, "SpeedUpVideo": True}
+        values = {"AutomaticAds": False, "ManualSkip": True, "AutoInteract": True, "SpeedUpVideo": True}
         config.write_bytes(plistlib.dumps(values))
         inject_module.inject(self.source, self.framework, self.output, config)
         with zipfile.ZipFile(self.output) as result:
@@ -210,7 +214,7 @@ class ArchiveTests(unittest.TestCase):
     def test_rejects_invalid_configuration_without_output(self):
         ipa(self.source)
         config = self.root / "settings.plist"
-        for values in ({"Unknown": True}, {"Enabled": 1}, [True]):
+        for values in ({"Unknown": True}, {"Enabled": 1}, {"AutomaticAds": 0}, [True]):
             config.write_bytes(plistlib.dumps(values))
             with self.assertRaisesRegex(ValueError, "supported boolean"):
                 inject_module.inject(self.source, self.framework, self.output, config)
@@ -273,6 +277,48 @@ class SigningPolicyTests(unittest.TestCase):
         self.provision["Entitlements"]["application-identifier"] = "NEWTEAM.*"
         with self.assertRaisesRegex(ValueError, "exact bundle"):
             sign_module.signing_entitlements({}, self.provision, "com.example.game")
+
+
+class SimulatorRunnerTests(unittest.TestCase):
+    def test_retries_initial_simulator_timeout_once(self):
+        error = subprocess.TimeoutExpired(["xcrun", "simctl", "list", "-j"], 120)
+        with patch.object(runner_module, "run", side_effect=[error, '{"runtimes": []}']) as command:
+            self.assertEqual(runner_module.simulator_devices(), {"runtimes": []})
+            self.assertEqual(command.call_count, 2)
+
+    def test_second_startup_timeout_remains_a_failure(self):
+        error = subprocess.TimeoutExpired(["xcrun", "simctl", "list", "-j"], 120)
+        with patch.object(runner_module, "run", side_effect=error) as command:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                runner_module.simulator_devices()
+            self.assertEqual(command.call_count, 2)
+
+    def test_does_not_retry_command_failures(self):
+        error = subprocess.CalledProcessError(1, ["xcrun", "simctl", "list", "-j"])
+        with patch.object(runner_module, "run", side_effect=error) as command:
+            with self.assertRaises(subprocess.CalledProcessError):
+                runner_module.simulator_devices()
+            command.assert_called_once()
+
+    def test_failed_startup_cannot_leave_a_passing_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "result.json"
+            output.write_text('{"passed": true}')
+            error = subprocess.CalledProcessError(1, ["xcrun"])
+            with patch.object(runner_module, "run", side_effect=error), self.assertRaises(subprocess.CalledProcessError):
+                runner_module.main(Path(directory) / "fixture.mp4", output, True)
+            self.assertFalse(output.exists())
+
+    def test_source_archive_revision_is_read_from_repository_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "project"
+            project.mkdir()
+            revision = "b" * 40
+            (root / "SOURCE_COMMIT").write_text(revision + "\n")
+            with patch.object(runner_module, "ROOT", project), patch.object(runner_module, "run") as command:
+                self.assertEqual(runner_module.source_commit(), revision)
+                command.assert_not_called()
 
 
 if __name__ == "__main__":
