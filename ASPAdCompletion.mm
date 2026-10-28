@@ -120,15 +120,12 @@ static void observeReward(ASPRewardSession *session) {
 static ASPRewardSession *googleSession(id ad, UIViewController *presenter, BOOL requiresReward) {
     pruneSessions();
     if (!presenter) {
-        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-            if (![scene isKindOfClass:UIWindowScene.class] || scene.activationState != UISceneActivationStateForegroundActive) continue;
-            for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-                if (!window.keyWindow || window.hidden || namedKind(window, @"ASPSkipWindow")) continue;
-                UIViewController *front = window.rootViewController;
-                while (front.presentedViewController) front = front.presentedViewController;
-                if (presenter && presenter != front) return nil;
-                presenter = front;
-            }
+        for (UIWindow *window in ASPManualSkipContentWindows()) {
+            if (!window.keyWindow) continue;
+            UIViewController *front = window.rootViewController;
+            while (front.presentedViewController) front = front.presentedViewController;
+            if (presenter && presenter != front) return nil;
+            presenter = front;
         }
     }
     if (!presenter) return nil;

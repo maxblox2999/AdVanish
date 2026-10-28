@@ -281,7 +281,7 @@ static NSString *webSpeedJS(void) {
 }
 
 static BOOL webEnabled(void) {
-    return gActive && (gManualSkip || gSpeedVideo || gWebTimers || gWebClock);
+    return gActive && (gManualSkip || gSpeedVideo || gWebTimers || gWebClock || gAutoInteract || gBlockRedirects);
 }
 
 static void installWebScript(WKWebViewConfiguration *configuration) {

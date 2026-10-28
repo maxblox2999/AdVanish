@@ -95,6 +95,9 @@ function environment(configuration = {}, options = {}) {
     sandbox.requestAnimationFrame = (callback) => nativeFrameTimer(() => callback(now), 16);
     sandbox.cancelAnimationFrame = sandbox.clearTimeout;
     sandbox.open = options.open || (() => 'opened');
+    if (options.readOnlyOpen) {
+        Object.defineProperty(sandbox, 'open', {value: sandbox.open, writable: false, configurable: false});
+    }
     sandbox.MouseEvent = class { constructor(type, options) { this.type = type; Object.assign(this, options); } };
     sandbox.PointerEvent = sandbox.MouseEvent;
     if (options.noPerformance) {
@@ -1436,4 +1439,15 @@ test('an old gesture cannot cancel or release a new context gesture', () => {
     assert.equal(next.events.at(-1).type, 'pointerup');
     assert.notEqual(old.events[0].pointerId, next.events[0].pointerId);
     assert.equal(next.events.some(event => event.type === 'pointercancel'), false);
+});
+
+test('a read-only window.open does not prevent independent acceleration from initializing', () => {
+    const env = environment(adConfig, {readOnlyOpen: true});
+    const originalOpen = env.sandbox.open;
+    const media = video(env);
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(500);
+    assert.equal(media.playbackRate, 16);
+    assert.equal(env.sandbox.open, originalOpen);
+    assert.equal(env.sandbox.__adspeed.stats.interactionFailures, 1);
 });

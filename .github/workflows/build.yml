@@ -63,6 +63,7 @@ jobs:
         if: matrix.variant == 'jailed'
         run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --output dist/jailed/ios-injected.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
           name: advanish-${{ matrix.variant }}-${{ github.sha }}
           path: dist/${{ matrix.variant }}/

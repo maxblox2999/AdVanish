@@ -153,6 +153,81 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 }
 @end
 
+@interface GADRewardedAd : NSObject
+@property (nonatomic, strong) GADFullScreenAdViewController *controller;
+@property (nonatomic, weak) UIViewController *fallbackPresenter;
+@property (nonatomic, copy) void (^sdkRewardHandler)(void);
+@property (nonatomic) NSUInteger presentations;
+@property (nonatomic) BOOL receivedNilHandler;
+@property (nonatomic) BOOL receivedNilPresenter;
+- (void)presentFromRootViewController:(UIViewController *)presenter userDidEarnRewardHandler:(void (^)(void))handler;
+- (void)emitSDKReward;
+@end
+@implementation GADRewardedAd
+- (void)presentFromRootViewController:(UIViewController *)presenter userDidEarnRewardHandler:(void (^)(void))handler {
+    self.presentations += 1;
+    self.receivedNilPresenter = presenter == nil;
+    self.receivedNilHandler = handler == nil;
+    self.sdkRewardHandler = handler;
+    UIViewController *actualPresenter = presenter ?: self.fallbackPresenter;
+    if (!self.controller) self.controller = [GADFullScreenAdViewController new];
+    [actualPresenter addChildViewController:self.controller];
+    self.controller.view.frame = actualPresenter.view.bounds;
+    [actualPresenter.view addSubview:self.controller.view];
+    [self.controller didMoveToParentViewController:actualPresenter];
+    self.controller.currentAd = [NSObject new];
+    self.controller.closes = 0;
+}
+- (void)emitSDKReward {
+    if (self.sdkRewardHandler) self.sdkRewardHandler();
+}
+@end
+
+static void testGoogleRewarded(UIViewController *presenter) {
+    __block NSUInteger nilRootRewards = 0;
+    GADRewardedAd *nilRoot = [GADRewardedAd new];
+    nilRoot.fallbackPresenter = presenter;
+    [nilRoot presentFromRootViewController:nil userDidEarnRewardHandler:^{ nilRootRewards += 1; }];
+    ASPAdCompletionTrackController(nilRoot.controller);
+    [nilRoot emitSDKReward];
+    if (!check(nilRoot.presentations == 1 && nilRoot.receivedNilPresenter && nilRootRewards == 1 && nilRoot.controller.closes == 1,
+               @"A nil Google root resolves the active legacy window without changing SDK input")) return;
+    [nilRoot.controller.view removeFromSuperview];
+    [nilRoot.controller removeFromParentViewController];
+    __block NSUInteger firstRewards = 0;
+    __block NSUInteger secondRewards = 0;
+    GADRewardedAd *first = [GADRewardedAd new];
+    first.fallbackPresenter = presenter;
+    [first presentFromRootViewController:presenter userDidEarnRewardHandler:^{ firstRewards += 1; }];
+    ASPAdCompletionTrackController(first.controller);
+    if (!check(first.presentations == 1 && first.controller.closes == 0,
+               @"Google presentation forwards once and preserves its pending reward")) return;
+    [first.controller.view removeFromSuperview];
+    [first.controller removeFromParentViewController];
+    GADRewardedAd *second = [GADRewardedAd new];
+    second.controller = first.controller;
+    [second presentFromRootViewController:presenter userDidEarnRewardHandler:^{ secondRewards += 1; }];
+    ASPAdCompletionTrackController(second.controller);
+    [first emitSDKReward];
+    if (!check(firstRewards == 1 && secondRewards == 0 && second.controller.closes == 0,
+               @"A stale Google SDK reward is forwarded without dismissing a reused controller")) return;
+    [second emitSDKReward];
+    if (!check(second.presentations == 1 && secondRewards == 1 && second.controller.closes == 1,
+               @"A matching Google SDK reward forwards the app handler and activates Close once")) return;
+    ASPAdCompletionTrackController(second.controller);
+    if (!check(second.controller.closes == 1, @"Google reward observation cannot duplicate dismissal")) return;
+    [second.controller.view removeFromSuperview];
+    [second.controller removeFromParentViewController];
+    GADRewardedAd *withoutHandler = [GADRewardedAd new];
+    [withoutHandler presentFromRootViewController:presenter userDidEarnRewardHandler:nil];
+    ASPAdCompletionTrackController(withoutHandler.controller);
+    [withoutHandler emitSDKReward];
+    if (!check(withoutHandler.presentations == 1 && withoutHandler.receivedNilHandler &&
+               withoutHandler.sdkRewardHandler == nil && withoutHandler.controller.closes == 0,
+               @"A nil Google reward handler reaches the SDK unchanged")) return;
+    result(nil);
+}
+
 static void runOrdinaryCase(UIViewController *presenter, NSUInteger kind, NSTimeInterval deadline) {
     GADInterstitialAd *ad = [GADInterstitialAd new];
     [ad presentFromRootViewController:presenter];
@@ -185,7 +260,9 @@ static void runOrdinaryCase(UIViewController *presenter, NSUInteger kind, NSTime
                        @"A real ordinary-ad video end activates the eligible SDK Close")) return;
             ASPAdCompletionTrackController(ad.controller);
             if (!check(ad.controller.closes == 1, @"Ordinary-ad completion cannot dismiss twice")) return;
-            result(nil);
+            [ad.controller.view removeFromSuperview];
+            [ad.controller removeFromParentViewController];
+            testGoogleRewarded(presenter);
         });
     });
 }
@@ -252,12 +329,14 @@ static void testReplacement(ALBaseVideoViewController *owner, UIButton *button, 
     owner.rewardPending = YES;
     [owner didDisplayAd:owner.rewardAd];
     [owner.avPlayer replaceCurrentItemWithPlayerItem:replacement];
-    [owner.avPlayer playImmediatelyAtRate:2];
+    NSTimeInterval replacementStarted = NSProcessInfo.processInfo.systemUptime;
+    [owner.avPlayer playImmediatelyAtRate:16];
     waitUntil(^BOOL {
         return owner.avPlayer.rate == 1 && [button.currentTitle isEqualToString:@"Fast-forward ad"];
     }, deadline, ^{
-        if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) < 4,
-                   @"Replacing a creative releases its prior manual rate")) return;
+        NSTimeInterval elapsed = NSProcessInfo.processInfo.systemUptime - replacementStarted;
+        if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) <= elapsed * ASPSpeedRate() + 0.5,
+                   @"Replacing a creative releases its owned rate without seeking")) return;
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
         if (!check(owner.avPlayer.rate == 16, @"A new creative accepts a separate manual request")) return;
         testCompletion(owner, button, deadline);
