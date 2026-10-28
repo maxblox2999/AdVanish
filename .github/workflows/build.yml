@@ -5,9 +5,22 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: macOS build runner
+        type: choice
+        required: false
+        default: macos-15
+        options:
+          - macos-15
+          - macos-15-intel
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: project
 
 jobs:
   checks:
@@ -25,7 +38,7 @@ jobs:
       - name: Archive complete source
         run: |
           mkdir -p dist/source "$RUNNER_TEMP/source-id"
-          git archive --format=tar --prefix=AdVanish/ HEAD > "$RUNNER_TEMP/advanish-source.tar"
+          git -C .. archive --format=tar --prefix=AdVanish/ HEAD > "$RUNNER_TEMP/advanish-source.tar"
           printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/source-id/SOURCE_COMMIT"
           tar --append --file="$RUNNER_TEMP/advanish-source.tar" --transform='s,^,AdVanish/,' -C "$RUNNER_TEMP/source-id" SOURCE_COMMIT
           gzip -n < "$RUNNER_TEMP/advanish-source.tar" > dist/source/AdVanish-source.tar.gz
@@ -34,12 +47,13 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: advanish-source-${{ github.sha }}
-          path: dist/source/
+          path: project/dist/source/
           if-no-files-found: error
+          overwrite: true
 
   package:
     needs: checks
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +69,7 @@ jobs:
           bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools"
           echo "THEOS=$RUNNER_TEMP/advanish-tools/theos" >> "$GITHUB_ENV"
       - name: Build and inspect package
+        id: package_build
         run: bash scripts/build.sh "${{ matrix.variant }}"
       - name: Exercise native skipping and pending reward protection in iOS Simulator
         if: matrix.variant == 'rootless'
@@ -62,9 +77,13 @@ jobs:
       - name: Exercise injected initialization and production hooks in iOS Simulator
         if: matrix.variant == 'jailed'
         run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --output dist/jailed/ios-injected.json
+      - name: Verify manual-only injected mode stays idle until a button request
+        if: ${{ !cancelled() && matrix.variant == 'jailed' && steps.package_build.outcome == 'success' }}
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --manual --output dist/jailed/ios-injected-manual.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: advanish-${{ matrix.variant }}-${{ github.sha }}
-          path: dist/${{ matrix.variant }}/
+          path: project/dist/${{ matrix.variant }}/
           if-no-files-found: error
+          overwrite: true

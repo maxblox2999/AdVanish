@@ -42,6 +42,7 @@ static BOOL  gWebClock    = NO;
 static BOOL  gForceInline  = NO;
 static BOOL  gSpeedNative  = NO;
 static BOOL  gManualSkip = NO;
+static BOOL gAutomaticAds = YES;
 static BOOL gAutoInteract = YES;
 static BOOL gAutoDismiss = YES;
 static BOOL gBlockRedirects = YES;
@@ -67,6 +68,12 @@ static NSDictionary *loadPrefs(void) {
 static BOOL prefBool(NSDictionary *p, NSString *key, BOOL fallback) {
     id v = p[key];
     return [v respondsToSelector:@selector(boolValue)] ? [v boolValue] : fallback;
+}
+
+static BOOL automaticAdsPreference(NSDictionary *prefs, NSString *automaticKey, NSString *manualKey) {
+    if (prefs[automaticKey]) return prefBool(prefs, automaticKey, YES);
+    // Existing explicit manual-mode choices keep requiring the button after upgrading.
+    return !prefBool(prefs, manualKey, NO);
 }
 
 // Per-app preference key: "<bundleID>-<Suffix>" (e.g. com.x.game-SpeedUpVideo).
@@ -182,7 +189,9 @@ static id webAdContext(WKWebView *web) {
         }
     }
     if (!exposed) return @NO;
-    return ASPManualSkipIsAdWebView(web) ? @YES : NSNull.null;
+    NSInteger context = ASPManualSkipWebViewContext(web);
+    if (context < 0) return @NO;
+    return context > 0 ? @YES : NSNull.null;
 }
 
 static void setWebContext(WKWebView *web, WKFrameInfo *frame) {
@@ -224,7 +233,7 @@ static void scheduleAdPoll(void);
 
 %hook AVPlayer
 - (void)setRate:(float)rate {
-    if (gActive && !ASPSpeedInternalChange() && gSpeedVideo && isfinite(rate) && rate > 0) {
+    if (gActive && gAutomaticAds && !ASPSpeedInternalChange() && gSpeedVideo && isfinite(rate) && rate > 0) {
         ASPAdSurface *surface = ASPManualSkipSurfaceForPlayer(self, !gSpeedNative);
         if (surface) {
             ASPSpeedPrepareRate(self);
@@ -266,12 +275,13 @@ static NSString *webSpeedJS(void) {
     dispatch_once(&once, ^{ channel = [[NSUUID UUID] UUIDString]; });
     NSDictionary *config = @{
         @"rate": @(ASPSpeedRate()),
+        @"automatic": @(gAutomaticAds),
         @"speedVideo": @(gSpeedVideo),
         @"compressTimers": @(gWebTimers),
         @"accelerateClock": @(gWebClock),
         @"forceInline": @(gForceInline),
         @"recognizedAd": @NO,
-        @"autoComplete": @(gAutoInteract),
+        @"autoComplete": @(gAutoInteract && gAutomaticAds),
         @"preventRedirects": @(gBlockRedirects),
                 @"skipChannel": channel,
     };
@@ -372,15 +382,24 @@ static void refreshAdContexts(void) {
     for (WKWebView *web in gWebViews.allObjects) setWebContext(web, nil);
     for (ASPAdSurface *surface in surfaces) {
         ASPAdCompletionTrackController(surface.owner);
-        if (gSpeedVideo) {
+        if (gAutomaticAds && gSpeedVideo) {
             for (AVPlayer *player in surface.players) ASPSpeedAcceleratePlayer(player, surface.root);
         }
     }
 }
 
 static void scheduleAdPoll(void) {
-    if (!gActive || gPollScheduled || UIApplication.sharedApplication.applicationState != UIApplicationStateActive ||
-        !ASPManualSkipAdSurfaces().count) return;
+    if (!gActive || gPollScheduled || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
+    BOOL hasSurface = ASPManualSkipAdSurfaces().count != 0;
+    if (!hasSurface) {
+        for (WKWebView *web in gWebViews.allObjects) {
+            if (web.window && !web.window.hidden) {
+                hasSurface = YES;
+                break;
+            }
+        }
+    }
+    if (!hasSurface) return;
     gPollScheduled = YES;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
         gPollScheduled = NO;
@@ -421,6 +440,7 @@ static void imageAdded(const struct mach_header *mh, intptr_t slide) {
         gWebClock = prefBool(prefs, @"AccelerateClock", YES);
         gForceInline = prefBool(prefs, @"ForceInline", NO);
         gManualSkip = prefBool(prefs, @"ManualSkip", YES);
+        gAutomaticAds = automaticAdsPreference(prefs, @"AutomaticAds", @"ManualSkip");
         gSpeedNative = prefBool(prefs, @"SpeedNativeVideo", NO);
         gAutoInteract = prefBool(prefs, @"AutoInteract", YES);
         gAutoDismiss = prefBool(prefs, @"AutoDismiss", YES);
@@ -448,6 +468,7 @@ static void imageAdded(const struct mach_header *mh, intptr_t slide) {
 
         // Per-app settings, keyed by this app's bundle id (resolved above).
         gManualSkip = prefBool(prefs, appKey(bid, kKeyManualSkip), YES);
+        gAutomaticAds = automaticAdsPreference(prefs, appKey(bid, @"AutomaticAds"), appKey(bid, kKeyManualSkip));
         gSpeedVideo  = prefBool(prefs, appKey(bid, kKeySpeedVideo), YES);
         gWebTimers   = prefBool(prefs, appKey(bid, kKeyWebTimers), YES);
         gWebClock    = prefBool(prefs, appKey(bid, kKeyWebClock), YES);
@@ -459,7 +480,7 @@ static void imageAdded(const struct mach_header *mh, intptr_t slide) {
         gInstallJB  = prefBool(prefs, appKey(bid, kKeyBypassJB), YES);
 #endif
         ASPManualSkipConfigure(gManualSkip);
-        ASPAdCompletionConfigure(gAutoDismiss);
+        ASPAdCompletionConfigure(gAutoDismiss && gAutomaticAds);
         installEnabled();
         _dyld_register_func_for_add_image(&imageAdded);
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification

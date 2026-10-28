@@ -22,11 +22,10 @@ const config = {
     forceInline: false,
     skipChannel: 'browser-verification-session'
 };
-const engine = source.replace('__ADSPEED_CONFIG__', JSON.stringify(config));
 let portA;
 let portB;
-function html(child, playback) {
-    return `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#eee}video{display:block;width:320px;height:180px}iframe{width:360px;height:210px;border:0}</style><script>window.realNow=performance.now.bind(performance);window.realTimeout=setTimeout.bind(window);</script><script src="/engine.js?playback=${playback ? 1 : 0}"></script><script>
+function html(child, playback, automatic) {
+    return `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#eee}video{display:block;width:320px;height:180px}iframe{width:360px;height:210px;border:0}</style><script>window.realNow=performance.now.bind(performance);window.realTimeout=setTimeout.bind(window);</script><script src="/engine.js?playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}"></script><script>
     window.fixture = {messages:[],closes:0,errors:[]};
     window.addEventListener('error',e=>fixture.errors.push(String(e.message)));
     window.addEventListener('unhandledrejection',e=>fixture.errors.push(String(e.reason)));
@@ -34,20 +33,30 @@ function html(child, playback) {
     window.sleep=ms=>new Promise(r=>realTimeout(r,ms));
     window.until=async (fn,label,ms=6000)=>{const end=realNow()+ms;while(realNow()<end){if(fn())return;await sleep(20)}throw Error('Timeout: '+label)};
     window.addVideo=async (loop=false)=>{const v=document.createElement('video');v.muted=true;v.playsInline=true;v.loop=loop;v.src='/fixture.mp4?n='+Math.random();v.preload='auto';v.dataset.seeks='0';v.addEventListener('seeking',()=>{v.dataset.seeks=String(Number(v.dataset.seeks)+1);if(parent!==window)report('seeking')});v.addEventListener('ended',()=>{if(parent!==window)report('ended')});document.body.append(v);await v.play();await until(()=>v.readyState>=3&&Number.isFinite(v.duration)&&v.seekable.length&&!v.paused&&!v.seeking&&v.currentTime>0.1,'video ready');return v};
-    window.state=()=>({closes:fixture.closes,videos:Array.from(document.querySelectorAll('video')).map(v=>({ended:v.ended,seeks:Number(v.dataset.seeks),current:v.currentTime,duration:v.duration,loop:v.loop,paused:v.paused,rate:v.playbackRate})),errors:fixture.errors});
+    window.state=()=>({closes:fixture.closes,virtual:performance.now(),real:realNow(),timerDone:!!fixture.timerDone,videos:Array.from(document.querySelectorAll('video')).map(v=>({ended:v.ended,seeks:Number(v.dataset.seeks),current:v.currentTime,duration:v.duration,loop:v.loop,paused:v.paused,rate:v.playbackRate})),errors:fixture.errors});
     window.report=phase=>parent.postMessage({fixtureReport:true,phase,state:state()},'*');
-    window.addEventListener('message',async e=>{if(e.data&&e.data.fixtureReport)fixture.messages.push({source:e.source,phase:e.data.phase,state:e.data.state});if(e.data&&e.data.fixtureCommand==='add-video'){await addVideo();report('added')}if(e.data&&e.data.fixtureCommand==='state')report('state')});
-    window.addFrame=async video=>{const frame=document.createElement('iframe');frame.src='http://127.0.0.1:${portB}/child?video='+(video?'1':'0')+'&playback=${playback ? 1 : 0}';document.body.append(frame);await until(()=>fixture.messages.some(m=>m.source===frame.contentWindow&&m.phase==='ready'),'frame ready');return frame};
+    window.addEventListener('message',async e=>{
+        if(e.data&&e.data.fixtureReport)fixture.messages.push({source:e.source,phase:e.data.phase,state:e.data.state});
+        if(e.data&&e.data.fixtureCommand==='add-video'){await addVideo();report('added')}
+        if(e.data&&e.data.fixtureCommand==='state')report('state');
+        if(e.data&&e.data.fixtureCommand==='sample')report(e.data.id);
+        if(e.data&&e.data.fixtureCommand==='playable'){
+            delete window.mraid;
+            const canvas=document.createElement('canvas');canvas.width=320;canvas.height=180;document.body.append(canvas);
+            setTimeout(()=>{fixture.timerDone=true;report('playable-timer')},1600);
+            report('playable-ready');
+        }
+    });
+    window.addFrame=async video=>{const frame=document.createElement('iframe');frame.src='http://127.0.0.1:${portB}/child?video='+(video?'1':'0')+'&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}';document.body.append(frame);await until(()=>fixture.messages.some(m=>m.source===frame.contentWindow&&m.phase==='ready'),'frame ready');return frame};
     ${child ? `window.addEventListener('DOMContentLoaded',async()=>{try{if(new URL(location.href).searchParams.get('video')==='1')await addVideo();report('ready')}catch(e){fixture.errors.push(String(e));report('error')}});` : ''}
     </script><body></body>`;
 }
 function serve(req, res) {
     const url = new URL(req.url, 'http://127.0.0.1');
     if (url.pathname === '/engine.js') {
-        const script =
-            url.searchParams.get('playback') === '1'
-                ? source.replace('__ADSPEED_CONFIG__', JSON.stringify(config))
-                : engine;
+        const script = source.replace('__ADSPEED_CONFIG__', JSON.stringify({
+            ...config, automatic: url.searchParams.get('automatic') !== '0'
+        }));
         res.writeHead(200, { 'Content-Type': 'text/javascript' });
         res.end(script);
         return;
@@ -76,7 +85,7 @@ function serve(req, res) {
         return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(html(url.pathname === '/child', url.searchParams.get('playback') === '1'));
+    res.end(html(url.pathname === '/child', url.searchParams.get('playback') === '1', url.searchParams.get('automatic') !== '0'));
 }
 const serverA = http.createServer(serve);
 const serverB = http.createServer(serve);
@@ -106,9 +115,9 @@ async function evaluate(sessionId, expression) {
     if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails));
     return r.result.value;
 }
-async function runCase(name, body, verify, playback = false) {
+async function runCase(name, body, verify, playback = false, automatic = true) {
     const { targetId } = await command('Target.createTarget', {
-        url: `http://127.0.0.1:${portA}/?case=${name}&playback=${playback ? 1 : 0}`
+        url: `http://127.0.0.1:${portA}/?case=${name}&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}`
     });
     const { sessionId } = await command('Target.attachToTarget', { targetId, flatten: true });
     try {
@@ -585,6 +594,138 @@ async function main() {
         assert.equal(result.events.at(-1), 'pointercancel');
         assert.equal(result.events.includes('pointerup'), false);
         assert.equal(result.events.includes('click'), false);
+        assert.deepEqual(result.errors, []);
+    }));
+    cases.push(await runCase('manual-only-video-and-playable-timing-require-a-press', `
+        const video = await addVideo();
+        let inputs = 0;
+        const button = document.createElement('button');
+        button.textContent = 'Tap to play';
+        button.style.cssText = 'display:block;width:300px;height:100px';
+        button.addEventListener('click', () => inputs++);
+        document.body.append(button);
+        __adspeed.setAdContext(true);
+        const beforeReal = realNow();
+        const beforeVirtual = performance.now();
+        await sleep(350);
+        const untouched = {rate: video.playbackRate, real: realNow() - beforeReal,
+            virtual: performance.now() - beforeVirtual, inputs};
+        const action = await __adspeed.skipAsync();
+        const requestedRate = video.playbackRate;
+        const speedReal = realNow();
+        const speedVirtual = performance.now();
+        await sleep(150);
+        const accelerated = {real: realNow() - speedReal, virtual: performance.now() - speedVirtual};
+        __adspeed.setAdContext(false);
+        __adspeed.setAdContext(true);
+        const resetReal = realNow();
+        const resetVirtual = performance.now();
+        await sleep(150);
+        return {untouched, action, requestedRate, accelerated, reset: {rate: video.playbackRate,
+            real: realNow() - resetReal, virtual: performance.now() - resetVirtual}, inputs, ...state()};
+    `, result => {
+        assert.equal(result.untouched.rate, 1);
+        assert.ok(result.untouched.virtual < result.untouched.real * 1.5);
+        assert.equal(result.action.kind, 'video');
+        assert.equal(result.action.handled, 1);
+        assert.equal(result.requestedRate, 16);
+        assert.ok(result.accelerated.virtual > result.accelerated.real * 10);
+        assert.equal(result.reset.rate, 1);
+        assert.ok(result.reset.virtual < result.reset.real * 1.5);
+        assert.equal(result.inputs, 0);
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }, true, false));
+    cases.push(await runCase('manual-only-canvas-timing-and-static-end-card', `
+        __adspeed.setAdContext(true);
+        const staticInspection = await __adspeed.inspectAsync();
+        const canvas = document.createElement('canvas');
+        canvas.width = 320;
+        canvas.height = 180;
+        document.body.append(canvas);
+        const inspection = await __adspeed.inspectAsync();
+        const started = realNow();
+        let timerFinished = false;
+        const action = await __adspeed.skipAsync(inspection.token);
+        setTimeout(() => timerFinished = true, 4000);
+        await until(() => timerFinished, 'manual canvas timer', 2500);
+        return {staticInspection, inspection, action, elapsed: realNow() - started,
+            interactions: __adspeed.stats.interactions, ...state()};
+    `, result => {
+        assert.equal(result.staticInspection.count, 0);
+        assert.equal(result.inspection.count, 1);
+        assert.equal(result.action.handled, 1);
+        assert.equal(result.action.kind, 'timing');
+        assert.ok(result.elapsed < 2500);
+        assert.equal(result.interactions, 0);
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }, false, false));
+    for (const automatic of [true, false]) {
+        cases.push(await runCase('nested-mraid-parent-child-without-bridge-' + (automatic ? 'automatic' : 'manual'), `
+            const frame = await addFrame(false);
+            frame.contentWindow.postMessage({fixtureCommand: 'playable'}, '*');
+            await until(() => fixture.messages.some(item => item.phase === 'playable-ready'), 'child canvas ready');
+            __adspeed.setAdContext(null);
+            await sleep(200);
+            frame.contentWindow.postMessage({fixtureCommand: 'sample', id: 'before'}, '*');
+            await until(() => fixture.messages.some(item => item.phase === 'before'), 'child before sample');
+            const before = fixture.messages.find(item => item.phase === 'before').state;
+            const inspection = await __adspeed.inspectAsync();
+            const action = ${automatic ? 'null' : 'await __adspeed.skipAsync(inspection.token)'};
+            await until(() => fixture.messages.some(item => item.phase === 'playable-timer'), 'child timer accelerated', 1500);
+            frame.contentWindow.postMessage({fixtureCommand: 'sample', id: 'after'}, '*');
+            await until(() => fixture.messages.some(item => item.phase === 'after'), 'child after sample');
+            const after = fixture.messages.find(item => item.phase === 'after').state;
+            return {inspection, action, before, after, ...state()};
+        `, result => {
+            assert.equal(result.inspection.count, 1);
+            if (!automatic) {
+                assert.equal(result.action.handled, 1);
+                assert.equal(result.action.kind, 'timing');
+                assert.ok(result.after.virtual - result.before.virtual > (result.after.real - result.before.real) * 8);
+            }
+            assert.equal(result.after.timerDone, true);
+            assert.equal(result.after.closes, 0);
+            assert.deepEqual(result.after.errors, []);
+            assert.deepEqual(result.errors, []);
+        }, false, automatic));
+    }
+    cases.push(await runCase('css-and-web-animations-16x-pause-base-rate-cleanup', `
+        const style = document.createElement('style');
+        style.textContent = '@keyframes fixtureMove{from{transform:translateX(0)}to{transform:translateX(40px)}}.animated{width:100px;height:100px;background:#345;animation:fixtureMove 16s linear infinite}';
+        document.head.append(style);
+        const css = document.createElement('div');
+        css.className = 'animated';
+        document.body.append(css);
+        const target = document.createElement('div');
+        target.style.cssText = 'width:100px;height:100px;background:#567';
+        document.body.append(target);
+        const web = target.animate([{transform:'translateX(0)'},{transform:'translateX(40px)'}],
+            {duration:16000,iterations:Infinity});
+        await web.ready;
+        const cssAnimation = css.getAnimations()[0];
+        __adspeed.setAdContext(true);
+        const requested = [web.playbackRate, cssAnimation.playbackRate];
+        const originalTime = web.currentTime;
+        const started = realNow();
+        await sleep(150);
+        const progression = {real: realNow() - started, animated: web.currentTime - originalTime};
+        web.pause();
+        await web.ready;
+        await until(() => web.playbackRate === 1, 'paused animation releases speed');
+        const paused = {state:web.playState,rate:web.playbackRate};
+        cssAnimation.playbackRate = 0.5;
+        await until(() => cssAnimation.playbackRate === 8, 'new SDK base rate');
+        __adspeed.setAdContext(false);
+        return {requested, progression, paused, restored:cssAnimation.playbackRate, ...state()};
+    `, result => {
+        assert.deepEqual(result.requested, [16, 16]);
+        assert.ok(result.progression.animated > result.progression.real * 8);
+        assert.equal(result.paused.state, 'paused');
+        assert.equal(result.paused.rate, 1);
+        assert.equal(result.restored, 0.5);
+        assert.equal(result.closes, 0);
         assert.deepEqual(result.errors, []);
     }));
     const report = {

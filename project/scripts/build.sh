@@ -35,8 +35,8 @@ test -f "$package"
 python3 scripts/verify-package.py "$package" "$variant" > "$output_dir/package-check.json"
 cp "$package" "$output_dir/"
 {
-    if [ -f SOURCE_COMMIT ]; then
-        printf 'commit=%s\n' "$(cat SOURCE_COMMIT)"
+    if [ -f ../SOURCE_COMMIT ]; then
+        printf 'commit=%s\n' "$(cat ../SOURCE_COMMIT)"
     else
         printf 'commit=%s\n' "$(git rev-parse HEAD 2>/dev/null || printf unknown)"
     fi

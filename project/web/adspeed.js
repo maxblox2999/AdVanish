@@ -1,6 +1,4 @@
-#pragma once
-
-static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: Copyright (C) 2026 maxblox2999.
+// AdVanish contributions: Copyright (C) 2026 maxblox2999.
 // GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
 
 (function () {
@@ -25,6 +23,10 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
     var recognizedAd = !!(configuration && configuration.recognizedAd);
     var contextPolicy = configuration && configuration.recognizedAd === null ? null : recognizedAd;
     var autoComplete = !!(configuration && configuration.autoComplete);
+    var automatic = !(configuration && configuration.automatic === false);
+    var manualContext = false;
+    var timerHooks = 0;
+    var clockHooks = 0;
     var preventRedirects = !!(configuration && configuration.preventRedirects);
     var skipChannel = configuration && configuration.skipChannel;
     var nativeTimeout = window.setTimeout;
@@ -35,6 +37,8 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
     var nativePerformance = window.performance;
     var nativePerformanceNow = nativePerformance && nativePerformance.now;
     var states = new WeakMap();
+    var animationStates = new WeakMap();
+    var animationLeases = new Map();
     var manuallyAccelerated = new Set();
     var manualCleanupHandle = null;
     var pollHandle = null;
@@ -54,6 +58,8 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
         redirectsBlocked: 0,
         mediaFailures: 0,
         clockFailures: 0,
+        timerFailures: 0,
+        animationFailures: 0,
         frameRequests: 0
     };
 
@@ -95,6 +101,30 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
         }
         advance(timerClock);
         fast = nextFast;
+    }
+
+    function accelerationActive() {
+        return recognizedAd && (automatic || manualContext) && !pageHidden();
+    }
+
+    function timingAvailable() {
+        return timerHooks > 0 || clockHooks > 0
+            || (accelerateClock && typeof document.getAnimations === 'function');
+    }
+
+    function authorizeTiming() {
+        if (!recognizedAd || pageHidden() || !timingAvailable()) return false;
+        manualContext = true;
+        changeMode(true);
+        schedulePoll();
+        return true;
+    }
+
+    function revokeManualContext() {
+        manualContext = false;
+        changeMode(false);
+        manuallyAccelerated.forEach(restoreManualRate);
+        restoreAnimations();
     }
 
     function pageHidden() {
@@ -169,6 +199,10 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
         var source = String(video.currentSrc || video.src || '');
         var state = states.get(video);
         if (!state || state.source !== source) {
+            if (state && !automatic && manualContext) {
+                contextGeneration += 1;
+                revokeManualContext();
+            }
             if (state) restoreManualRate(video);
             state = {source: source, manualAttempts: 0, rateAttempts: 0, rateFailed: false};
             states.set(video, state);
@@ -228,6 +262,69 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
         delete state.manualEnded;
     }
 
+    function releaseAnimation(animation) {
+        var lease = animationLeases.get(animation);
+        animationLeases.delete(animation);
+        if (!lease) return;
+        try {
+            if (animation.playbackRate === lease.appliedRate) animation.playbackRate = lease.originalRate;
+        } catch (error) {
+            stats.animationFailures += 1;
+        }
+    }
+
+    function restoreAnimations() {
+        animationLeases.forEach(function (lease, animation) { releaseAnimation(animation); });
+    }
+
+    function updateAnimations(active) {
+        if (!active || !accelerateClock || typeof document.getAnimations !== 'function') {
+            restoreAnimations();
+            return;
+        }
+        var current = new Set();
+        try {
+            var animations = document.getAnimations();
+            for (var index = 0; index < Math.min(animations.length, 64); index += 1) {
+                var animation = animations[index];
+                var target = animation.effect && animation.effect.target;
+                if (!target || animation.playState !== 'running' || !visible(target) || !exposed(target)) continue;
+                current.add(animation);
+                var lease = animationLeases.get(animation);
+                var base = animation.playbackRate;
+                if (lease && base === lease.appliedRate) continue;
+                if (typeof base !== 'number' || !isFinite(base) || base <= 0) {
+                    releaseAnimation(animation);
+                    continue;
+                }
+                var attempts = animationStates.get(animation) || 0;
+                if (attempts >= maximumRateAttempts) {
+                    releaseAnimation(animation);
+                    continue;
+                }
+                animationStates.set(animation, attempts + 1);
+                var applied = base * rate;
+                if (!isFinite(applied)) {
+                    releaseAnimation(animation);
+                    continue;
+                }
+                try {
+                    animation.playbackRate = applied;
+                    if (animation.playbackRate !== applied) throw new Error('Animation rate was not accepted');
+                    animationLeases.set(animation, {originalRate: base, appliedRate: applied});
+                } catch (error) {
+                    stats.animationFailures += 1;
+                    releaseAnimation(animation);
+                }
+            }
+        } catch (error) {
+            stats.animationFailures += 1;
+        }
+        animationLeases.forEach(function (lease, animation) {
+            if (!current.has(animation)) releaseAnimation(animation);
+        });
+    }
+
     function manualEligible(video) {
         return playing(video) && !video.loop && typeof video.duration === 'number'
             && isFinite(video.duration) && video.duration > 0
@@ -239,7 +336,10 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
     function manualAction(video) {
         var state = mediaState(video);
         if (!manualEligible(video) || state.manualAttempts >= 3) return false;
-        if (video.playbackRate >= rate) return true;
+        if (video.playbackRate >= rate) {
+            authorizeTiming();
+            return true;
+        }
         manuallyAccelerated.forEach(function (existing) {
             if (existing.isConnected === false) restoreManualRate(existing);
         });
@@ -256,6 +356,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
             state.manualRate = rate;
             manuallyAccelerated.add(video);
             stats.rateChanges += 1;
+            authorizeTiming();
             return true;
         } catch (error) {
             try {
@@ -304,7 +405,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
                         continue;
                     }
                     var state = mediaState(video);
-                    if (recognizedAd && forceInline) {
+                    if (accelerationActive() && forceInline) {
                         if (!video.hasAttribute('playsinline')) {
                             video.setAttribute('playsinline', '');
                         }
@@ -313,12 +414,13 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
                         }
                         video.playsInline = true;
                     }
-                    if (recognizedAd) applyRate(video, state);
+                    if (accelerationActive()) applyRate(video, state);
                 } catch (error) {
                     stats.mediaFailures += 1;
                 }
             }
-            changeMode(recognizedAd);
+            changeMode(accelerationActive());
+            updateAnimations(accelerationActive());
         } finally {
             refreshing = false;
         }
@@ -350,7 +452,11 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
 
     function visibilityChanged() {
         if (pageHidden()) {
+            manualContext = false;
+            contextGeneration += 1;
+            if (cancelInteraction) cancelInteraction();
             manuallyAccelerated.forEach(restoreManualRate);
+            restoreAnimations();
             if (manualCleanupHandle !== null) {
                 nativeClearTimeout.call(window, manualCleanupHandle);
                 manualCleanupHandle = null;
@@ -372,58 +478,68 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
     }
 
     if (compressTimers && typeof nativeTimeout === 'function') {
-        window.setTimeout = function (callback, delay) {
-            var args = Array.prototype.slice.call(arguments);
-            var period = timerDelay(delay);
-            if (typeof callback === 'function' && period > 0
-                && typeof nativeInterval === 'function' && typeof nativeClearInterval === 'function') {
+        try {
+            window.setTimeout = function (callback, delay) {
+                var args = Array.prototype.slice.call(arguments);
+                var period = timerDelay(delay);
+                if (typeof callback === 'function' && period > 0
+                    && typeof nativeInterval === 'function' && typeof nativeClearInterval === 'function') {
+                    var next = advance(timerClock) + period;
+                    var handle;
+                    args[0] = function () {
+                        if (pageHidden()) {
+                            changeMode(false);
+                        }
+                        if (advance(timerClock) + 0.001 < next) {
+                            return;
+                        }
+                        nativeClearInterval.call(window, handle);
+                        return callback.apply(this, arguments);
+                    };
+                    args[1] = period / rate;
+                    handle = nativeInterval.apply(this, args);
+                    return handle;
+                }
+                if (args.length > 1) {
+                    args[1] = period / (fast && !pageHidden() ? rate : 1);
+                }
+                return nativeTimeout.apply(this, args);
+            };
+            timerHooks += 1;
+        } catch (error) {
+            stats.timerFailures += 1;
+        }
+    }
+    if (compressTimers && typeof nativeInterval === 'function') {
+        try {
+            window.setInterval = function (callback, delay) {
+                var args = Array.prototype.slice.call(arguments);
+                var period = timerDelay(delay);
+                if (typeof callback !== 'function' || period === 0) {
+                    if (args.length > 1) {
+                        args[1] = period / (fast && !pageHidden() ? rate : 1);
+                    }
+                    return nativeInterval.apply(this, args);
+                }
                 var next = advance(timerClock) + period;
-                var handle;
                 args[0] = function () {
                     if (pageHidden()) {
                         changeMode(false);
                     }
-                    if (advance(timerClock) + 0.001 < next) {
+                    var now = advance(timerClock);
+                    if (now + 0.001 < next) {
                         return;
                     }
-                    nativeClearInterval.call(window, handle);
+                    next += (Math.floor((now - next) / period) + 1) * period;
                     return callback.apply(this, arguments);
                 };
                 args[1] = period / rate;
-                handle = nativeInterval.apply(this, args);
-                return handle;
-            }
-            if (args.length > 1) {
-                args[1] = period / (fast && !pageHidden() ? rate : 1);
-            }
-            return nativeTimeout.apply(this, args);
-        };
-    }
-    if (compressTimers && typeof nativeInterval === 'function') {
-        window.setInterval = function (callback, delay) {
-            var args = Array.prototype.slice.call(arguments);
-            var period = timerDelay(delay);
-            if (typeof callback !== 'function' || period === 0) {
-                if (args.length > 1) {
-                    args[1] = period / (fast && !pageHidden() ? rate : 1);
-                }
                 return nativeInterval.apply(this, args);
-            }
-            var next = advance(timerClock) + period;
-            args[0] = function () {
-                if (pageHidden()) {
-                    changeMode(false);
-                }
-                var now = advance(timerClock);
-                if (now + 0.001 < next) {
-                    return;
-                }
-                next += (Math.floor((now - next) / period) + 1) * period;
-                return callback.apply(this, arguments);
             };
-            args[1] = period / rate;
-            return nativeInterval.apply(this, args);
-        };
+            timerHooks += 1;
+        } catch (error) {
+            stats.timerFailures += 1;
+        }
     }
 
     if (accelerateClock) {
@@ -435,6 +551,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
                     return Math.floor(advance(dateClock));
                 }
             });
+            clockHooks += 1;
         } catch (error) {
             stats.clockFailures += 1;
         }
@@ -447,6 +564,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
                         return advance(performanceClock);
                     }
                 });
+                clockHooks += 1;
             } catch (error) {
                 stats.clockFailures += 1;
             }
@@ -470,7 +588,8 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
             var node = nodes[index];
             var child = node.contentWindow;
             var visibleFrame = !pageHidden() && visible(node) && exposed(node);
-            var active = visibleFrame && contextPolicy === null ? null : recognizedAd && visibleFrame;
+            var active = visibleFrame && recognizedAd ? true
+                : visibleFrame && contextPolicy === null ? null : false;
             if (!child || frameContexts.get(child) === active) continue;
             try {
                 child.postMessage({adSpeedContext: skipChannel, active: active}, '*');
@@ -485,12 +604,14 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
         if (recognizedAd !== active) {
             if (cancelInteraction) cancelInteraction();
             recognizedAd = active;
+            manualContext = false;
             contextGeneration += 1;
             interacted = new WeakMap();
             interactionCount = 0;
             interactionBusy = false;
             if (!active) {
                 manuallyAccelerated.forEach(restoreManualRate);
+                restoreAnimations();
                 if (pollHandle !== null) nativeClearTimeout.call(window, pollHandle);
                 pollHandle = null;
             }
@@ -654,7 +775,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
 
     function interact() {
         readyMraid();
-        if (!autoComplete || !recognizedAd || pageHidden() || interactionBusy || interactionCount >= 12 || !readyMraid()) return;
+        if (!automatic || !autoComplete || !recognizedAd || pageHidden() || interactionBusy || interactionCount >= 12 || !readyMraid()) return;
         var controls = document.querySelectorAll('button,[role="button"],[aria-label]');
         for (var index = 0; index < Math.min(controls.length, 128); index += 1) {
             var node = controls[index];
@@ -742,10 +863,38 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
         return result;
     }
 
+    function playableSurface() {
+        var nodes = document.querySelectorAll('canvas,[role="timer"],time');
+        for (var index = 0; index < Math.min(nodes.length, 64); index += 1) {
+            if (visible(nodes[index]) && exposed(nodes[index])) return true;
+        }
+        var controls = document.querySelectorAll('button,[role="button"],[aria-label]');
+        for (var controlIndex = 0; controlIndex < Math.min(controls.length, 128); controlIndex += 1) {
+            var node = controls[controlIndex];
+            if (controlAction(node) && visible(node) && exposed(node)) return true;
+        }
+        if (accelerateClock && typeof document.getAnimations === 'function') {
+            try {
+                var animations = document.getAnimations();
+                for (var animationIndex = 0; animationIndex < Math.min(animations.length, 64); animationIndex += 1) {
+                    var animation = animations[animationIndex];
+                    var target = animation.effect && animation.effect.target;
+                    if (target && animation.playState === 'running' && visible(target) && exposed(target)) return true;
+                }
+            } catch (error) {
+                stats.animationFailures += 1;
+            }
+        }
+        return false;
+    }
+
     function capture() {
         var frames = frameCandidates();
-        var snapshot = {generation: generation, videos: [], children: frames.children,
+        var snapshot = {generation: generation, context: contextGeneration, videos: [], children: frames.children,
             unresolved: frames.unresolved, candidates: []};
+        snapshot.timing = recognizedAd && !pageHidden() && timingAvailable()
+            && document.readyState !== 'loading' && (contextPolicy === true || recognizedMraid())
+            && playableSurface();
         if (pageHidden()) snapshot.unresolved = 1;
         try {
             var videos = document.getElementsByTagName('video');
@@ -773,10 +922,10 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
     }
 
     function unchanged(snapshot) {
-        if (pageHidden() || generation !== snapshot.generation) return false;
+        if (pageHidden() || generation !== snapshot.generation || contextGeneration !== snapshot.context) return false;
         var current = capture();
         if (current.unresolved !== snapshot.unresolved || current.videos.length !== snapshot.videos.length
-            || current.children.length !== snapshot.children.length) return false;
+            || current.children.length !== snapshot.children.length || current.timing !== snapshot.timing) return false;
         for (var index = 0; index < snapshot.videos.length; index += 1) {
             var before = snapshot.videos[index];
             var after = current.videos[index];
@@ -840,6 +989,10 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
                     route = {child: snapshot.children[index], token: result.token};
                 }
             });
+            if (!count && !unresolved && !snapshot.videos.length && snapshot.timing) {
+                count = 1;
+                route = {timing: true};
+            }
             if (count > 1 || unresolved) return {count: count, unresolved: unresolved, token: null};
             var token = identifier();
             if (snapshots.size >= 8) snapshots.delete(snapshots.keys().next().value);
@@ -883,15 +1036,25 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
                 return {handled: 0, unresolved: 1};
             }
             snapshots.delete(token);
+            if (record.route.timing) {
+                var timing = authorizeTiming();
+                if (timing) refresh();
+                return {handled: timing ? 1 : 0, unresolved: timing ? 0 : 1, kind: 'timing'};
+            }
             if (record.route.video) {
                 var video = record.route.video;
                 if (!manualEligible(video)) return {handled: 0, unresolved: 1};
                 var handled = manualAction(video) ? 1 : 0;
-                return {handled: handled, unresolved: handled ? 0 : 1};
+                if (handled) refresh();
+                return {handled: handled, unresolved: handled ? 0 : 1, kind: 'video'};
             }
             if (depth >= maximumFrameDepth) return {handled: 0, unresolved: 1};
             return query(record.route.child.source, 'act', record.route.token, depth).then(function (result) {
                 if (!result.handled && !unchanged(record.snapshot)) return {handled: 0, unresolved: 1};
+                if (result.handled) {
+                    authorizeTiming();
+                    refresh();
+                }
                 return result;
             });
         }, function () {
@@ -918,9 +1081,17 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
 
     function requestSkip() {
         var snapshot = capture();
-        if (snapshot.unresolved || snapshot.children.length || snapshot.candidates.length !== 1) return 0;
+        if (snapshot.unresolved || snapshot.children.length) return 0;
+        if (!snapshot.candidates.length && !snapshot.videos.length && snapshot.timing) {
+            var timing = authorizeTiming();
+            if (timing) refresh();
+            return timing ? 1 : 0;
+        }
+        if (snapshot.candidates.length !== 1) return 0;
         var video = snapshot.candidates[0];
-        return manualAction(video) ? 1 : 0;
+        var handled = manualAction(video);
+        if (handled) refresh();
+        return handled ? 1 : 0;
     }
 
     var api = Object.freeze({
@@ -947,6 +1118,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
         try {
             parent.postMessage({adSpeedReply: skipChannel, id: request.id, phase: request.phase,
                 count: result.count, token: result.token, handled: result.handled,
+                kind: result.kind,
                 unresolved: result && result.unresolved, valid: result === true}, '*');
         } catch (error) {
             // The parent can disappear while discovery is pending.
@@ -981,14 +1153,15 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
                     ? bounded && (data.count === 0 || data.count === 1 || data.count === 2)
                         && (data.count > 1 || data.unresolved || validIdentifier(data.token))
                     : record.phase === 'validate' ? typeof data.valid === 'boolean'
-                    : bounded && (data.handled === 0 || data.handled === 1);
+                    : bounded && (data.handled === 0 || data.handled === 1)
+                        && (data.kind === undefined || data.kind === 'timing' || data.kind === 'video');
                 if (!valid) return;
                 pendingMessages.delete(data.id);
                 nativeClearTimeout.call(window, record.timer);
                 record.resolve(record.phase === 'inspect'
                     ? {count: data.count, unresolved: data.unresolved, token: data.token}
                     : record.phase === 'validate' ? data.valid
-                    : {handled: data.handled, unresolved: data.unresolved});
+                    : {handled: data.handled, unresolved: data.unresolved, kind: data.kind});
                 return;
             }
             if (window.parent === window || event.source !== window.parent || data.adSpeedProtocol !== skipChannel
@@ -1030,6 +1203,9 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
         }
         function sourceChanged(event) {
             generation += 1;
+            if (!automatic) {
+                revokeManualContext();
+            }
             if (event.target && String(event.target.tagName).toLowerCase() === 'video') {
                 restoreManualRate(event.target);
                 states.delete(event.target);
@@ -1059,4 +1235,3 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
     refresh();
     schedulePoll();
 }());
-)ADSPEEDJS";

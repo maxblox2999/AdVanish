@@ -27,19 +27,22 @@
         NSString *enableKey = [@"enabled-" stringByAppendingString:[self bid]];
         BOOL enabled  = [self boolPref:enableKey default:NO];
         BOOL speedOn  = [self boolPref:[self k:@"SpeedUpVideo"] default:YES];
+        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:[ASPListBase prefsPathForDomain:@"com.34306-sr.adspeed"]];
+        BOOL automaticDefault = ![prefs[[self k:@"ManualSkip"]] boolValue];
 
         [specs addObject:[self groupNamed:nil
                                    footer:@"Settings for this app only. They apply next time the app is launched."]];
         [specs addObject:[self switchSpecifierNamed:@"Enabled" key:enableKey default:NO]];
         [specs addObject:[self groupNamed:@"Ad playback"
-                                   footer:@"16x playback for supported ads. The button uses the same speed system. "
-                                          @"Rewards still require the SDK's completion and validation."]];
+                                   footer:@"Automatic ads enables speed, playable assistance and supported closing without a press. "
+                                          @"Turn it off to require the button for 16x video or supported web timing. Manual mode never presses Close."]];
+        [specs addObject:[self disable:[self switchSpecifierNamed:@"Automatic ads" key:[self k:@"AutomaticAds"] default:automaticDefault] when:!enabled]];
         [specs addObject:[self disable:[self switchSpecifierNamed:@"Show fast-forward button" key:[self k:@"ManualSkip"] default:YES] when:!enabled]];
         [specs addObject:[self disable:[self switchSpecifierNamed:@"Bypass ads jailbreak detection" key:[self k:@"BypassJailbreak"] default:YES] when:!enabled]];
 
         [specs addObject:[self groupNamed:@"Fast-forward ads"
                                    footer:!enabled ? @"Enable this app first."
-                                   : @"Automatic video acceleration. Force inline can break ads. "
+                                   : @"Video acceleration when automatic ads is enabled. The button remains available independently. Force inline can break ads. "
                                      @"Include native video also speeds in-game cutscenes."]];
         [specs addObject:[self disable:[self switchSpecifierNamed:@"Fast-forward ads" key:[self k:@"SpeedUpVideo"] default:YES] when:!enabled]];
         if (speedOn) {
@@ -55,7 +58,7 @@
         [specs addObject:[self disable:[self switchSpecifierNamed:@"Accelerate gameplay clock" key:[self k:@"AccelerateClock"] default:YES] when:!enabled]];
 
         [specs addObject:[self groupNamed:@"Completion"
-                                   footer:@"Supported playable controls can receive generated input. Unknown games "
+                                   footer:@"With automatic ads enabled, supported playable controls can receive generated input. Unknown games "
                                           @"and controls that require a real touch still need interaction. "
                                           @"Auto-close waits for a genuine SDK completion signal."]];
         [specs addObject:[self disable:[self switchSpecifierNamed:@"Assist supported playables" key:[self k:@"AutoInteract"] default:YES] when:!enabled]];
@@ -69,8 +72,14 @@
 
 // Rebuild dependent rows after a switch changes.
 - (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
-    [super setPreferenceValue:value specifier:specifier];
     NSString *changed = [specifier propertyForKey:@"key"];
+    if ([changed isEqualToString:[self k:@"ManualSkip"]]) {
+        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:[ASPListBase prefsPathForDomain:@"com.34306-sr.adspeed"]];
+        if (!prefs[[self k:@"AutomaticAds"]]) {
+            [self setBool:![prefs[[self k:@"ManualSkip"]] boolValue] forKey:[self k:@"AutomaticAds"]];
+        }
+    }
+    [super setPreferenceValue:value specifier:specifier];
     if ([changed isEqualToString:[@"enabled-" stringByAppendingString:[self bid]]] ||
         [changed isEqualToString:[self k:@"ManualSkip"]] ||
         [changed isEqualToString:[self k:@"SpeedUpVideo"]] ||

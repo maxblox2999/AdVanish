@@ -14,4 +14,4 @@ The upstream project licenses SoulRune's rewrites and new code from commit `2085
 
 The original preference domain `com.34306-sr.adspeed` and preference-bundle name remain for migration compatibility. They are internal identifiers, not a second installed tweak. The package conflicts with the older AdSpeed packages to avoid simultaneous hook installations.
 
-Theos, its submodules, the patched SDK repository and GitHub Actions are external build dependencies. Their selected revisions are recorded in the workflow and `build/dependencies.env`. They are not represented as AdVanish-authored source.
+Theos, its submodules, the patched SDK repository and GitHub Actions are external build dependencies. Their selected revisions are recorded in the workflow and `project/build/dependencies.env`. They are not represented as AdVanish-authored source.

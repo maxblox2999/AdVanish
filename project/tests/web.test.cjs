@@ -32,6 +32,7 @@ function environment(configuration = {}, options = {}) {
         },
         querySelectorAll(selector) {
             if (selector === 'iframe,frame') return frameNodes;
+            if (selector === 'canvas,[role="timer"],time') return controls.filter(node => node.tagName === 'CANVAS');
             assert.equal(selector, 'button,[role="button"],[aria-label]');
             return controls;
         },
@@ -92,6 +93,9 @@ function environment(configuration = {}, options = {}) {
     }
     sandbox.setTimeout = timer('timeout');
     sandbox.setInterval = timer('interval');
+    for (const name of options.readOnlyTimers || []) {
+        Object.defineProperty(sandbox, name, {value: sandbox[name], writable: false, configurable: false});
+    }
     sandbox.clearTimeout = (handle) => tasks.delete(handle);
     sandbox.clearInterval = (handle) => tasks.delete(handle);
     const nativeFrameTimer = sandbox.setTimeout;
@@ -1453,4 +1457,275 @@ test('a read-only window.open does not prevent independent acceleration from ini
     assert.equal(media.playbackRate, 16);
     assert.equal(env.sandbox.open, originalOpen);
     assert.equal(env.sandbox.__adspeed.stats.interactionFailures, 1);
+});
+
+test('a MRAID-recognized parent authorizes visible child timing without another bridge', () => {
+    const parent = environment(adConfig);
+    const child = environment(adConfig);
+    installClose(parent);
+    connect(parent, child);
+    parent.sandbox.__adspeed.setAdContext(null);
+    parent.advance(100);
+    child.advance(100);
+    assert.equal(parent.sandbox.performance.now(), 1600);
+    assert.equal(child.sandbox.performance.now(), 1600);
+    parent.document.elementFromPoint = () => ({tagName: 'DIV'});
+    parent.observers[0].callback([]);
+    child.advance(100);
+    assert.equal(child.sandbox.performance.now(), 1700);
+});
+
+for (const method of ['setTimeout', 'setInterval']) {
+    test('a read-only ' + method + ' does not disable independent video and clock hooks', () => {
+        const env = environment(adConfig, {readOnlyTimers: [method]});
+        const media = video(env);
+        env.sandbox.__adspeed.setAdContext(true);
+        env.advance(100);
+        assert.equal(media.playbackRate, 16);
+        assert.equal(env.sandbox.performance.now(), 1600);
+        assert.equal(env.sandbox.__adspeed.stats.timerFailures, 1);
+        let fired = 0;
+        const working = method === 'setTimeout' ? 'setInterval' : 'setTimeout';
+        env.sandbox[working](() => fired++, 1600);
+        env.advance(100);
+        assert.equal(fired, 1);
+    });
+}
+
+const manualAdConfig = {...adConfig, automatic: false};
+
+test('manual-only video and timing remain unchanged until pressed and reset with context', async () => {
+    const env = environment(manualAdConfig);
+    installClose(env);
+    const node = control(env, 'Tap to play');
+    const media = video(env);
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(300);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(env.sandbox.performance.now(), 300);
+    assert.equal(node.events.length, 0);
+    const action = await env.sandbox.__adspeed.skipAsync();
+    assert.equal(action.handled, 1);
+    assert.equal(action.kind, 'video');
+    assert.equal(media.playbackRate, 16);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1900);
+    assert.equal(node.events.length, 0);
+    env.sandbox.__adspeed.setAdContext(false);
+    assert.equal(media.playbackRate, 1);
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(100);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(env.sandbox.performance.now(), 2000);
+    assert.equal(node.events.length, 0);
+});
+
+test('manual-only recognized playable reports applied timing without inventing completion', async () => {
+    const env = environment(manualAdConfig);
+    const closes = installClose(env);
+    const node = control(env, 'Start game');
+    env.sandbox.__adspeed.setAdContext(true);
+    const before = await env.sandbox.__adspeed.inspectAsync();
+    assert.equal(before.count, 1);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 100);
+    const action = await env.sandbox.__adspeed.skipAsync(before.token);
+    assert.equal(action.handled, 1);
+    assert.equal(action.kind, 'timing');
+    let complete = 0;
+    env.sandbox.setTimeout(() => complete++, 1600);
+    env.advance(100);
+    assert.equal(complete, 1);
+    assert.equal(env.sandbox.performance.now(), 1700);
+    assert.equal(node.events.length, 0);
+    assert.equal(closes(), 0);
+});
+
+test('manual timing permission is lost on hiding even if the page immediately returns', async () => {
+    const env = environment(manualAdConfig);
+    control(env, 'Start game');
+    env.sandbox.__adspeed.setAdContext(true);
+    const stale = await env.sandbox.__adspeed.inspectAsync();
+    const action = await env.sandbox.__adspeed.skipAsync();
+    assert.equal(action.kind, 'timing');
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1600);
+    env.hide(true);
+    env.hide(false);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1700);
+    assert.equal((await env.sandbox.__adspeed.skipAsync(stale.token)).handled, 0);
+});
+
+test('manual timing tokens reject a different ad context and replaced video', async () => {
+    const env = environment(manualAdConfig);
+    control(env, 'Start game');
+    env.sandbox.__adspeed.setAdContext(true);
+    const stale = await env.sandbox.__adspeed.inspectAsync();
+    env.sandbox.__adspeed.setAdContext(false);
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal((await env.sandbox.__adspeed.skipAsync(stale.token)).handled, 0);
+    const media = video(env);
+    const selected = await env.sandbox.__adspeed.inspectAsync();
+    media.currentSrc = 'https://example.invalid/new.mp4';
+    assert.equal((await env.sandbox.__adspeed.skipAsync(selected.token)).handled, 0);
+    assert.equal(media.playbackRate, 1);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 100);
+});
+
+test('manual-only source replacement revokes prior timing and video authorization', async () => {
+    const env = environment(manualAdConfig);
+    const media = video(env);
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1600);
+    media.currentSrc = 'https://example.invalid/new.mp4';
+    env.emit('loadstart', media);
+    env.advance(100);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(env.sandbox.performance.now(), 1700);
+});
+
+test('manual video on ordinary content never authorizes its timers or gameplay clock', async () => {
+    const env = environment(manualAdConfig);
+    const media = video(env);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).kind, 'video');
+    env.advance(100);
+    assert.equal(media.playbackRate, 16);
+    assert.equal(env.sandbox.performance.now(), 100);
+    assert.equal((await environment(manualAdConfig).sandbox.__adspeed.skipAsync()).handled, 0);
+});
+
+test('manual recognized nested playable is selected once without parent timing duplication', async () => {
+    const parent = environment(manualAdConfig);
+    const child = environment(manualAdConfig);
+    control(child, 'Start game');
+    connect(parent, child);
+    parent.sandbox.__adspeed.setAdContext(true);
+    const inspection = await parent.sandbox.__adspeed.inspectAsync();
+    assert.equal(inspection.count, 1);
+    const action = await parent.sandbox.__adspeed.skipAsync(inspection.token);
+    assert.equal(action.handled, 1);
+    assert.equal(action.kind, 'timing');
+    parent.advance(100);
+    child.advance(100);
+    assert.equal(parent.sandbox.performance.now(), 1600);
+    assert.equal(child.sandbox.performance.now(), 1600);
+});
+
+test('multiple recognized playable frames remain ambiguous and unmodified in manual mode', async () => {
+    const parent = environment(manualAdConfig);
+    const first = environment(manualAdConfig);
+    const second = environment(manualAdConfig);
+    control(first, 'Start game');
+    control(second, 'Start game');
+    connect(parent, first);
+    connect(parent, second);
+    parent.sandbox.__adspeed.setAdContext(true);
+    assert.equal((await parent.sandbox.__adspeed.inspectAsync()).count, 2);
+    assert.equal((await parent.sandbox.__adspeed.skipAsync()).handled, 0);
+    first.advance(100);
+    second.advance(100);
+    assert.equal(first.sandbox.performance.now(), 100);
+    assert.equal(second.sandbox.performance.now(), 100);
+});
+
+function animation(env, overrides = {}) {
+    const target = control(env, 'Artwork');
+    return Object.assign({effect: {target}, playbackRate: 1, playState: 'running',
+        play() { throw new Error('Acceleration cannot resume an animation'); }
+    }, overrides);
+}
+
+test('visible CSS and Web Animations use 16x base rate without repeated multiplication', () => {
+    const env = environment(adConfig);
+    const item = animation(env);
+    env.document.getAnimations = () => [item];
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal(item.playbackRate, 16);
+    env.advance(1000);
+    assert.equal(item.playbackRate, 16);
+    item.playbackRate = 0.5;
+    env.advance(250);
+    assert.equal(item.playbackRate, 8);
+    env.sandbox.__adspeed.setAdContext(false);
+    assert.equal(item.playbackRate, 0.5);
+});
+
+test('paused, removed and hidden animation leases restore without resuming', () => {
+    for (const reason of ['paused', 'removed', 'hidden']) {
+        const env = environment(adConfig);
+        const item = animation(env);
+        let entries = [item];
+        env.document.getAnimations = () => entries;
+        env.sandbox.__adspeed.setAdContext(true);
+        if (reason === 'paused') item.playState = 'paused';
+        if (reason === 'removed') entries = [];
+        if (reason === 'hidden') item.effect.target.hidden = true;
+        env.advance(250);
+        assert.equal(item.playbackRate, 1);
+        if (reason === 'paused') assert.equal(item.playState, 'paused');
+    }
+});
+
+test('animation cleanup preserves a newer SDK rate and work is bounded', () => {
+    const env = environment(adConfig);
+    const entries = Array.from({length: 70}, () => animation(env));
+    env.document.getAnimations = () => entries;
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal(entries.filter(item => item.playbackRate === 16).length, 64);
+    entries[0].playbackRate = 2;
+    env.hide(true);
+    assert.equal(entries[0].playbackRate, 2);
+    assert.equal(entries[1].playbackRate, 1);
+});
+
+test('manual-only animation waits for the timing request and releases on context loss', async () => {
+    const env = environment(manualAdConfig);
+    const item = animation(env);
+    env.document.getAnimations = () => [item];
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(300);
+    assert.equal(item.playbackRate, 1);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).kind, 'timing');
+    assert.equal(item.playbackRate, 16);
+    env.sandbox.__adspeed.setAdContext(false);
+    assert.equal(item.playbackRate, 1);
+});
+
+test('a recognized static end card does not claim a playable timing surface', async () => {
+    const env = environment(manualAdConfig);
+    installClose(env);
+    control(env, 'Install');
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal((await env.sandbox.__adspeed.inspectAsync()).count, 0);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 100);
+});
+
+test('animation speed rejects nonpositive, nonfinite and overflowing rates', () => {
+    const env = environment(adConfig);
+    const rates = [0, -1, NaN, Infinity, 1e308];
+    const entries = rates.map(playbackRate => animation(env, {playbackRate}));
+    env.document.getAnimations = () => entries;
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(1000);
+    entries.forEach((item, index) => assert.ok(Object.is(item.playbackRate, rates[index])));
+});
+
+test('a replaced source without loadstart cannot inherit manual ad timing permission', async () => {
+    const env = environment(manualAdConfig);
+    const media = video(env);
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1600);
+    media.currentSrc = 'https://example.invalid/replaced-without-event.mp4';
+    env.emit('play', media);
+    env.advance(100);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(env.sandbox.performance.now(), 1700);
 });

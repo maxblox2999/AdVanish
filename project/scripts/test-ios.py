@@ -21,9 +21,30 @@ def run(*command, timeout=120):
     return subprocess.check_output(command, text=True, timeout=timeout).strip()
 
 
-def main(video, output, injected=False):
+def simulator_devices():
+    try:
+        return json.loads(run("xcrun", "simctl", "list", "-j"))
+    except subprocess.TimeoutExpired:
+        print(json.dumps({"phase": "simulator startup", "retry": 1}), flush=True)
+        return json.loads(run("xcrun", "simctl", "list", "-j"))
+
+
+def source_commit():
+    record = ROOT.parent / "SOURCE_COMMIT"
+    if record.is_file():
+        return record.read_text().strip()
+    try:
+        return run("git", "-C", str(ROOT), "rev-parse", "HEAD")
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+
+
+def main(video, output, injected=False, manual=False):
+    output.unlink(missing_ok=True)
+    if manual and not injected:
+        raise ValueError("Manual-mode verification requires the injected framework")
     sdk = run("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
-    devices = json.loads(run("xcrun", "simctl", "list", "-j"))
+    devices = simulator_devices()
     runtimes = [item for item in devices["runtimes"]
                 if item.get("isAvailable") and item["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]
     if not runtimes:
@@ -57,7 +78,11 @@ def main(video, output, injected=False):
                 "UILaunchScreen": {},
                 "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
             }
+            if manual:
+                info["AdVanishManualFixture"] = True
             (app / "Info.plist").write_bytes(plistlib.dumps(info))
+            if injected:
+                (app / "AdVanish.plist").write_bytes(plistlib.dumps({"AutomaticAds": not manual, "ManualSkip": True}))
             shutil.copyfile(video, app / "fixture.mp4")
             command = ["xcrun", "--sdk", "iphonesimulator", "clang++", "-fobjc-arc", "-fblocks", "-std=c++11",
                        "-isysroot", sdk, "-target", platform.machine() + "-apple-ios15.0-simulator", "-I", str(ROOT)]
@@ -102,6 +127,8 @@ def main(video, output, injected=False):
             report = json.loads(report_path.read_text())
             report["runtime"] = runtime["version"]
             report["injected_framework"] = injected
+            report["source_commit"] = source_commit()
+            report["manual_mode"] = manual
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(json.dumps(report, indent=2) + "\n")
             print(json.dumps(report))
@@ -120,5 +147,8 @@ if __name__ == "__main__":
     parser.add_argument("--video", required=True, type=Path)
     parser.add_argument("--output", type=Path, default=ROOT / "dist/ios-simulator.json")
     parser.add_argument("--injected", action="store_true")
+    parser.add_argument("--manual", action="store_true", help="Check manual-only mode in the injected framework")
     args = parser.parse_args()
-    main(args.video, args.output, args.injected)
+    if args.manual and not args.injected:
+        parser.error("--manual requires --injected")
+    main(args.video, args.output, args.injected, args.manual)

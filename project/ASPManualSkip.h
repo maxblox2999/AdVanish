@@ -17,6 +17,8 @@ NSArray<ASPAdSurface *> *ASPManualSkipAdSurfaces(void);
 NSArray<UIWindow *> *ASPManualSkipContentWindows(void);
 ASPAdSurface *ASPManualSkipSurfaceForPlayer(AVPlayer *player, BOOL recognizedOnly);
 BOOL ASPManualSkipIsAdWebView(WKWebView *view);
+// -1: covered/inactive, 0: exposed unknown surface, 1: exposed recognized ad.
+NSInteger ASPManualSkipWebViewContext(WKWebView *view);
 #ifdef __cplusplus
 }
 #endif
