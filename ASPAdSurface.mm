@@ -1,3 +1,6 @@
+// AdVanish contributions: Copyright (C) 2026 maxblox2999.
+// GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+
 #import "ASPAdSurface.h"
 #import <objc/message.h>
 #include <string.h>
@@ -21,7 +24,7 @@ static BOOL adController(UIViewController *controller) {
 }
 
 BOOL ASPViewVisibleInSurface(UIView *view, UIView *root) {
-    UIWindow *window = root.window;
+    UIWindow *window = [root isKindOfClass:UIWindow.class] ? (UIWindow *)root : root.window;
     if (!view || !window || (view != root && ![view isDescendantOfView:root])) return NO;
     CGRect rect = [view convertRect:view.bounds toView:window];
     rect = CGRectIntersection(rect, window.bounds);

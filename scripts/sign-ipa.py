@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# AdVanish contributions: Copyright (C) 2026 maxblox2999.
+# GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+
 """Optional local macOS signing for a single app and its embedded frameworks."""
 import argparse
 import datetime

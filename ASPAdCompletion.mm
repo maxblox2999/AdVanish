@@ -1,3 +1,6 @@
+// AdVanish contributions: Copyright (C) 2026 maxblox2999.
+// GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+
 #import "ASPAdCompletion.h"
 #import "ASPManualSkip.h"
 #import <objc/runtime.h>
@@ -9,7 +12,8 @@
 @property (nonatomic, weak) id ad;
 @property (nonatomic, weak) UIViewController *presenter;
 @property (nonatomic, weak) UIViewController *owner;
-@property (nonatomic, strong) id creative;
+@property (nonatomic, weak) id creative;
+@property (nonatomic) BOOL ownerBound;
 @property (nonatomic) BOOL google;
 @property (nonatomic) BOOL requiresReward;
 @property (nonatomic) BOOL rewarded;
@@ -43,19 +47,40 @@ static id objectValue(id object, SEL selector) {
     }
 }
 
+static void retireSession(ASPRewardSession *session) {
+    session.invalidated = YES;
+    session.videoItems = nil;
+    session.endedItems = nil;
+    session.creative = nil;
+    session.owner = nil;
+}
+
 static void pruneSessions(void) {
     if (!sessions) sessions = [NSMutableArray array];
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     NSIndexSet *expired = [sessions indexesOfObjectsPassingTest:^BOOL(ASPRewardSession *session, NSUInteger index, BOOL *stop) {
-        return !session.ad || session.expires <= now || session.closeRequested;
+        UIViewController *owner = session.owner;
+        BOOL detached = session.ownerBound && (!owner || !owner.viewIfLoaded.window);
+        BOOL changedCreative = !session.google && (!session.creative ||
+            objectValue(owner, NSSelectorFromString(@"currentAd")) != session.creative);
+        return !session.ad || session.expires <= now || session.closeRequested || session.invalidated ||
+            detached || changedCreative;
+    }];
+    [expired enumerateIndexesUsingBlock:^(NSUInteger index, BOOL *stop) {
+        retireSession(sessions[index]);
     }];
     [sessions removeObjectsAtIndexes:expired];
-    while (sessions.count >= 16) [sessions removeObjectAtIndex:0];
+    while (sessions.count >= 16) {
+        retireSession(sessions.firstObject);
+        [sessions removeObjectAtIndex:0];
+    }
 }
 
 static BOOL sameOwner(ASPRewardSession *session, ASPAdSurface *surface) {
-    return surface.owner == session.owner && ASPAdSurfaceUnchanged(surface) &&
-        (!session.creative || surface.creative == session.creative);
+    if (surface.owner != session.owner || !ASPAdSurfaceUnchanged(surface)) return NO;
+    if (session.google) return YES;
+    id creative = session.creative;
+    return creative && session.ad == creative && surface.creative == creative;
 }
 
 static BOOL belongsToPresenter(UIViewController *owner, UIViewController *presenter) {
@@ -130,7 +155,10 @@ static ASPRewardSession *googleSession(id ad, UIViewController *presenter, BOOL 
     }
     if (!presenter) return nil;
     for (ASPRewardSession *previous in sessions.copy) {
-        if (previous.google && previous.presenter == presenter) [sessions removeObjectIdenticalTo:previous];
+        if (previous.google && previous.presenter == presenter) {
+            retireSession(previous);
+            [sessions removeObjectIdenticalTo:previous];
+        }
     }
     ASPRewardSession *session = [ASPRewardSession new];
     session.ad = ad;
@@ -160,6 +188,7 @@ static void observeMAXDisplay(id ad) {
     session.ad = ad;
     session.requiresReward = YES;
     session.owner = owned.owner;
+    session.ownerBound = YES;
     session.creative = owned.creative;
     session.expires = NSProcessInfo.processInfo.systemUptime + 600;
     [sessions addObject:session];
@@ -333,6 +362,7 @@ void ASPAdCompletionTrackController(UIViewController *controller) {
     for (ASPRewardSession *session in sessions.copy) {
         if (google && session.google && !session.owner && belongsToPresenter(controller, session.presenter)) {
             session.owner = controller;
+            session.ownerBound = YES;
         }
         if (session.owner == controller) {
             captureVideoItems(session);

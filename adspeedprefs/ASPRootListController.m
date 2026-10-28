@@ -1,3 +1,6 @@
+// AdVanish contributions: Copyright (C) 2026 maxblox2999.
+// GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+
 #import "ASPRootListController.h"
 #import "ASPAppListController.h"
 #import <objc/runtime.h>
@@ -88,8 +91,8 @@
         [reset setProperty:@YES forKey:@"enabled"];
         [specs addObject:reset];
 
-        [specs addObject:[self groupNamed:@"Credits"
-                                   footer:@"Original authors: 34306 and SoulRune. Fork contributions: maxblox2999."]];
+        [specs addObject:[self groupNamed:@"Maintainer"
+                                   footer:@"maxblox2999"]];
 
         _specifiers = [specs copy];
     }

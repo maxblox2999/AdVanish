@@ -30,4 +30,4 @@ Test release. Unknown playables may still need input. Real-game rewards and sign
 
 ---
 
-[Tests](docs/VALIDATION.md) · [Changes](docs/AUDIT.md) · [Credits](NOTICE.md) · [GPLv3](LICENSE)
+[maxblox2999](https://github.com/maxblox2999) · [Tests](docs/VALIDATION.md) · [Changes](docs/AUDIT.md) · [License](LICENSE)
