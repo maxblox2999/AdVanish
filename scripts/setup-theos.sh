@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# AdVanish contributions: Copyright (C) 2026 maxblox2999.
+# GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "$0")/.." && pwd)"

@@ -1,3 +1,6 @@
+// AdVanish contributions: Copyright (C) 2026 maxblox2999.
+// GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+
 // AdVanish. See NOTICE.md for upstream attribution.
 // ADSPEED_FORCE_ON enables standalone injection without per-app preferences.
 
@@ -364,6 +367,7 @@ static void installEnabled(void) {
 
 static void refreshAdContexts(void) {
     if (!gActive || ![NSThread isMainThread]) return;
+    ASPAdCompletionTrackController(nil);
     NSArray<ASPAdSurface *> *surfaces = ASPManualSkipAdSurfaces();
     for (WKWebView *web in gWebViews.allObjects) setWebContext(web, nil);
     for (ASPAdSurface *surface in surfaces) {

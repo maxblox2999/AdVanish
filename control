@@ -8,6 +8,6 @@ Replaces: com.34306-sr.adspeed, com.34306.adspeed, com.soulrune.adspeed
 Provides: com.34306-sr.adspeed
 Description: 16x ad playback with manual and automatic controls.
 Maintainer: maxblox2999
-Author: 34306, SoulRune, maxblox2999
+Author: maxblox2999
 Section: Tweaks
 Homepage: https://github.com/maxblox2999/AdVanish

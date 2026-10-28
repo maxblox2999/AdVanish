@@ -1,3 +1,6 @@
+// AdVanish contributions: Copyright (C) 2026 maxblox2999.
+// GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
@@ -343,6 +346,24 @@ static void testReplacement(ALBaseVideoViewController *owner, UIButton *button, 
     });
 }
 
+static BOOL testCreativeOwnership(ALBaseVideoViewController *owner) {
+    id originalCreative = owner.currentAd;
+    id originalRewardAd = owner.rewardAd;
+    __weak NSObject *releasedCreative;
+    @autoreleasepool {
+        NSObject *creative = [NSObject new];
+        releasedCreative = creative;
+        owner.currentAd = creative;
+        owner.rewardAd = creative;
+        [owner didDisplayAd:creative];
+        owner.currentAd = originalCreative;
+        owner.rewardAd = originalRewardAd;
+    }
+    BOOL released = check(releasedCreative == nil, @"Completion observation does not retain a discarded SDK creative");
+    ASPAdCompletionTrackController(owner);
+    return released;
+}
+
 static void runFixture(ALBaseVideoViewController *owner) {
     ASPManualSkipTrackController(owner);
     ASPManualSkipConfigure(YES);
@@ -372,7 +393,10 @@ static void runFixture(ALBaseVideoViewController *owner) {
         ASPAdSurface *surface = ASPFindAdSurface(@[owner.view.window], NO);
         if (!check(surface.owner == owner && [surface.players containsObject:owner.avPlayer] && !surface.incomplete,
                    @"Visible SDK-owned native player is discovered")) return;
+        if (!check(ASPViewVisibleInSurface(owner.videoPlayer.videoView, owner.view.window),
+                   @"A window root includes its visible content")) return;
         if (!check(owner.displayEvents == 1, @"The SDK display callback is forwarded unchanged")) return;
+        if (!testCreativeOwnership(owner)) return;
         double before = CMTimeGetSeconds(owner.avPlayer.currentTime);
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
         if (!check(owner.avPlayer.rate == 16 && CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 0.5,

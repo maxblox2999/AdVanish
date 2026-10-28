@@ -1,4 +1,10 @@
-# Attribution
+# Project notices
+
+AdVanish maintainer: **maxblox2999**.
+
+AdVanish contributions: Copyright (C) 2026 maxblox2999. The origin terms in LICENSE apply to these contributions: do not misrepresent their authorship, and clearly identify modified versions. GPL copying, modification and redistribution rights remain intact.
+
+## Retained upstream notices
 
 AdVanish is derived from maxblox2999/Un-JailedSpeedAds at commit `2f9d7b6566321c3daee8dfe1d9840bc28e4a43eb`, a fork of SoulRune/Un-JailedSpeedAds. Those projects are based on 34306/JailedSpeedAds.
 

@@ -1,3 +1,6 @@
+// AdVanish contributions: Copyright (C) 2026 maxblox2999.
+// GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

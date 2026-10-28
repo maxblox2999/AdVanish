@@ -1,8 +1,12 @@
+// AdVanish contributions: Copyright (C) 2026 maxblox2999.
+// GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <WebKit/WebKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <dlfcn.h>
+#import "ASPAdSurface.h"
 
 static NSMutableArray<NSString *> *checks;
 static BOOL finished;
@@ -33,6 +37,41 @@ static NSString *webSnapshotJS(void) {
         "viewport:[innerWidth,innerHeight],control:node?{label:node.textContent,rect:node.getBoundingClientRect().toJSON()}:null,"
         "pointer:typeof PointerEvent,touch:typeof Touch,touchEvent:typeof TouchEvent,"
         "errors:window.fixtureErrors||[],clock:typeof window.fixtureNativeNow};})()";
+}
+
+static NSDictionary *nativeWebState(WKWebView *web) {
+    BOOL (*isAd)(WKWebView *) = (BOOL (*)(WKWebView *))dlsym(RTLD_DEFAULT, "ASPManualSkipIsAdWebView");
+    NSArray *(*surfaces)(void) = (NSArray *(*)(void))dlsym(RTLD_DEFAULT, "ASPManualSkipAdSurfaces");
+    UIWindow *window = web.window;
+    NSMutableArray *hits = [NSMutableArray array];
+    for (NSUInteger x = 1; x <= 3; x++) {
+        for (NSUInteger y = 1; y <= 3; y++) {
+            CGPoint local = CGPointMake(web.bounds.size.width * x / 4, web.bounds.size.height * y / 4);
+            CGPoint point = [web convertPoint:local toView:window];
+            UIView *hit = [window hitTest:point withEvent:nil];
+            [hits addObject:@{@"point": NSStringFromCGPoint(point), @"class": hit ? NSStringFromClass(hit.class) : @"nil",
+                @"insideWeb": @(hit == web || [hit isDescendantOfView:web])}];
+        }
+    }
+    NSMutableArray *owners = [NSMutableArray array];
+    NSArray *activeSurfaces = surfaces ? surfaces() : @[];
+    for (ASPAdSurface *surface in activeSurfaces) {
+        UIViewController *owner = surface.owner;
+        NSArray *webViews = surface.webViews;
+        [owners addObject:@{@"owner": owner ? NSStringFromClass(owner.class) : @"nil",
+            @"webCount": @(webViews.count), @"containsWeb": @([webViews containsObject:web]),
+            @"root": surface.root.description ?: @"nil"}];
+    }
+    return @{@"applicationState": @(UIApplication.sharedApplication.applicationState), @"onMainThread": @(NSThread.isMainThread),
+        @"web": web.description ?: @"nil", @"webHidden": @(web.hidden), @"webAlpha": @(web.alpha),
+        @"webInteraction": @(web.userInteractionEnabled), @"window": window.description ?: @"nil",
+        @"windowWindow": window.window.description ?: @"nil", @"windowWindowIsSelf": @(window.window == window),
+        @"windowRootVisible": @(ASPViewVisibleInSurface(web, window)),
+        @"windowHidden": @(window.hidden), @"windowBounds": NSStringFromCGRect(window.bounds),
+        @"rootBounds": NSStringFromCGRect(window.rootViewController.viewIfLoaded.bounds),
+        @"frame": NSStringFromCGRect(web.frame), @"bounds": NSStringFromCGRect(web.bounds),
+        @"windowSceneState": window.windowScene ? @(window.windowScene.activationState) : NSNull.null,
+        @"recognizedWeb": isAd ? @(isAd(web)) : NSNull.null, @"surfaces": owners, @"hitTests": hits};
 }
 
 static BOOL check(BOOL condition, NSString *name) {
@@ -125,8 +164,9 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 @implementation InjectedDelegate
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
     diagnostics[@"webNavigation"] = @"finished";
+    diagnostics[@"nativeWebAtNavigation"] = nativeWebState(webView);
     NSString *script = [NSString stringWithFormat:@"return await new Promise((resolve) => {"
-        "const snapshot=()=>%@;"
+        "const snapshot=()=>({...%@,bridgeBooleanType:typeof bridgeBoolean,bridgeBooleanValue:bridgeBoolean});"
         "const now=typeof fixtureNativeNow==='function'?fixtureNativeNow:Date.now.bind(Date);"
         "const schedule=typeof fixtureNativeTimeout==='function'?fixtureNativeTimeout:setTimeout.bind(window);"
         "const started=now();"
@@ -137,9 +177,10 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
         "if (now()-started>15000) {resolve({runtimeError:'WebKit playable timed out',diagnostics:snapshot()});return;}"
         "schedule(poll,25); } catch(error) {resolve({runtimeError:String(error.stack||error),diagnostics:snapshot()});}"
         "} poll(); });", webSnapshotJS()];
-    [webView callAsyncJavaScript:script arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld
+    [webView callAsyncJavaScript:script arguments:@{@"bridgeBoolean": @YES} inFrame:nil inContentWorld:WKContentWorld.pageWorld
         completionHandler:^(id value, NSError *error) {
         if (finished) return;
+        diagnostics[@"nativeWebAtCompletion"] = nativeWebState(webView);
         if (error) {
             diagnostics[@"webEvaluationError"] = errorDetails(error);
             [webView evaluateJavaScript:webSnapshotJS() completionHandler:^(id snapshot, NSError *snapshotError) {
