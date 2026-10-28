@@ -509,10 +509,14 @@
 
     if (typeof window.open === 'function') {
         var nativeOpen = window.open;
-        window.open = function () {
-            if (blockRedirect()) return null;
-            return nativeOpen.apply(this, arguments);
-        };
+        try {
+            window.open = function () {
+                if (blockRedirect()) return null;
+                return nativeOpen.apply(this, arguments);
+            };
+        } catch (error) {
+            stats.interactionFailures += 1;
+        }
     }
 
     function readyMraid() {

@@ -8,14 +8,31 @@ static NSMutableArray<NSString *> *checks;
 static BOOL finished;
 static BOOL nativeFinished;
 static BOOL webFinished;
+static NSMutableDictionary<NSString *, id> *diagnostics;
 
 static void result(NSString *failure) {
     if (finished) return;
     finished = YES;
-    NSDictionary *report = @{@"passed": @(!failure), @"checks": checks,
+    NSDictionary *report = @{@"passed": @(!failure), @"checks": checks, @"diagnostics": diagnostics ?: @{},
         @"failure": failure ?: @"", @"scope": @"Loaded production jailed framework and real Objective-C hooks; mock SDK ownership, no real game rewards"};
     NSData *data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
     [data writeToFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/result.json"] atomically:YES];
+    NSLog(@"Injected fixture result: %@", report);
+}
+
+static NSDictionary *errorDetails(NSError *error) {
+    if (!error) return @{};
+    return @{@"domain": error.domain ?: @"", @"code": @(error.code),
+        @"description": error.localizedDescription ?: @"", @"userInfo": error.userInfo.description ?: @""};
+}
+
+static NSString *webSnapshotJS(void) {
+    return @"(() => {const node=document.querySelector('button');return {"
+        "fixture:window.fixture||null,engine:!!window.__adspeed,stats:window.__adspeed?{...window.__adspeed.stats}:null,"
+        "visibility:document.visibilityState,hidden:document.hidden,ready:document.readyState,"
+        "viewport:[innerWidth,innerHeight],control:node?{label:node.textContent,rect:node.getBoundingClientRect().toJSON()}:null,"
+        "pointer:typeof PointerEvent,touch:typeof Touch,touchEvent:typeof TouchEvent,"
+        "errors:window.fixtureErrors||[],clock:typeof window.fixtureNativeNow};})()";
 }
 
 static BOOL check(BOOL condition, NSString *name) {
@@ -107,19 +124,41 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 @end
 @implementation InjectedDelegate
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
-    NSString *script = @"return await new Promise((resolve, reject) => {"
-        "const started = fixtureNativeNow();"
+    diagnostics[@"webNavigation"] = @"finished";
+    NSString *script = [NSString stringWithFormat:@"return await new Promise((resolve) => {"
+        "const snapshot=()=>%@;"
+        "const now=typeof fixtureNativeNow==='function'?fixtureNativeNow:Date.now.bind(Date);"
+        "const schedule=typeof fixtureNativeTimeout==='function'?fixtureNativeTimeout:setTimeout.bind(window);"
+        "const started=now();"
         "function poll() {"
-        "if (fixture.complete) { resolve({complete:fixture.complete,movements:fixture.movements,"
+        "try { if (window.fixture&&fixture.complete) { resolve({complete:fixture.complete,movements:fixture.movements,"
         "rewardCalls:fixture.rewardCalls,redirectCalls:fixture.redirectCalls,closes:fixture.closes,"
-        "elapsed:fixture.finishedAt-fixture.startedAt,stats:{...window.__adspeed.stats}}); return; }"
-        "if (fixtureNativeNow()-started>15000) { reject(new Error('WebKit playable timed out')); return; }"
-        "fixtureNativeTimeout(poll,25); } poll(); });";
+        "elapsed:fixture.finishedAt-fixture.startedAt,stats:window.__adspeed?{...window.__adspeed.stats}:null,diagnostics:snapshot()}); return; }"
+        "if (now()-started>15000) {resolve({runtimeError:'WebKit playable timed out',diagnostics:snapshot()});return;}"
+        "schedule(poll,25); } catch(error) {resolve({runtimeError:String(error.stack||error),diagnostics:snapshot()});}"
+        "} poll(); });", webSnapshotJS()];
     [webView callAsyncJavaScript:script arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld
         completionHandler:^(id value, NSError *error) {
         if (finished) return;
+        if (error) {
+            diagnostics[@"webEvaluationError"] = errorDetails(error);
+            [webView evaluateJavaScript:webSnapshotJS() completionHandler:^(id snapshot, NSError *snapshotError) {
+                diagnostics[@"webSnapshot"] = snapshot ?: NSNull.null;
+                if (snapshotError) diagnostics[@"webSnapshotError"] = errorDetails(snapshotError);
+                result(@"The production engine executes inside iOS WebKit");
+            }];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                result(@"The production engine executes inside iOS WebKit");
+            });
+            return;
+        }
+        diagnostics[@"webResult"] = value ?: NSNull.null;
         if (!check(!error && [value isKindOfClass:NSDictionary.class], @"The production engine executes inside iOS WebKit")) return;
         NSDictionary *web = value;
+        if (web[@"runtimeError"]) {
+            result([@"WebKit playable: " stringByAppendingString:[web[@"runtimeError"] description]]);
+            return;
+        }
         NSDictionary *stats = web[@"stats"];
         if (!check([stats[@"rate"] integerValue] == 16 && [stats[@"polls"] integerValue] > 0,
                    @"WebKit runs the production 16x acceleration policy")) return;
@@ -136,15 +175,27 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
     }];
 }
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+    diagnostics[@"webNavigationError"] = errorDetails(error);
     result(@"Injected WebKit fixture navigation failed");
+}
+- (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+    diagnostics[@"webProvisionalNavigationError"] = errorDetails(error);
+    result(@"Injected WebKit fixture provisional navigation failed");
+}
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {
+    diagnostics[@"webProcessTerminated"] = @YES;
+    result(@"Injected WebKit content process terminated");
 }
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     checks = [NSMutableArray array];
+    diagnostics = [NSMutableDictionary dictionary];
     float (*rate)(void) = (float (*)(void))dlsym(RTLD_DEFAULT, "ASPSpeedRate");
     if (!check(rate && rate() == 16, @"The jailed framework loads and exposes the shared 16x policy")) return YES;
     WKWebViewConfiguration *config = [WKWebViewConfiguration new];
     WKUserScript *fixtureClock = [[WKUserScript alloc] initWithSource:
         @"window.fixtureNativeNow=performance.now.bind(performance);window.fixtureNativeTimeout=setTimeout.bind(window);"
+        "window.fixtureErrors=[];addEventListener('error',event=>fixtureErrors.push({message:String(event.message),line:event.lineno,column:event.colno}));"
+        "addEventListener('unhandledrejection',event=>fixtureErrors.push({rejection:String(event.reason)}));"
         injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
     [config.userContentController addUserScript:fixtureClock];
     WKWebView *web = [[WKWebView alloc] initWithFrame:CGRectZero configuration:config];
@@ -166,19 +217,19 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
     [owner.view addSubview:web];
     NSString *html = @"<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<style>body{margin:0;background:#eee}button{display:block;position:fixed;left:10px;top:20px;width:280px;height:180px}</style>"
-        "<script>window.fixture={complete:false,movements:0,rewardCalls:0,redirectCalls:0,closes:0,startedAt:0,finishedAt:0};"
+        "<script>window.fixture={complete:false,movements:0,rewardCalls:0,redirectCalls:0,closes:0,startedAt:0,finishedAt:0,stage:'script'};"
         "window.mraid={getState(){return 'default'},getPlacementType(){return 'interstitial'},isViewable(){return true},"
         "open(){fixture.redirectCalls++},close(){fixture.closes++}};"
         "window.gameEnd=()=>fixture.rewardCalls++;"
         "function button(label){const node=document.createElement('button');node.textContent=label;document.body.append(node);return node;}"
-        "addEventListener('DOMContentLoaded',()=>{const start=button('Tap to play');start.addEventListener('click',()=>{"
-        "start.remove();const swipe=button('Swipe right');let startX=0;"
-        "swipe.addEventListener('pointerdown',event=>startX=event.clientX);"
+        "addEventListener('DOMContentLoaded',()=>{fixture.stage='tap-ready';const start=button('Tap to play');start.addEventListener('click',()=>{"
+        "fixture.stage='swipe-ready';start.remove();const swipe=button('Swipe right');let startX=0;"
+        "swipe.addEventListener('pointerdown',event=>{fixture.stage='pointer-down';startX=event.clientX;});"
         "swipe.addEventListener('pointermove',()=>fixture.movements++);"
-        "swipe.addEventListener('pointerup',event=>{if(event.clientX<=startX+50||fixture.movements!==6)return;"
-        "swipe.remove();const next=button('Continue playing');next.addEventListener('click',()=>{next.remove();"
+        "swipe.addEventListener('pointerup',event=>{fixture.stage='pointer-up';fixture.swipeDistance=event.clientX-startX;if(event.clientX<=startX+50||fixture.movements!==6)return;"
+        "fixture.stage='continue-ready';swipe.remove();const next=button('Continue playing');next.addEventListener('click',()=>{fixture.stage='timer-pending';next.remove();"
         "mraid.open('https://apps.apple.com/app/id0');window.open('https://apps.apple.com/app/id0');"
-        "fixture.startedAt=fixtureNativeNow();setTimeout(()=>{fixture.finishedAt=fixtureNativeNow();fixture.complete=true;},4000);"
+        "fixture.startedAt=fixtureNativeNow();setTimeout(()=>{fixture.finishedAt=fixtureNativeNow();fixture.complete=true;fixture.stage='complete';},4000);"
         "});});});});</script><body></body>";
     [web loadHTMLString:html baseURL:[NSURL URLWithString:@"https://advanish-fixture.invalid/"]];
     self.ordinaryPlayer = [AVPlayer playerWithURL:[NSBundle.mainBundle URLForResource:@"fixture" withExtension:@"mp4"]];

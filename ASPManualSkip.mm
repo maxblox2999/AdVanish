@@ -61,6 +61,18 @@ static ASPAdSurface *currentSurface(UIWindowScene *scene) {
     return ASPFindAdSurface(contentWindows(scene), NO);
 }
 
+NSArray<UIWindow *> *ASPManualSkipContentWindows(void) {
+    if (![NSThread isMainThread] || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return @[];
+    NSMutableOrderedSet<UIWindow *> *windows = [NSMutableOrderedSet orderedSet];
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class] ||
+            scene.activationState != UISceneActivationStateForegroundActive) continue;
+        [windows addObjectsFromArray:contentWindows((UIWindowScene *)scene)];
+    }
+    [windows addObjectsFromArray:contentWindows(nil)];
+    return windows.array;
+}
+
 BOOL ASPManualSkipIsAdPlayer(AVPlayer *player) {
     return ASPManualSkipSurfaceForPlayer(player, YES) != nil;
 }
