@@ -40,3 +40,5 @@ The injector preserves the original IPA and accepts authorized decrypted, thin a
 Optional `--config AdVanish.plist` accepts boolean keys: `Enabled`, `AutomaticAds`, `ManualSkip`, `SpeedUpVideo`, `CompressTimers`, `AccelerateClock`, `ForceInline`, `SpeedNativeVideo`, `AutoInteract`, `AutoDismiss`, `BlockRedirects`. The app's `NSUserDefaults` dictionary `AdVanish` can override them. `AutomaticAds=false` requires the button; it disables automatic input and Close.
 
 [Cyanide compatibility](docs/CYANIDE.md) · [Ad types](docs/AD_TYPES.md).
+
+The injected framework uses the Objective-C runtime directly; it no longer needs Logos or Substrate to build. Jailbreak packages still need their platform injection loader.

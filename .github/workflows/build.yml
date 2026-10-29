@@ -65,6 +65,7 @@ jobs:
           brew install ldid dpkg make
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
       - name: Set up pinned Theos and SDK
+        if: matrix.variant != 'jailed'
         run: |
           bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" "${{ matrix.variant }}"
           echo "THEOS=$RUNNER_TEMP/advanish-tools/theos" >> "$GITHUB_ENV"

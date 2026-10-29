@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# AdVanish contributions: Copyright (C) 2026 maxblox2999.
-# GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+# Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 
 set -euo pipefail
 

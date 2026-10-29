@@ -2,26 +2,27 @@ THEOS_PACKAGE_SCHEME ?= rootless
 export THEOS_PACKAGE_SCHEME
 ARCHS = arm64 arm64e
 TARGET = iphone:clang:16.5:15.0
-DEBUG = 0
 FINALPACKAGE = 1
-FOR_RELEASE = 1
-
+DEBUG = 0
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = advanish
-advanish_FILES = Tweak.xm ASPUniversalSkip.mm ASPManualSkip.mm ASPAdSurface.mm ASPAdCompletion.mm
-advanish_CFLAGS = -fobjc-arc
+LIBRARY_NAME = advanish
+advanish_INSTALL_PATH = /Library/MobileSubstrate/DynamicLibraries
+advanish_FILES = Runtime.mm ASPUniversalSkip.mm ASPManualSkip.mm ASPAdSurface.mm ASPAdCompletion.mm
+advanish_CFLAGS = -fobjc-arc -fblocks
+advanish_CCFLAGS = -std=c++11 -fno-rtti -fno-exceptions
+advanish_FRAMEWORKS = Foundation UIKit QuartzCore CoreGraphics AVFoundation CoreMedia WebKit
+ifeq ($(THEOS_PACKAGE_SCHEME),rootless)
+advanish_CFLAGS += -DADSPEED_ROOTLESS=1
+endif
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
 advanish_CFLAGS += -DADSPEED_ROOTHIDE=1
 advanish_LDFLAGS += -lroothide
 endif
-advanish_CCFLAGS = -std=c++11 -fno-rtti -fno-exceptions -DNDEBUG
-advanish_FRAMEWORKS = UIKit QuartzCore CoreGraphics AVFoundation CoreMedia WebKit
-SUBPROJECTS = adspeedprefs
-
-include $(THEOS_MAKE_PATH)/tweak.mk
+SUBPROJECTS = settings
+include $(THEOS_MAKE_PATH)/library.mk
 include $(THEOS_MAKE_PATH)/aggregate.mk
 
-.PHONY: jailed
-jailed:
-	python3 scripts/build-jailed.py
+after-stage::
+	mkdir -p "$(THEOS_STAGING_DIR)$(THEOS_PACKAGE_INSTALL_PREFIX)/Library/MobileSubstrate/DynamicLibraries"
+	cp advanish.plist "$(THEOS_STAGING_DIR)$(THEOS_PACKAGE_INSTALL_PREFIX)/Library/MobileSubstrate/DynamicLibraries/"

@@ -1,5 +1,4 @@
-# AdVanish contributions: Copyright (C) 2026 maxblox2999.
-# GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+# Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 
 import importlib.util
 import io
@@ -8,7 +7,7 @@ import struct
 import tarfile
 import tempfile
 import unittest
-from test_ipa import dylib_command, image
+from test_ipa import dylib_command
 
 spec = importlib.util.spec_from_file_location("package_verifier", Path(__file__).resolve().parents[1] / "scripts/verify-package.py")
 verifier = importlib.util.module_from_spec(spec)
@@ -26,7 +25,15 @@ def archive(files):
 
 
 def fat(loads):
-    pieces = [image(kind=6, subtype=subtype, extra=tuple(dylib_command(name) for name in loads)) for subtype in (0, 2)]
+    loads = ["/System/Library/Frameworks/UIKit.framework/UIKit"] + loads
+    pieces = []
+    for subtype in (0, 2):
+        commands = [struct.pack("<IIIIII", 0x32, 24, 2, 15 << 16, 18 << 16, 0)]
+        commands += [dylib_command(name) for name in loads]
+        commands += [struct.pack("<IIII", 0x1D, 16, 1024, 64)]
+        body = b"".join(commands)
+        header = struct.pack("<IIIIIIII", 0xFEEDFACF, 0x100000C, subtype, 6, len(commands), len(body), 0, 0)
+        pieces.append(header + body + bytes(1088 - len(header) - len(body)))
     header = struct.pack(">II", 0xCAFEBABE, 2)
     offset = 48
     for subtype, piece in zip((0, 2), pieces):

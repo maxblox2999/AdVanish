@@ -1,11 +1,11 @@
-// AdVanish contributions: Copyright (C) 2026 maxblox2999.
-// GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+// Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
 #import "ASPAdSurface.h"
 #import "ASPManualSkip.h"
+#import "ASPUniversalSkip.h"
 #import "ASPAdCompletion.h"
 #import "ASPSpeed.h"
 

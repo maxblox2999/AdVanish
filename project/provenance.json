@@ -1,0 +1,15 @@
+{
+  "upstream_reference": "maxblox2999/Un-JailedSpeedAds@2f9d7b6566321c3daee8dfe1d9840bc28e4a43eb",
+  "replaced_runtime": "project/Runtime.mm",
+  "replaced_settings": "project/settings/AVNSettings.m",
+  "removed_features": [
+    "jailbreak bypass",
+    "legacy class-dump/debug scaffolding"
+  ],
+  "preserved_interfaces": [
+    "legacy preference keys",
+    "package id",
+    "PreferenceLoader bundle filename"
+  ],
+  "limitation": "This identifies replaced source files; it does not establish legal clearance or revoke earlier GPL grants."
+}
