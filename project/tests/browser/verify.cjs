@@ -728,6 +728,67 @@ async function main() {
         assert.equal(result.closes, 0);
         assert.deepEqual(result.errors, []);
     }));
+    for (const variant of ['loop', 'paused', 'ended', 'mixed']) {
+        cases.push(await runCase('recognized-playable-with-' + variant + '-video', `
+            const variant = ${JSON.stringify(variant)};
+            const video = await addVideo(variant === 'loop');
+            let other = null;
+            if (variant === 'paused' || variant === 'mixed') video.pause();
+            if (variant === 'ended') {
+                video.currentTime = video.duration - 0.05;
+                await until(() => video.ended, 'setup an actual ended media element');
+            }
+            if (variant === 'mixed') other = await addVideo();
+            const canvas = document.createElement('canvas');
+            canvas.width = 320;
+            canvas.height = 120;
+            document.body.append(canvas);
+            __adspeed.setAdContext(true);
+            const inspection = await __adspeed.inspectAsync();
+            const stale = await __adspeed.inspectAsync();
+            video.loop = !video.loop;
+            const rejected = await __adspeed.skipAsync(stale.token);
+            video.loop = !video.loop;
+            const current = await __adspeed.inspectAsync();
+            const before = {time:video.currentTime,paused:video.paused,seeks:Number(video.dataset.seeks),
+                other:other ? other.currentTime : null};
+            const start = realNow();
+            let done = false;
+            const action = await __adspeed.skipAsync(current.token);
+            setTimeout(() => done = true, 4000);
+            await until(() => done, 'recognized playable original timer', 2500);
+            const elapsed = realNow() - start;
+            const progressed = {time:video.currentTime,paused:video.paused,seeks:Number(video.dataset.seeks),
+                rate:video.playbackRate,other:other ? other.currentTime : null,
+                otherRate:other ? other.playbackRate : null};
+            __adspeed.setAdContext(false);
+            __adspeed.setAdContext(true);
+            const resetReal = realNow();
+            const resetVirtual = performance.now();
+            await sleep(120);
+            return {variant, inspection, rejected, action, before, progressed, elapsed,
+                reset:{real:realNow()-resetReal,virtual:performance.now()-resetVirtual}, ...state()};
+        `, result => {
+            assert.equal(result.inspection.count, 1);
+            assert.equal(result.inspection.unresolved, 0);
+            assert.equal(result.rejected.handled, 0);
+            assert.equal(result.action.handled, 1);
+            assert.equal(result.action.kind, 'timing');
+            assert.ok(result.elapsed < 2000);
+            assert.equal(result.progressed.rate, 1);
+            assert.equal(result.progressed.seeks, result.before.seeks);
+            assert.equal(result.progressed.paused, result.before.paused);
+            if (result.before.paused) assert.equal(result.progressed.time, result.before.time);
+            else assert.ok(result.progressed.time - result.before.time < result.elapsed / 1000 + 0.5);
+            if (result.variant === 'mixed') {
+                assert.equal(result.progressed.otherRate, 1);
+                assert.ok(result.progressed.other - result.before.other < result.elapsed / 1000 + 0.5);
+            }
+            assert.ok(result.reset.virtual < result.reset.real * 1.5);
+            assert.equal(result.closes, 0);
+            assert.deepEqual(result.errors, []);
+        }, true, false));
+    }
     const report = {
         sourceSha256,
         browser: version,

@@ -184,7 +184,10 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
     return gEnabled && root && !surface.incomplete && !fresh.incomplete &&
         ASPAdSurfaceUnchanged(surface) && ASPViewVisibleInSurface(root, root) &&
         [UIApplication sharedApplication].applicationState == UIApplicationStateActive &&
-        fresh.root == root && [[NSSet setWithArray:fresh.webViews] isEqualToSet:[NSSet setWithArray:surface.webViews]];
+        fresh.root == root && fresh.window == surface.window && root.window == surface.window &&
+        fresh.owner == surface.owner && fresh.creative == surface.creative &&
+        fresh.recognized == surface.recognized &&
+        [[NSSet setWithArray:fresh.webViews] isEqualToSet:[NSSet setWithArray:surface.webViews]];
 }
 - (BOOL)nativeSelectionCurrent:(NSArray<AVPlayer *> *)native surface:(ASPAdSurface *)surface {
     if (![self surfaceCurrent:surface]) return NO;
@@ -228,7 +231,10 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
         [self finishRequest:@"No supported media" generation:generation];
         return;
     }
-    if (count > 1) {
+    BOOL paired = count == 2 && native.count == 1 && selected &&
+        surface.recognized && surface.creative && surface.owner &&
+        surface.webViews.count == 1 && snapshots.count == 1;
+    if (count > 1 && !paired) {
         [self finishRequest:@"Multiple videos" generation:generation];
         return;
     }
@@ -261,9 +267,25 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
         } else if (error || ![result isKindOfClass:[NSDictionary class]] ||
                    !boundedInteger(result[@"handled"], 1) || !boundedInteger(result[@"unresolved"], 1)) {
             [controller finishRequest:@"Web unavailable" generation:generation];
-        } else if ([result[@"handled"] unsignedIntegerValue] == 1) {
+        } else if ([result[@"handled"] unsignedIntegerValue] == 1 &&
+                   [result[@"unresolved"] unsignedIntegerValue] == 0) {
             BOOL timing = [result[@"kind"] isKindOfClass:NSString.class] && [result[@"kind"] isEqualToString:@"timing"];
-            [controller finishRequest:timing ? @"Timing requested" : @"Playback requested" generation:generation];
+            if (!paired) {
+                [controller finishRequest:timing ? @"Timing requested" : @"Playback requested" generation:generation];
+                return;
+            }
+            if (![controller nativeSelectionCurrent:native surface:surface]) {
+                [controller finishRequest:@"Web only: changed" generation:generation];
+                return;
+            }
+            ASPUniversalSkipNow(native, surface.root, surface.items, NO, ^BOOL {
+                ASPSkipButtonController *current = weakSelf;
+                return current && current.feedbackGeneration == generation &&
+                    [current nativeSelectionCurrent:native surface:surface];
+            }, ^(NSString *message) {
+                BOOL accelerated = [message hasPrefix:@"Playing at "] || [message hasPrefix:@"Already at "];
+                [weakSelf finishRequest:accelerated ? @"Ad speed requested" : @"Web only" generation:generation];
+            });
         } else {
             [controller finishRequest:@"Media unavailable" generation:generation];
         }

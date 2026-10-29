@@ -9,5 +9,9 @@ adspeedprefs_INSTALL_PATH = /Library/PreferenceBundles
 adspeedprefs_FRAMEWORKS = UIKit
 adspeedprefs_PRIVATE_FRAMEWORKS = Preferences
 adspeedprefs_CFLAGS = -fobjc-arc
+ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
+adspeedprefs_CFLAGS += -DADSPEED_ROOTHIDE=1
+adspeedprefs_LDFLAGS += -lroothide
+endif
 
 include $(THEOS_MAKE_PATH)/bundle.mk

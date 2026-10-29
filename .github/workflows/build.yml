@@ -57,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [rootless, rootful, jailed]
+        variant: [rootless, rootful, roothide, jailed]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install build tools
@@ -66,7 +66,7 @@ jobs:
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
       - name: Set up pinned Theos and SDK
         run: |
-          bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools"
+          bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" "${{ matrix.variant }}"
           echo "THEOS=$RUNNER_TEMP/advanish-tools/theos" >> "$GITHUB_ENV"
       - name: Build and inspect package
         id: package_build

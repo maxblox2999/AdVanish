@@ -1729,3 +1729,109 @@ test('a replaced source without loadstart cannot inherit manual ad timing permis
     assert.equal(media.playbackRate, 1);
     assert.equal(env.sandbox.performance.now(), 1700);
 });
+
+for (const [name, overrides] of [
+    ['looping video', {loop: true}],
+    ['ended video', {ended: true}],
+    ['paused video', {paused: true}],
+    ['loading video', {readyState: 1}]
+]) {
+    test('a recognized canvas with ' + name + ' can request timing without changing media', async () => {
+        const env = environment(manualAdConfig);
+        const canvas = control(env, '', {tagName: 'CANVAS'});
+        const media = video(env, overrides);
+        env.sandbox.__adspeed.setAdContext(true);
+        const inspection = await env.sandbox.__adspeed.inspectAsync();
+        assert.equal(inspection.count, 1);
+        assert.equal(inspection.unresolved, 0);
+        const action = await env.sandbox.__adspeed.skipAsync(inspection.token);
+        assert.equal(action.handled, 1);
+        assert.equal(action.kind, 'timing');
+        env.advance(500);
+        assert.equal(env.sandbox.performance.now(), 8000);
+        assert.equal(media.playbackRate, 1);
+        assert.equal(media.paused, !!overrides.paused);
+        assert.deepEqual(media.rates, []);
+        assert.deepEqual(media.seeks, []);
+        assert.equal(canvas.events.length, 0);
+    });
+}
+
+test('canvas timing remains available over a covered decorative video without accelerating it', async () => {
+    const env = environment(manualAdConfig);
+    const canvas = control(env, '', {tagName: 'CANVAS'});
+    const media = video(env);
+    env.document.elementFromPoint = () => canvas;
+    env.sandbox.__adspeed.setAdContext(true);
+    const result = await env.sandbox.__adspeed.skipAsync();
+    assert.equal(result.handled, 1);
+    assert.equal(result.kind, 'timing');
+    env.advance(500);
+    assert.equal(env.sandbox.performance.now(), 8000);
+    assert.equal(media.playbackRate, 1);
+    assert.deepEqual(media.rates, []);
+});
+
+test('timing tokens freeze decorative video identity and state', async () => {
+    for (const change of ['source', 'loop', 'pause', 'ready', 'removal']) {
+        const env = environment(manualAdConfig);
+        control(env, '', {tagName: 'CANVAS'});
+        const media = video(env, {loop: true});
+        env.sandbox.__adspeed.setAdContext(true);
+        const inspection = await env.sandbox.__adspeed.inspectAsync();
+        if (change === 'source') media.currentSrc = 'https://example.invalid/other.mp4';
+        if (change === 'loop') media.loop = false;
+        if (change === 'pause') media.paused = true;
+        if (change === 'ready') media.readyState = 1;
+        if (change === 'removal') media.isConnected = false;
+        assert.equal((await env.sandbox.__adspeed.skipAsync(inspection.token)).handled, 0);
+        env.advance(100);
+        assert.equal(env.sandbox.performance.now(), 100);
+        assert.equal(media.playbackRate, 1);
+    }
+});
+
+test('a changed paused-video source revokes a prior timing-only request', async () => {
+    const env = environment(manualAdConfig);
+    control(env, '', {tagName: 'CANVAS'});
+    const media = video(env, {paused: true});
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).kind, 'timing');
+    env.advance(100);
+    media.currentSrc = 'https://example.invalid/new.mp4';
+    env.advance(250);
+    const before = env.sandbox.performance.now();
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now() - before, 100);
+    assert.equal(media.paused, true);
+    assert.deepEqual(media.rates, []);
+});
+
+test('timing requests preserve unknown pages and multiple eligible video ambiguity', async () => {
+    const unknown = environment(manualAdConfig);
+    control(unknown, '', {tagName: 'CANVAS'});
+    video(unknown, {loop: true});
+    assert.equal((await unknown.sandbox.__adspeed.skipAsync()).handled, 0);
+    const ambiguous = environment(manualAdConfig);
+    control(ambiguous, '', {tagName: 'CANVAS'});
+    const first = video(ambiguous);
+    const second = video(ambiguous);
+    ambiguous.sandbox.__adspeed.setAdContext(true);
+    const result = await ambiguous.sandbox.__adspeed.skipAsync();
+    assert.equal(result.handled, 0);
+    assert.equal(result.unresolved, 1);
+    assert.equal(first.playbackRate, 1);
+    assert.equal(second.playbackRate, 1);
+});
+
+test('a later video cannot inherit another video manual rate authorization', async () => {
+    const env = environment(manualAdConfig);
+    const first = video(env);
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).kind, 'video');
+    const later = video(env, {currentSrc: 'https://example.invalid/late.mp4'});
+    env.advance(250);
+    assert.equal(first.playbackRate, 16);
+    assert.equal(later.playbackRate, 1);
+    assert.deepEqual(later.rates, []);
+});

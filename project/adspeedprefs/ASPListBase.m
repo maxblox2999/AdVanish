@@ -2,6 +2,7 @@
 // GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
 
 #import "ASPListBase.h"
+#import "../ASPPaths.h"
 #import <UIKit/UIKit.h>
 
 static NSString *const kDomain = @"com.34306-sr.adspeed";
@@ -9,11 +10,8 @@ static NSString *const kNotify = @"com.34306-sr.adspeed/reloadPrefs";
 
 @implementation ASPListBase
 
-// Store under the jailbreak root: "/var/jb/..." on rootless (the sandbox grants
-// injected apps read access there), or "/var/mobile/..." on rootful.
 + (NSString *)prefsPathForDomain:(NSString *)domain {
-    NSString *root = [[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"] ? @"/var/jb" : @"";
-    return [NSString stringWithFormat:@"%@/var/mobile/Library/Preferences/%@.plist", root, domain];
+    return ASPPrefsWritePath(domain);
 }
 
 - (NSString *)pathForSpecifier:(PSSpecifier *)specifier {

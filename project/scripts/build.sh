@@ -11,13 +11,15 @@ variant="${1:-rootless}"
 case "$variant" in
     rootless) scheme=rootless; architecture=iphoneos-arm64 ;;
     rootful) scheme=; architecture=iphoneos-arm ;;
+    roothide) scheme=roothide; architecture=iphoneos-arm64e; THEOS_REVISION="$ROOTHIDE_THEOS_REVISION" ;;
     jailed)
         node scripts/embed-web.cjs
         exec python3 scripts/build-jailed.py
         ;;
-    *) printf 'Usage: bash scripts/build.sh rootless|rootful|jailed\n' >&2; exit 2 ;;
+    *) printf 'Usage: bash scripts/build.sh rootless|rootful|roothide|jailed\n' >&2; exit 2 ;;
 esac
 : "${THEOS:?Set THEOS to the directory printed by scripts/setup-theos.sh}"
+test "$(git -C "$THEOS" rev-parse HEAD)" = "$THEOS_REVISION"
 make_command="${MAKE:-make}"
 node scripts/embed-web.cjs
 node --test tests/web.test.cjs

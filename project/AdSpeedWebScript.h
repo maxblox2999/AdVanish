@@ -27,6 +27,8 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
     var autoComplete = !!(configuration && configuration.autoComplete);
     var automatic = !(configuration && configuration.automatic === false);
     var manualContext = false;
+    var manualTimingOnly = false;
+    var manualTimingSnapshot = null;
     var timerHooks = 0;
     var clockHooks = 0;
     var preventRedirects = !!(configuration && configuration.preventRedirects);
@@ -114,9 +116,11 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
             || (accelerateClock && typeof document.getAnimations === 'function');
     }
 
-    function authorizeTiming() {
+    function authorizeTiming(timingOnly, snapshot) {
         if (!recognizedAd || pageHidden() || !timingAvailable()) return false;
         manualContext = true;
+        manualTimingOnly = timingOnly === true;
+        manualTimingSnapshot = manualTimingOnly ? snapshot : null;
         changeMode(true);
         schedulePoll();
         return true;
@@ -124,6 +128,8 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
 
     function revokeManualContext() {
         manualContext = false;
+        manualTimingOnly = false;
+        manualTimingSnapshot = null;
         changeMode(false);
         manuallyAccelerated.forEach(restoreManualRate);
         restoreAnimations();
@@ -395,6 +401,9 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
         refreshing = true;
 
         try {
+            if (!automatic && manualTimingOnly && manualTimingSnapshot && !unchanged(manualTimingSnapshot)) {
+                revokeManualContext();
+            }
             var videos = typeof document.getElementsByTagName === 'function'
                 ? document.getElementsByTagName('video')
                 : [];
@@ -407,7 +416,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
                         continue;
                     }
                     var state = mediaState(video);
-                    if (accelerationActive() && forceInline) {
+                    if (accelerationActive() && (automatic || (!manualTimingOnly && manuallyAccelerated.has(video))) && forceInline) {
                         if (!video.hasAttribute('playsinline')) {
                             video.setAttribute('playsinline', '');
                         }
@@ -416,7 +425,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
                         }
                         video.playsInline = true;
                     }
-                    if (accelerationActive()) applyRate(video, state);
+                    if (accelerationActive() && (automatic || (!manualTimingOnly && manuallyAccelerated.has(video)))) applyRate(video, state);
                 } catch (error) {
                     stats.mediaFailures += 1;
                 }
@@ -455,6 +464,8 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
     function visibilityChanged() {
         if (pageHidden()) {
             manualContext = false;
+            manualTimingOnly = false;
+            manualTimingSnapshot = null;
             contextGeneration += 1;
             if (cancelInteraction) cancelInteraction();
             manuallyAccelerated.forEach(restoreManualRate);
@@ -607,6 +618,8 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
             if (cancelInteraction) cancelInteraction();
             recognizedAd = active;
             manualContext = false;
+            manualTimingOnly = false;
+            manualTimingSnapshot = null;
             contextGeneration += 1;
             interacted = new WeakMap();
             interactionCount = 0;
@@ -893,7 +906,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
     function capture() {
         var frames = frameCandidates();
         var snapshot = {generation: generation, context: contextGeneration, videos: [], children: frames.children,
-            unresolved: frames.unresolved, candidates: []};
+            unresolved: frames.unresolved, blockedMedia: false, candidates: []};
         snapshot.timing = recognizedAd && !pageHidden() && timingAvailable()
             && document.readyState !== 'loading' && (contextPolicy === true || recognizedMraid())
             && playableSurface();
@@ -905,17 +918,19 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
             for (var index = 0; index < count; index += 1) {
                 var video = videos[index];
                 if (!visible(video)) continue;
-                if (!exposed(video)) {
-                    snapshot.unresolved = 1;
-                    continue;
-                }
+                var mediaExposed = exposed(video);
                 var source = String(video.currentSrc || video.src || '');
                 snapshot.videos.push({node: video, source: source, paused: !!video.paused,
-                    ended: !!video.ended, seeking: !!video.seeking, ready: video.readyState,
-                    duration: video.duration});
-                if (video.ended) continue;
-                if (!manualEligible(video) || mediaState(video).manualAttempts >= 3) snapshot.unresolved = 1;
-                else snapshot.candidates.push(video);
+                    ended: !!video.ended, loop: !!video.loop, exposed: mediaExposed,
+                    seeking: !!video.seeking, ready: video.readyState, duration: video.duration});
+                if (video.ended) {
+                    snapshot.blockedMedia = true;
+                    continue;
+                }
+                if (!mediaExposed || !manualEligible(video) || mediaState(video).manualAttempts >= 3) {
+                    snapshot.blockedMedia = true;
+                    if (!snapshot.timing) snapshot.unresolved = 1;
+                } else snapshot.candidates.push(video);
             }
         } catch (error) {
             snapshot.unresolved = 1;
@@ -927,12 +942,14 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
         if (pageHidden() || generation !== snapshot.generation || contextGeneration !== snapshot.context) return false;
         var current = capture();
         if (current.unresolved !== snapshot.unresolved || current.videos.length !== snapshot.videos.length
-            || current.children.length !== snapshot.children.length || current.timing !== snapshot.timing) return false;
+            || current.children.length !== snapshot.children.length || current.timing !== snapshot.timing
+            || current.blockedMedia !== snapshot.blockedMedia) return false;
         for (var index = 0; index < snapshot.videos.length; index += 1) {
             var before = snapshot.videos[index];
             var after = current.videos[index];
             if (before.node !== after.node || before.source !== after.source || before.paused !== after.paused
-                || before.ended !== after.ended || before.seeking !== after.seeking || before.ready !== after.ready
+                || before.ended !== after.ended || before.loop !== after.loop || before.exposed !== after.exposed
+                || before.seeking !== after.seeking || before.ready !== after.ready
                 || !Object.is(before.duration, after.duration)) return false;
         }
         for (var frameIndex = 0; frameIndex < snapshot.children.length; frameIndex += 1) {
@@ -981,9 +998,10 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
             return query(child.source, 'inspect', null, depth);
         })).then(function (results) {
             if (!unchanged(snapshot)) return unknown();
-            var count = Math.min(2, snapshot.candidates.length);
+            var timingOnly = snapshot.timing && snapshot.blockedMedia && snapshot.candidates.length <= 1;
+            var count = timingOnly ? 0 : Math.min(2, snapshot.candidates.length);
             var unresolved = 0;
-            var route = snapshot.candidates.length === 1 ? {video: snapshot.candidates[0]} : null;
+            var route = !timingOnly && snapshot.candidates.length === 1 ? {video: snapshot.candidates[0]} : null;
             results.forEach(function (result, index) {
                 count = Math.min(2, count + result.count);
                 if (result.unresolved) unresolved = 1;
@@ -991,7 +1009,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
                     route = {child: snapshot.children[index], token: result.token};
                 }
             });
-            if (!count && !unresolved && !snapshot.videos.length && snapshot.timing) {
+            if (!count && !unresolved && snapshot.timing) {
                 count = 1;
                 route = {timing: true};
             }
@@ -1039,7 +1057,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
             }
             snapshots.delete(token);
             if (record.route.timing) {
-                var timing = authorizeTiming();
+                var timing = authorizeTiming(true, record.snapshot);
                 if (timing) refresh();
                 return {handled: timing ? 1 : 0, unresolved: timing ? 0 : 1, kind: 'timing'};
             }
@@ -1054,7 +1072,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
             return query(record.route.child.source, 'act', record.route.token, depth).then(function (result) {
                 if (!result.handled && !unchanged(record.snapshot)) return {handled: 0, unresolved: 1};
                 if (result.handled) {
-                    authorizeTiming();
+                    authorizeTiming(result.kind === 'timing', record.snapshot);
                     refresh();
                 }
                 return result;
@@ -1084,8 +1102,8 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: C
     function requestSkip() {
         var snapshot = capture();
         if (snapshot.unresolved || snapshot.children.length) return 0;
-        if (!snapshot.candidates.length && !snapshot.videos.length && snapshot.timing) {
-            var timing = authorizeTiming();
+        if (snapshot.timing && (snapshot.candidates.length === 0 || (snapshot.blockedMedia && snapshot.candidates.length === 1))) {
+            var timing = authorizeTiming(true, snapshot);
             if (timing) refresh();
             return timing ? 1 : 0;
         }

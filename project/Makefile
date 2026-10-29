@@ -11,6 +11,10 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = advanish
 advanish_FILES = Tweak.xm ASPUniversalSkip.mm ASPManualSkip.mm ASPAdSurface.mm ASPAdCompletion.mm
 advanish_CFLAGS = -fobjc-arc
+ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
+advanish_CFLAGS += -DADSPEED_ROOTHIDE=1
+advanish_LDFLAGS += -lroothide
+endif
 advanish_CCFLAGS = -std=c++11 -fno-rtti -fno-exceptions -DNDEBUG
 advanish_FRAMEWORKS = UIKit QuartzCore CoreGraphics AVFoundation CoreMedia WebKit
 SUBPROJECTS = adspeedprefs
