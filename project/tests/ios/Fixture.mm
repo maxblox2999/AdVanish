@@ -65,6 +65,23 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 @implementation FixtureVideoOwner
 @end
 
+@interface UIView (AdVanishTapFixture)
+- (void)al_addTapHandler:(SEL)action toTarget:(id)target;
+@end
+@implementation UIView (AdVanishTapFixture)
+- (void)al_addTapHandler:(SEL)action toTarget:(id)target {
+    UITapGestureRecognizer *gesture = [[UITapGestureRecognizer alloc] initWithTarget:target action:action];
+    gesture.numberOfTapsRequired = 1;
+    gesture.numberOfTouchesRequired = 1;
+    [self addGestureRecognizer:gesture];
+}
+@end
+
+@interface ALExitButton : UIView
+@end
+@implementation ALExitButton
+@end
+
 @interface MARewardedAd : NSObject
 @property (nonatomic, weak) id delegate;
 @end
@@ -112,7 +129,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 @interface ALBaseVideoViewController : UIViewController
 @property (nonatomic, strong) FixtureVideoOwner *videoPlayer;
 @property (nonatomic, strong) ALAd *currentAd;
-@property (nonatomic, strong) UIButton *closeButton;
+@property (nonatomic, strong) UIView *closeButton;
 @property (nonatomic) NSUInteger closes;
 @property (nonatomic) BOOL ended;
 @property (nonatomic) BOOL rewardPending;
@@ -162,6 +179,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 - (AVPlayer *)avPlayer { return self.videoPlayer.videoView.player; }
 - (BOOL)isVideoFullyWatched { return self.ended; }
 - (void)closeAd { self.closes += 1; }
+- (id)invalidCloseAction { return self; }
 - (void)didDisplayAd:(id)ad { self.displayEvents += 1; }
 - (void)didRewardUserForAd:(id)ad withReward:(id)reward {
     self.rewardEvents += 1;
@@ -222,6 +240,71 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 }
 @end
 
+static BOOL testRegisteredTapClose(UIViewController *presenter) {
+    NSArray<NSString *> *names = @[
+        @"An unrelated registered tap target cannot close the current ad",
+        @"A disabled SDK Close tap stays untouched after reward",
+        @"A removed SDK Close gesture stays untouched after reward",
+        @"Removing the registered target invalidates automatic Close",
+        @"A stale reward cannot activate a new creative's registered Close",
+        @"Adding a target invalidates the observed SDK Close registration",
+        @"A registered action with an incompatible return type is not invoked",
+        @"An unobserved tap is not inferred from the SDK Close getter",
+    ];
+    for (NSUInteger kind = 0; kind <= names.count; kind++) {
+        ALBaseVideoViewController *owner = [ALBaseVideoViewController new];
+        [presenter addChildViewController:owner];
+        owner.view.frame = presenter.view.bounds;
+        [presenter.view addSubview:owner.view];
+        [owner didMoveToParentViewController:presenter];
+        owner.videoPlayer.videoView.hidden = YES;
+        [owner.closeButton removeFromSuperview];
+        ALExitButton *close = [[ALExitButton alloc] initWithFrame:CGRectMake(20, 50, 90, 44)];
+        close.backgroundColor = UIColor.systemBlueColor;
+        owner.closeButton = close;
+        [owner.view addSubview:close];
+        MARewardedAd *sdk = [MARewardedAd new];
+        sdk.delegate = owner;
+        owner.rewardAd = rewardDescriptor(owner.currentAd);
+        id callbackAd = owner.rewardAd;
+        [owner didDisplayAd:callbackAd];
+        ALBaseVideoViewController *other = kind == 0 ? [ALBaseVideoViewController new] : nil;
+        if (kind == 7) {
+            [close addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:owner action:@selector(closeAd)]];
+        } else {
+            [close al_addTapHandler:kind == 6 ? @selector(invalidCloseAction) : @selector(closeAd) toTarget:other ?: owner];
+        }
+        UITapGestureRecognizer *gesture = (UITapGestureRecognizer *)close.gestureRecognizers.lastObject;
+        ASPAdCompletionTrackController(owner);
+        if (!check(owner.closes == 0, @"A registered UIView Close waits for a genuine reward")) return NO;
+        if (kind == 1) gesture.enabled = NO;
+        if (kind == 2) [close removeGestureRecognizer:gesture];
+        if (kind == 3) [gesture removeTarget:owner action:@selector(closeAd)];
+        if (kind == 4) {
+            owner.currentAd = [ALAd new];
+            owner.rewardAd = rewardDescriptor(owner.currentAd);
+            [owner didDisplayAd:owner.rewardAd];
+        }
+        if (kind == 5) [gesture addTarget:owner action:@selector(closeAd)];
+        [owner didRewardUserForAd:callbackAd withReward:[NSObject new]];
+        ASPAdCompletionTrackController(owner);
+        if (kind < names.count) {
+            if (!check(owner.closes == 0, names[kind])) return NO;
+        } else {
+            if (!check(owner.closes == 1 && owner.rewardEvents == 1,
+                       @"A genuine matching reward invokes the SDK's registered UIView X action once")) return NO;
+            ASPAdCompletionTrackController(owner);
+            if (!check(owner.closes == 1, @"Repeated polling cannot repeat a registered UIView Close")) return NO;
+            ASPAdSurface *surface = ASPFindAdSurface(@[owner.view.window], YES);
+            if (!check(surface.owner == owner && surface.players.count == 0,
+                       @"Non-video SDK ownership supports registered Close without an AVPlayer")) return NO;
+        }
+        [owner.view removeFromSuperview];
+        [owner removeFromParentViewController];
+    }
+    return YES;
+}
+
 static void testGoogleRewarded(UIViewController *presenter) {
     __block NSUInteger nilRootRewards = 0;
     GADRewardedAd *nilRoot = [GADRewardedAd new];
@@ -264,6 +347,9 @@ static void testGoogleRewarded(UIViewController *presenter) {
     if (!check(withoutHandler.presentations == 1 && withoutHandler.receivedNilHandler &&
                withoutHandler.sdkRewardHandler == nil && withoutHandler.controller.closes == 0,
                @"A nil Google reward handler reaches the SDK unchanged")) return;
+    [withoutHandler.controller.view removeFromSuperview];
+    [withoutHandler.controller removeFromParentViewController];
+    if (!testRegisteredTapClose(presenter)) return;
     result(nil);
 }
 
@@ -351,7 +437,7 @@ static void testCompletion(ALBaseVideoViewController *owner, UIButton *button, N
                        @"The genuine matching reward is forwarded and activates SDK Close once")) return;
             ASPAdCompletionTrackController(owner);
             if (!check(owner.closes == 1, @"Repeated completion polling cannot duplicate dismissal")) return;
-            [owner.closeButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+            [(UIControl *)owner.closeButton sendActionsForControlEvents:UIControlEventTouchUpInside];
             if (!check(owner.closes == 2, @"The app's own Close control remains functional")) return;
             testOrdinaryInterstitial(owner);
         });

@@ -7,6 +7,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <dlfcn.h>
 #import "ASPAdSurface.h"
+#import "ASPAdCompletion.h"
 
 static NSMutableArray<NSString *> *checks;
 static BOOL finished;
@@ -15,6 +16,8 @@ static BOOL webFinished;
 static BOOL manualMode;
 static __weak UIWindow *fixtureOverlay;
 static NSMutableDictionary<NSString *, id> *diagnostics;
+static void (^completionChecks)(void);
+static BOOL completionChecksStarted;
 
 static void result(NSString *failure) {
     if (finished) return;
@@ -86,7 +89,10 @@ static BOOL check(BOOL condition, NSString *name) {
 }
 
 static void finishIfReady(void) {
-    if (nativeFinished && webFinished) result(nil);
+    if (!nativeFinished || !webFinished || completionChecksStarted) return;
+    completionChecksStarted = YES;
+    if (completionChecks) completionChecks();
+    else result(nil);
 }
 
 static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^next)(void)) {
@@ -117,12 +123,70 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 @implementation InjectedVideoOwner
 @end
 
+@interface UIView (InjectedTapFixture)
+- (void)al_addTapHandler:(SEL)action toTarget:(id)target;
+@end
+@implementation UIView (InjectedTapFixture)
+- (void)al_addTapHandler:(SEL)action toTarget:(id)target {
+    UITapGestureRecognizer *gesture = [[UITapGestureRecognizer alloc] initWithTarget:target action:action];
+    gesture.numberOfTapsRequired = 1;
+    gesture.numberOfTouchesRequired = 1;
+    [self addGestureRecognizer:gesture];
+}
+@end
+
+@interface ALExitButton : UIView
+@end
+@implementation ALExitButton
+@end
+@interface ALAd : NSObject
+@end
+@implementation ALAd
+@end
+@class ALMediationAdapterWrapper;
+@interface MAAd : NSObject
+@end
+@implementation MAAd
+@end
+@interface ALMediatedAd : MAAd
+@property (nonatomic, strong) ALMediationAdapterWrapper *adapterWrapper;
+@end
+@implementation ALMediatedAd
+@end
+@interface ALAppLovinMediationAdapter : NSObject
+@property (nonatomic, strong) ALAd *loadedRewardedAd;
+@end
+@implementation ALAppLovinMediationAdapter
+@end
+@interface ALMediationAdapterWrapper : NSObject
+@property (nonatomic, weak) ALMediatedAd *ad;
+@property (nonatomic, strong) ALAppLovinMediationAdapter *adapter;
+@end
+@implementation ALMediationAdapterWrapper
+@end
+@interface MARewardedAd : NSObject
+@property (nonatomic, weak) id delegate;
+@end
+@implementation MARewardedAd
+@end
+
+static ALMediatedAd *rewardDescriptor(ALAd *creative) {
+    ALMediatedAd *ad = [ALMediatedAd new];
+    ad.adapterWrapper = [ALMediationAdapterWrapper new];
+    ad.adapterWrapper.ad = ad;
+    ad.adapterWrapper.adapter = [ALAppLovinMediationAdapter new];
+    ad.adapterWrapper.adapter.loadedRewardedAd = creative;
+    return ad;
+}
+
 @interface ALBaseVideoViewController : UIViewController
 @property (nonatomic, strong) InjectedVideoOwner *videoPlayer;
-@property (nonatomic, strong) NSObject *currentAd;
+@property (nonatomic, strong) ALAd *currentAd;
 @property (nonatomic) BOOL ended;
 @property (nonatomic) NSUInteger closes;
-@property (nonatomic, strong) UIButton *closeButton;
+@property (nonatomic, strong) UIView *closeButton;
+@property (nonatomic, strong) ALMediatedAd *rewardAd;
+@property (nonatomic) NSUInteger rewardEvents;
 - (AVPlayer *)avPlayer;
 - (BOOL)isVideoFullyWatched;
 @end
@@ -130,7 +194,7 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 - (void)loadView {
     self.view = [[UIView alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.view.backgroundColor = UIColor.blackColor;
-    self.currentAd = [NSObject new];
+    self.currentAd = [ALAd new];
     self.videoPlayer = [InjectedVideoOwner new];
     InjectedVideoView *video = [[InjectedVideoView alloc] initWithFrame:self.view.bounds];
     video.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -144,10 +208,11 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
     video.player.muted = YES;
     self.videoPlayer.videoView = video;
     [self.view addSubview:video];
-    self.closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.closeButton.frame = CGRectMake(20, 50, 90, 44);
-    [self.closeButton setTitle:@"Close" forState:UIControlStateNormal];
-    [self.closeButton addTarget:self action:@selector(closeAd) forControlEvents:UIControlEventTouchUpInside];
+    UIButton *close = [UIButton buttonWithType:UIButtonTypeSystem];
+    close.frame = CGRectMake(20, 50, 90, 44);
+    [close setTitle:@"Close" forState:UIControlStateNormal];
+    [close addTarget:self action:@selector(closeAd) forControlEvents:UIControlEventTouchUpInside];
+    self.closeButton = close;
     [self.view addSubview:self.closeButton];
     __weak ALBaseVideoViewController *weakSelf = self;
     [NSNotificationCenter.defaultCenter addObserverForName:AVPlayerItemDidPlayToEndTimeNotification object:video.player.currentItem
@@ -156,6 +221,8 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 - (AVPlayer *)avPlayer { return self.videoPlayer.videoView.player; }
 - (BOOL)isVideoFullyWatched { return self.ended; }
 - (void)closeAd { self.closes += 1; }
+- (void)didDisplayAd:(id)ad {}
+- (void)didRewardUserForAd:(id)ad withReward:(id)reward { self.rewardEvents += 1; }
 @end
 
 @interface InjectedDelegate : UIResponder <UIApplicationDelegate, WKNavigationDelegate>
@@ -166,8 +233,50 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 @property (nonatomic) BOOL manualWebStarted;
 - (void)startManualWebIfReady;
 - (void)runManualNative:(ALBaseVideoViewController *)owner;
+- (void)runRegisteredTapChecks;
 @end
 @implementation InjectedDelegate
+- (void)runRegisteredTapChecks {
+    UIViewController *presenter = self.window.rootViewController;
+    ALBaseVideoViewController *owner = [ALBaseVideoViewController new];
+    [presenter addChildViewController:owner];
+    owner.view.frame = presenter.view.bounds;
+    [presenter.view addSubview:owner.view];
+    [owner didMoveToParentViewController:presenter];
+    owner.videoPlayer.videoView.hidden = YES;
+    [owner.closeButton removeFromSuperview];
+    ALExitButton *close = [[ALExitButton alloc] initWithFrame:CGRectMake(20, 50, 90, 44)];
+    close.backgroundColor = UIColor.systemBlueColor;
+    owner.closeButton = close;
+    [owner.view addSubview:close];
+    MARewardedAd *sdk = [MARewardedAd new];
+    sdk.delegate = owner;
+    owner.rewardAd = rewardDescriptor(owner.currentAd);
+    [owner didDisplayAd:owner.rewardAd];
+    [close al_addTapHandler:@selector(closeAd) toTarget:owner];
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.closes == 0, @"The injected framework leaves a registered UIView X untouched before reward")) return;
+    UITapGestureRecognizer *gesture = (UITapGestureRecognizer *)close.gestureRecognizers.lastObject;
+    [gesture removeTarget:owner action:@selector(closeAd)];
+    [owner didRewardUserForAd:owner.rewardAd withReward:[NSObject new]];
+    if (!check(owner.closes == 0 && owner.rewardEvents == 1,
+               @"The injected target-removal hook preserves rewards and invalidates the removed X action")) return;
+    [close removeGestureRecognizer:gesture];
+    owner.rewardAd = rewardDescriptor(owner.currentAd);
+    [owner didDisplayAd:owner.rewardAd];
+    [close al_addTapHandler:@selector(closeAd) toTarget:owner];
+    [owner didRewardUserForAd:owner.rewardAd withReward:[NSObject new]];
+    ASPAdCompletionTrackController(owner);
+    NSUInteger expected = manualMode ? 0 : 1;
+    if (!check(owner.closes == expected && owner.rewardEvents == 2,
+               manualMode ? @"The injected manual policy forwards a genuine reward without activating UIView X" :
+                   @"The injected SDK registration hook reuses the original UIView X action once after genuine reward")) return;
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.closes == expected, @"The injected completion poll never repeats a UIView X action")) return;
+    [owner.view removeFromSuperview];
+    [owner removeFromParentViewController];
+    result(nil);
+}
 - (UIButton *)manualButton {
     if (fixtureOverlay.hidden) return nil;
     for (UIView *view in fixtureOverlay.rootViewController.view.subviews) {
@@ -313,6 +422,8 @@ static void waitUntil(BOOL (^condition)(void), NSTimeInterval deadline, void (^n
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     checks = [NSMutableArray array];
     diagnostics = [NSMutableDictionary dictionary];
+    __weak InjectedDelegate *weakSelf = self;
+    completionChecks = ^{ [weakSelf runRegisteredTapChecks]; };
     manualMode = [NSBundle.mainBundle.infoDictionary[@"AdVanishManualFixture"] boolValue];
     diagnostics[@"manualMode"] = @(manualMode);
     [NSNotificationCenter.defaultCenter addObserverForName:UIWindowDidBecomeVisibleNotification

@@ -7,6 +7,7 @@
 | Google rewarded / rewarded interstitial | Observe the original reward handler; eligible SDK Close action after the matching reward | Requires a recognized controller and accessible SDK-owned control |
 | Google interstitial / app-open with native video | Observe real player-end notifications for the captured items, then request eligible SDK Close | HTML-only, static and unknown completion paths abstain |
 | MAX rewarded through the AppLovin adapter | Observe genuine display/reward events after validating the callback ad, adapter wrapper and loaded AppLovin creative against the controller's creative | Other mediation adapters abstain unless an exact ownership relation is available |
+| AppLovin gesture-driven X view | Use the SDK's recorded tap registration on its own current Close view after a matching reward | Missing, replaced, disabled or unrelated gesture registrations abstain |
 | Unity / LevelPlay / other reward callbacks | Original SDK and app behavior preserved | No automatic reward-based dismissal adapter unless exact session ownership is established |
 | Ad redirects | Block supported MRAID/window and external URL opens inside the active ad context | Direct navigation and SDK-specific store presentations may remain unsupported |
 | Manual button | Same 16x playback target plus selected recognized playable timing; validated selection across native players and web frames | Ambiguous, hidden, stale or inaccessible surfaces abstain |
