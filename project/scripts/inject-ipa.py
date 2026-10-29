@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# AdVanish contributions: Copyright (C) 2026 maxblox2999.
-# GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+# Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 
 import argparse
 import json

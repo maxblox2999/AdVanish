@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# AdVanish contributions: Copyright (C) 2026 maxblox2999.
-# GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+# Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 
 import argparse
 import hashlib
@@ -132,8 +131,10 @@ def verify(path, variant, package_id, library):
         binaries[name] = macho_slices(files[name])
     library_path = prefix + "Library/MobileSubstrate/DynamicLibraries/" + library + ".dylib"
     for image in binaries[library_path]:
+        if not any("/UIKit.framework/" in name for name in image["dylibs"]):
+            raise ValueError("Missing UIKit runtime dependency")
         loads = [name for name in image["dylibs"] if "substrate" in name.lower()]
-        if not loads or (variant == "rootless" and any(not name.startswith("@rpath/") for name in loads)):
+        if variant == "rootless" and any(not name.startswith("@rpath/") for name in loads):
             raise ValueError("Unexpected tweak-loader linkage")
         if variant == "roothide" and any(not name.startswith("@loader_path/.jbroot/") for name in loads):
             raise ValueError("RootHide requires relocated tweak-loader linkage")

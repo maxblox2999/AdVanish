@@ -1,17 +1,9 @@
-# Project notices
+# Notices
 
-AdVanish maintainer: **maxblox2999**.
+Copyright (C) 2026 maxblox2999. Original AdVanish code is covered by LICENSE. Third-party rights and earlier license grants remain applicable.
 
-AdVanish contributions: Copyright (C) 2026 maxblox2999. The origin terms in LICENSE apply to these contributions: do not misrepresent their authorship, and clearly identify modified versions. GPL copying, modification and redistribution rights remain intact.
+Versions through 0.4.0 used source from maxblox2999/Un-JailedSpeedAds, a fork of SoulRune/Un-JailedSpeedAds based on 34306/JailedSpeedAds. Their required notices and GPL rights are retained for those versions; see project/licenses/GPL-3.0.txt.
 
-## Retained upstream notices
+The current rewrite replaces the inherited startup, configuration, hook scaffolding and Settings implementation. Compatibility identifiers are retained so existing preferences and packages still work. This source inventory is not a legal certification of licensing independence.
 
-AdVanish is derived from maxblox2999/Un-JailedSpeedAds at commit `2f9d7b6566321c3daee8dfe1d9840bc28e4a43eb`, a fork of SoulRune/Un-JailedSpeedAds. Those projects are based on 34306/JailedSpeedAds.
-
-Original authors: 34306 and SoulRune. Fork and AdVanish maintainer: maxblox2999.
-
-The upstream project licenses SoulRune's rewrites and new code from commit `2085624ea5551efc95e7775394e3e24b1893efbb` under GPLv3. It states that 34306's original foundation did not carry an explicit license. That provenance is retained here. The full GPLv3 text is in project/licenses/GPL-3.0.txt; new AdVanish changes are supplied under GPLv3.
-
-The original preference domain `com.34306-sr.adspeed` and preference-bundle name remain for migration compatibility. They are internal identifiers, not a second installed tweak. The package conflicts with the older AdSpeed packages to avoid simultaneous hook installations.
-
-Theos, its submodules, the patched SDK repository and GitHub Actions are external build dependencies. Their selected revisions are recorded in the workflow and `project/build/dependencies.env`. They are not represented as AdVanish-authored source.
+Theos, RootHide, Apple frameworks and ad SDKs remain third-party components under their own terms. Their names do not imply authorship by maxblox2999.

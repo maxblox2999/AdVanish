@@ -1,5 +1,4 @@
-// AdVanish contributions: Copyright (C) 2026 maxblox2999.
-// GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+// Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -488,7 +487,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     web.navigationDelegate = self;
     BOOL injected = NO;
     for (WKUserScript *script in web.configuration.userContentController.userScripts) {
-        if ([script.source containsString:@"AdSpeed shared media engine"] &&
+        if ([script.source containsString:@"AdVanish runtime v1"] &&
             [script.source containsString:@"\"rate\":16"]) injected = YES;
     }
     if (!check(injected, @"The production WebKit initializer installs its 16x engine")) return YES;

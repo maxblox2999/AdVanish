@@ -1,7 +1,6 @@
 #pragma once
 
-static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// AdVanish contributions: Copyright (C) 2026 maxblox2999.
-// GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 
 (function () {
     'use strict';

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# AdVanish contributions: Copyright (C) 2026 maxblox2999.
-# GPL-3.0-only with origin terms; see LICENSE and NOTICE.md.
+# Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 
 import argparse
 import hashlib
@@ -16,15 +15,11 @@ from ipa_tools import framework_report
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = ROOT.parent
-NATIVE = ["ASPUniversalSkip.mm", "ASPManualSkip.mm", "ASPAdSurface.mm", "ASPAdCompletion.mm"]
+NATIVE = ["Runtime.mm", "ASPUniversalSkip.mm", "ASPManualSkip.mm", "ASPAdSurface.mm", "ASPAdCompletion.mm"]
 FRAMEWORKS = ["Foundation", "UIKit", "QuartzCore", "CoreGraphics", "AVFoundation", "CoreMedia", "WebKit"]
 
 
 def build(output, simulator=False):
-    theos = Path(os.environ["THEOS"])
-    logos = theos / "bin/logos.pl"
-    if not logos.is_file():
-        raise RuntimeError("THEOS must contain the pinned Logos preprocessor")
     sdkname = "iphonesimulator" if simulator else "iphoneos"
     sdk = subprocess.check_output(["xcrun", "--sdk", sdkname, "--show-sdk-path"], text=True).strip()
     architecture = platform.machine() if simulator else "arm64"
@@ -41,21 +36,15 @@ def build(output, simulator=False):
             "CFBundleShortVersionString": version, "MinimumOSVersion": "15.0",
             "CFBundleSupportedPlatforms": ["iPhoneSimulator" if simulator else "iPhoneOS"]}
     (framework / "Info.plist").write_bytes(plistlib.dumps(info))
-    with tempfile.TemporaryDirectory(prefix="advanish-logos-") as directory:
-        generated = Path(directory) / "Tweak.mm"
-        with generated.open("w") as stream:
-            subprocess.run(["perl", str(logos), "-c", "generator=internal", str(ROOT / "Tweak.xm")],
-                           stdout=stream, check=True, timeout=60)
-        command = ["xcrun", "--sdk", sdkname, "clang++", "-dynamiclib", "-fobjc-arc", "-fblocks",
-                   "-std=c++11", "-fno-rtti", "-fno-exceptions", "-DNDEBUG", "-DADSPEED_JAILED=1",
-                   "-isysroot", sdk, "-target", target, "-I", str(ROOT), "-I", str(theos / "include"),
-                   "-install_name", "@rpath/AdVanish.framework/AdVanish", "-Wl,-headerpad_max_install_names",
-                   str(generated)]
-        command += [str(ROOT / name) for name in NATIVE]
-        for name in FRAMEWORKS:
-            command += ["-framework", name]
-        command += ["-o", str(framework / "AdVanish")]
-        subprocess.run(command, check=True, timeout=180)
+    command = ["xcrun", "--sdk", sdkname, "clang++", "-dynamiclib", "-fobjc-arc", "-fblocks",
+               "-std=c++11", "-fno-rtti", "-fno-exceptions", "-DNDEBUG", "-DADSPEED_JAILED=1",
+               "-isysroot", sdk, "-target", target, "-I", str(ROOT),
+               "-install_name", "@rpath/AdVanish.framework/AdVanish", "-Wl,-headerpad_max_install_names"]
+    command += [str(ROOT / name) for name in NATIVE]
+    for name in FRAMEWORKS:
+        command += ["-framework", name]
+    command += ["-o", str(framework / "AdVanish")]
+    subprocess.run(command, check=True, timeout=180)
     subprocess.run(["codesign", "--force", "--sign", "-", str(framework)], check=True, timeout=60)
     subprocess.run(["codesign", "--verify", "--strict", str(framework)], check=True, timeout=60)
     if not simulator:
@@ -73,7 +62,7 @@ def build(output, simulator=False):
             "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True).strip(),
             "clang": subprocess.check_output(["xcrun", "--sdk", sdkname, "clang++", "--version"], text=True).strip(),
             "python": platform.python_version(),
-            "theos_revision": subprocess.check_output(["git", "-C", str(theos), "rev-parse", "HEAD"], text=True).strip(),
+            "hook_engine": "Objective-C runtime",
         }
         (output / "build-info.json").write_text(json.dumps(toolchain, indent=2) + "\n")
         shutil.copy2(ROOT / "scripts/inject-ipa.py", output)
