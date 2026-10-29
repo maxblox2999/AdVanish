@@ -1,11 +1,11 @@
-# AdVanish 0.3.1
+# AdVanish 0.4.0
 
-- Support the AppLovin X view's registered tap action after a matching genuine reward event.
-- Keep Close tied to the visible current creative, registered target and enabled gesture.
-- Preserve 16x video/playable acceleration, manual-only behavior and redirect blocking from 0.3.0.
+- Fix playable timing requests blocked by decorative videos.
+- Handle validated native/web ads together.
+- Keep 16x first, with 8x/4x/2x fallback for players that reject it.
+- Add a separate RootHide package and randomized-root preference paths.
+- Preserve manual-only controls, SDK reward handling and existing acceleration.
 
-Rootless, rootful, jailed injection and complete source builds are included.
+Rootless, rootful, RootHide, jailed injection and full source builds. Targets iOS 15–18; iOS 26 remains experimental with a low chance of working.
 
-Targets iOS 15â€“18. iOS 26 is experimental with a low chance of working.
-
-Test release. Unknown playables may still need interaction. Real SDKs, game rewards and signed-device injection remain unverified. See [ad types and limits](https://github.com/maxblox2999/AdVanish/blob/main/project/docs/AD_TYPES.md).
+Test release. Real-game rewards and physical-device compatibility remain unverified. [Ad types](https://github.com/maxblox2999/AdVanish/blob/main/project/docs/AD_TYPES.md) · [Cyanide compatibility](https://github.com/maxblox2999/AdVanish/blob/main/project/docs/CYANIDE.md).

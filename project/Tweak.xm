@@ -20,6 +20,7 @@
 #import "ASPManualSkip.h"
 #import "ASPSpeed.h"
 #import "ASPAdCompletion.h"
+#import "ASPPaths.h"
 #include "AdSpeedWebScript.h"
 
 #pragma mark - Preferences
@@ -51,13 +52,7 @@ static BOOL gPollScheduled;
 
 
 static NSDictionary *loadPrefs(void) {
-    // The Settings panel writes via CFPreferences for the mobile user; read the plist
-    // directly so it works regardless of sandbox/CFPreferences quirks. Try rootless
-    // first, then rootful.
-    NSArray *paths = @[
-        @"/var/jb/var/mobile/Library/Preferences/com.34306-sr.adspeed.plist",
-        @"/var/mobile/Library/Preferences/com.34306-sr.adspeed.plist",
-    ];
+    NSArray *paths = ASPPrefsPaths(@"com.34306-sr.adspeed");
     for (NSString *p in paths) {
         NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:p];
         if (d) return d;
@@ -238,8 +233,8 @@ static void scheduleAdPoll(void);
         if (surface) {
             ASPSpeedPrepareRate(self);
             float accelerated = fminf(rate * ASPSpeedRate(), ASPSpeedRate());
-            %orig(accelerated);
-            ASPSpeedTrackRate(self, surface.root, rate, accelerated);
+            %orig(rate);
+            ASPSpeedRequestRate(self, surface.root, rate, accelerated);
             return;
         }
     }

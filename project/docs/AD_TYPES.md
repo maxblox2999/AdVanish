@@ -4,11 +4,13 @@ Detection, acceleration, completion and rewards are separate. Recognizing an ad 
 
 | Ad path | Acceleration | Automatic Close |
 | --- | --- | --- |
-| Visible owned AVPlayer video | Existing 16x playback; no seek | Supported Google ordinary-video completion or a matching genuine rewarded event |
+| Visible owned AVPlayer video | 16x first; 8x/4x/2x fallback after rejection, no seek | Supported Google ordinary-video completion or a matching genuine rewarded event |
 | HTML video, including nested frames | 16x playback on an authorized visible surface | Requires a supported native SDK completion path |
 | MRAID playable using JS timers or elapsed time | Timer, clock and animation-frame acceleration | No universal playable-complete callback; native SDK eligibility is still required |
 | CSS and Web Animations on a recognized ad surface | 16x running-animation rate relative to its base; pause and cleanup preserved | Animation end does not fabricate an SDK reward |
 | Playable with explicit gameplay controls | Bounded tap/swipe assistance in automatic mode | Same SDK completion requirements |
+| Playable with decorative video | Manual timing can run while looped, ended or paused media remains unchanged | Same SDK completion requirements |
+| One SDK-owned native/web pair | One validated manual request can accelerate both parts | Same SDK completion requirements |
 | Canvas/WebGL logic advancing once per rendered frame | Time-based code may accelerate; fixed-step code may not | No generic solver or invented completion event |
 | Native static/end-card countdown | SDK timer is unchanged | No early Close or reward fabrication |
 | Worker, remote or trusted-touch-only creative | Not verified; worker timing is not hooked | May require actual interaction |

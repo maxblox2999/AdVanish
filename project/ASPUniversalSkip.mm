@@ -3,6 +3,7 @@
 
 #import "ASPUniversalSkip.h"
 #import "ASPAdSurface.h"
+#import "ASPManualSkip.h"
 #import "ASPSpeed.h"
 #import <CoreMedia/CoreMedia.h>
 #import <objc/runtime.h>
@@ -24,10 +25,23 @@ void ASPSpeedSetRate(AVPlayer *player, float rate) {
     }
 }
 
+static BOOL setRateSafely(AVPlayer *player, float rate) {
+    @try {
+        ASPSpeedSetRate(player, rate);
+        return YES;
+    } @catch (NSException *exception) {
+        return NO;
+    }
+}
+
 @interface ASPSkipRequest : NSObject
 @property (nonatomic, weak) AVPlayerItem *item;
 @property (nonatomic, weak) UIView *root;
 @property (nonatomic, weak) UIWindow *window;
+@property (nonatomic, weak) UIViewController *owner;
+@property (nonatomic, weak) id creative;
+@property (nonatomic) BOOL ownerBound;
+@property (nonatomic) BOOL creativeBound;
 @property (nonatomic) NSUInteger generation;
 @property (nonatomic) NSTimeInterval deadline;
 @property (nonatomic) BOOL pending;
@@ -39,6 +53,7 @@ void ASPSpeedSetRate(AVPlayer *player, float rate) {
 @property (nonatomic) BOOL manualRateActive;
 @property (nonatomic) float originalRate;
 @property (nonatomic) float appliedRate;
+@property (nonatomic) float rateCeiling;
 @property (nonatomic, copy) void (^completion)(NSString *);
 @property (nonatomic, copy) BOOL (^isCurrent)(void);
 @end
@@ -62,12 +77,17 @@ static ASPSkipRequest *stateFor(AVPlayer *player) {
     if (state.item != player.currentItem) {
         state.rateGeneration += 1;
         if (state.manualRateActive && player.rate > 0 && fabsf(player.rate - state.appliedRate) <= 0.01f) {
-            ASPSpeedSetRate(player, state.originalRate);
+            setRateSafely(player, state.originalRate);
         }
         state.manualRateActive = NO;
+        state.owner = nil;
+        state.creative = nil;
+        state.ownerBound = NO;
+        state.creativeBound = NO;
         state.generation += 1;
         state.attempts = 0;
         state.speedAttempts = 0;
+        state.rateCeiling = ASPSpeedRate();
         state.lastAttempt = 0;
         state.item = player.currentItem;
         finish(state, @"Media changed");
@@ -102,9 +122,13 @@ static BOOL finiteVideo(AVPlayerItem *item) {
 static BOOL visibleOwner(AVPlayer *player, ASPSkipRequest *state) {
     UIView *root = state.root;
     UIWindow *window = state.window;
-    return root && window && root.window == window && !window.hidden &&
+    BOOL visible = root && window && root.window == window && !window.hidden &&
         (!window.windowScene || window.windowScene.activationState == UISceneActivationStateForegroundActive) &&
         ASPSurfaceOwnsPlayer(root, player);
+    if (!visible || !state.ownerBound) return visible;
+    ASPAdSurface *surface = ASPManualSkipSurfaceForPlayer(player, YES);
+    return surface.root == root && surface.owner == state.owner &&
+        (!state.creativeBound || (state.creative && surface.creative == state.creative));
 }
 
 static BOOL stillOwned(AVPlayer *player, ASPSkipRequest *state) {
@@ -119,7 +143,7 @@ static void releaseManualRate(AVPlayer *player, ASPSkipRequest *state, AVPlayerI
         state.rateGeneration += 1;
         state.manualRateActive = NO;
         // Never resume a player paused by the app or at its natural end.
-        if (player.rate > 0 && fabsf(player.rate - state.appliedRate) <= 0.01f) ASPSpeedSetRate(player, originalRate);
+        if (player.rate > 0 && fabsf(player.rate - state.appliedRate) <= 0.01f) setRateSafely(player, originalRate);
         return;
     }
     __weak AVPlayer *weakPlayer = player;
@@ -140,6 +164,11 @@ void ASPSpeedTrackRate(AVPlayer *player, UIView *root, float originalRate, float
     state.originalRate = originalRate;
     state.appliedRate = appliedRate;
     state.manualRateActive = YES;
+    ASPAdSurface *surface = ASPManualSkipSurfaceForPlayer(player, YES);
+    state.ownerBound = surface.root == root;
+    state.owner = state.ownerBound ? surface.owner : nil;
+    state.creativeBound = state.ownerBound && surface.creative != nil;
+    state.creative = state.creativeBound ? surface.creative : nil;
     NSUInteger generation = ++state.rateGeneration;
     double duration = CMTIME_IS_NUMERIC(player.currentItem.duration) ?
         CMTimeGetSeconds(player.currentItem.duration) : 300;
@@ -148,23 +177,63 @@ void ASPSpeedTrackRate(AVPlayer *player, UIView *root, float originalRate, float
     releaseManualRate(player, state, player.currentItem, generation, state.originalRate, deadline);
 }
 
+BOOL ASPSpeedRequestRate(AVPlayer *player, UIView *root, float originalRate, float requestedRate) {
+    if (![NSThread isMainThread] || !playing(player) || !ASPSurfaceOwnsPlayer(root, player) ||
+        !isfinite(originalRate) || originalRate <= 0 || !isfinite(requestedRate) || requestedRate <= 0) return NO;
+    AVPlayerItem *item = player.currentItem;
+    ASPSkipRequest *state = stateFor(player);
+    ASPAdSurface *surface = ASPManualSkipSurfaceForPlayer(player, YES);
+    BOOL recognized = surface.root == root;
+    if (state.ownerBound && (!recognized || surface.owner != state.owner ||
+        (state.creativeBound && (!state.creative || surface.creative != state.creative)))) {
+        state.speedAttempts = 0;
+        state.rateCeiling = ASPSpeedRate();
+    }
+    if (state.manualRateActive) {
+        state.rateGeneration += 1;
+        state.manualRateActive = NO;
+    }
+    if (requestedRate <= originalRate || state.speedAttempts >= 8) return NO;
+    state.speedAttempts += 1;
+    float requested = fminf(requestedRate, state.rateCeiling);
+    const float tiers[] = {requested, 8.0f, 4.0f, 2.0f};
+    float previous = INFINITY;
+    for (float candidate : tiers) {
+        if (candidate >= previous || candidate > requested || candidate <= originalRate) continue;
+        previous = candidate;
+        BOOL written = setRateSafely(player, candidate);
+        if (player.currentItem != item || !playing(player) || !ASPSurfaceOwnsPlayer(root, player) ||
+            (recognized && !ASPAdSurfaceUnchanged(surface))) {
+            if (player.currentItem == item && player.rate > 0 && fabsf(player.rate - candidate) <= 0.01f) {
+                setRateSafely(player, originalRate);
+            }
+            return NO;
+        }
+        float accepted = player.rate;
+        BOOL acceptedTier = fabsf(accepted - candidate) <= 0.01f;
+        for (float fallback : tiers) {
+            if (fallback < candidate && fallback > originalRate && fabsf(accepted - fallback) <= 0.01f) acceptedTier = YES;
+        }
+        if (written && acceptedTier) {
+            if (accepted < requestedRate) state.rateCeiling = accepted;
+            ASPSpeedTrackRate(player, root, originalRate, accepted);
+            return state.manualRateActive;
+        }
+    }
+    setRateSafely(player, originalRate);
+    return NO;
+}
+
 void ASPSpeedAcceleratePlayer(AVPlayer *player, UIView *root) {
     if (![NSThread isMainThread] || !playing(player) || !ASPSurfaceOwnsPlayer(root, player)) return;
     AVPlayerItem *item = player.currentItem;
     if (item.status != AVPlayerItemStatusReadyToPlay || !videoItem(item) || !finiteVideo(item) ||
-        player.timeControlStatus != AVPlayerTimeControlStatusPlaying || player.rate >= ASPSpeedRate()) return;
+        player.timeControlStatus != AVPlayerTimeControlStatusPlaying) return;
     ASPSkipRequest *state = stateFor(player);
-    if (state.speedAttempts >= 8) return;
-    state.speedAttempts += 1;
-    float original = state.manualRateActive ? state.originalRate : player.rate;
-    ASPSpeedSetRate(player, ASPSpeedRate());
-    if (player.currentItem != item) return;
-    if (fabsf(player.rate - ASPSpeedRate()) <= 0.01f) {
-        state.speedAttempts = 0;
-        ASPSpeedTrackRate(player, root, original, ASPSpeedRate());
-    } else if (player.rate > 0 && player.rate != original) {
-        ASPSpeedSetRate(player, original);
-    }
+    if (player.rate >= state.rateCeiling) return;
+    float original = state.manualRateActive && fabsf(player.rate - state.appliedRate) <= 0.01f ?
+        state.originalRate : player.rate;
+    ASPSpeedRequestRate(player, root, original, ASPSpeedRate());
 }
 
 static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation) {
@@ -201,15 +270,15 @@ static void attempt(AVPlayer *player, AVPlayerItem *item, NSUInteger generation)
         });
         return;
     }
-    if (player.rate >= ASPSpeedRate()) {
-        finish(state, @"Already at 16x");
+    if (player.rate >= state.rateCeiling) {
+        finish(state, [NSString stringWithFormat:@"Already at %gx", player.rate]);
         return;
     }
     state.attempts += 1;
     state.lastAttempt = NSProcessInfo.processInfo.systemUptime;
     state.speedAttempts = 0;
     ASPSpeedAcceleratePlayer(player, state.root);
-    finish(state, state.manualRateActive ? @"Playing at 16x" : @"Speed unsupported");
+    finish(state, state.manualRateActive ? [NSString stringWithFormat:@"Playing at %gx", state.appliedRate] : @"Player rejected speed");
 }
 
 NSArray<AVPlayer *> *ASPUniversalSkipCandidates(NSArray<AVPlayer *> *players, UIView *root,

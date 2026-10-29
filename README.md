@@ -14,19 +14,19 @@
 
 ## Use
 
-**Jailbreak:** install the rootless or rootful package, enable an app in **Settings → AdVanish** and reopen it.
+**Jailbreak:** install the matching rootless, rootful or RootHide package. Enable the app in **Settings → AdVanish** and reopen it.
 
 **Jailed:** inject the framework into an authorized decrypted IPA, then re-sign it. [Instructions](project/BUILD.md#ipa-injection).
 
-Choose **Automatic ads** for supported automatic acceleration and completion. Turn it off to require the **Fast-forward ad** button. Both use the existing **16x** speed system. Press the button only during an ad.
+**Automatic ads** enables supported acceleration and completion. Turn it off for button-only acceleration. Speed targets **16x**, with lower rates when a player rejects it.
 
-Automatic input and Close work only on supported paths. Rewards and server validation stay with the app.
+Rewards and server validation stay with the app.
 
 ## Support
 
-Rootless, rootful and jailed injection. Targets **iOS 15–18**. **iOS 26 is experimental, with a low chance of working.**
+Rootless, rootful, RootHide and jailed injection. Targets **iOS 15–18**. **iOS 26 is experimental, with a low chance of working.**
 
-Test release. Some playables still need input. Real-game rewards and signed-device injection are unverified. [Ad types and limits](project/docs/AD_TYPES.md) · [Tests](project/docs/VALIDATION.md).
+Test release. Some playables still need input. Real-game rewards and device compatibility are unverified. [Ad types](project/docs/AD_TYPES.md) · [Tests](project/docs/VALIDATION.md) · [Cyanide](project/docs/CYANIDE.md).
 
 Source, tests and build tools are in [`project/`](project/).
 

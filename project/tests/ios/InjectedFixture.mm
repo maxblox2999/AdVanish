@@ -233,6 +233,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 @property (nonatomic) BOOL manualWebStarted;
 - (void)startManualWebIfReady;
 - (void)runManualNative:(ALBaseVideoViewController *)owner;
+- (void)runManualComposite;
 - (void)runRegisteredTapChecks;
 @end
 @implementation InjectedDelegate
@@ -319,11 +320,54 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
                 if (!check([measured[@"interactions"] integerValue] == 0 && [measured[@"rewards"] integerValue] == 0 &&
                            [measured[@"closes"] integerValue] == 0 && [measured[@"stage"] isEqualToString:@"tap-ready"],
                            @"Manual playable timing never generates gameplay, reward or Close actions")) return;
-                webFinished = YES;
-                finishIfReady();
+                [self runManualComposite];
             }];
         });
     }];
+}
+- (void)runManualComposite {
+    ALBaseVideoViewController *owner = (ALBaseVideoViewController *)self.window.rootViewController;
+    self.web.hidden = YES;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+        AVPlayerItem *item = [AVPlayerItem playerItemWithURL:[NSBundle.mainBundle URLForResource:@"fixture" withExtension:@"mp4"]];
+        [owner.avPlayer replaceCurrentItemWithPlayerItem:item];
+        self.web.hidden = NO;
+        [owner.avPlayer playImmediatelyAtRate:1];
+        NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 10;
+        waitUntil(^BOOL { return item.status == AVPlayerItemStatusReadyToPlay &&
+            owner.avPlayer.timeControlStatus == AVPlayerTimeControlStatusPlaying; }, deadline, ^{
+            NSString *baseline = @"return await new Promise(resolve=>{const real=fixtureNativeNow();const virtual=performance.now();"
+                "fixtureNativeTimeout(async()=>resolve({elapsed:fixtureNativeNow()-real,virtual:performance.now()-virtual,"
+                "inspection:await window.__adspeed.inspectAsync()}),750);});";
+            [self.web callAsyncJavaScript:baseline arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld
+                completionHandler:^(id value, NSError *error) {
+                diagnostics[@"compositeBaseline"] = value ?: errorDetails(error);
+                if (!check(!error && [value isKindOfClass:NSDictionary.class], @"The mixed native/playable baseline executes")) return;
+                if (!check(owner.avPlayer.rate == 1 && [value[@"virtual"] doubleValue] < [value[@"elapsed"] doubleValue] * 2,
+                           @"A mixed owned ad stays at normal speed before a manual press")) return;
+                if (!check([value[@"inspection"][@"count"] integerValue] == 1,
+                           @"The mixed ad has one native item and one playable timing candidate")) return;
+                UIButton *button = [self manualButton];
+                [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+                waitUntil(^BOOL { return owner.avPlayer.rate == 16 && [button.currentTitle isEqualToString:@"Ad speed requested"]; }, deadline, ^{
+                    NSString *timing = @"return await new Promise(resolve=>{const real=fixtureNativeNow();"
+                        "setTimeout(()=>resolve({elapsed:fixtureNativeNow()-real,interactions:__adspeed.stats.interactions,"
+                        "rewards:fixture.rewardCalls,closes:fixture.closes}),4000);});";
+                    [self.web callAsyncJavaScript:timing arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld
+                        completionHandler:^(id measured, NSError *timingError) {
+                        diagnostics[@"compositeTiming"] = measured ?: errorDetails(timingError);
+                        if (!check(!timingError && [measured isKindOfClass:NSDictionary.class] && [measured[@"elapsed"] doubleValue] < 2000,
+                                   @"One manual press accelerates both parts of the same SDK-owned ad")) return;
+                        if (!check([measured[@"interactions"] integerValue] == 0 && [measured[@"rewards"] integerValue] == 0 &&
+                                   [measured[@"closes"] integerValue] == 0, @"Mixed manual acceleration never fabricates input or completion")) return;
+                        [owner.avPlayer pause];
+                        webFinished = YES;
+                        finishIfReady();
+                    }];
+                });
+            }];
+        });
+    });
 }
 - (void)runManualNative:(ALBaseVideoViewController *)owner {
     owner.avPlayer.rate = 1;

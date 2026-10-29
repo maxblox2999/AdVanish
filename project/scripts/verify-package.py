@@ -117,15 +117,15 @@ def verify(path, variant, package_id, library):
         raise ValueError("Expected one control and one data archive")
     control = tar_files(members[control_name[0]])["control"].decode("utf-8")
     fields = dict(line.split(": ", 1) for line in control.splitlines() if ": " in line)
-    expected_arch = "iphoneos-arm64" if variant == "rootless" else "iphoneos-arm"
+    expected_arch = {"rootless": "iphoneos-arm64", "rootful": "iphoneos-arm", "roothide": "iphoneos-arm64e"}[variant]
     if fields.get("Package") != package_id or fields.get("Architecture") != expected_arch:
         raise ValueError("Wrong package identity or Debian architecture")
     files = tar_files(members[data_name[0]])
     prefix = "var/jb/" if variant == "rootless" else ""
     if variant == "rootless" and any(not name.startswith(prefix) for name in files):
         raise ValueError("Rootless package has files outside /var/jb")
-    if variant == "rootful" and any(name.startswith("var/jb/") for name in files):
-        raise ValueError("Rootful package contains a rootless installation path")
+    if variant in ("rootful", "roothide") and any(name.startswith("var/jb/") for name in files):
+        raise ValueError("Package contains a fixed rootless installation path")
     binaries = {}
     for name in [prefix + "Library/MobileSubstrate/DynamicLibraries/" + library + ".dylib",
                  prefix + "Library/PreferenceBundles/adspeedprefs.bundle/adspeedprefs"]:
@@ -135,6 +135,15 @@ def verify(path, variant, package_id, library):
         loads = [name for name in image["dylibs"] if "substrate" in name.lower()]
         if not loads or (variant == "rootless" and any(not name.startswith("@rpath/") for name in loads)):
             raise ValueError("Unexpected tweak-loader linkage")
+        if variant == "roothide" and any(not name.startswith("@loader_path/.jbroot/") for name in loads):
+            raise ValueError("RootHide requires relocated tweak-loader linkage")
+    if variant == "roothide":
+        for images in binaries.values():
+            for image in images:
+                if "@loader_path/.jbroot/usr/lib/libroothide.dylib" not in image["dylibs"]:
+                    raise ValueError("RootHide path support is missing")
+                if any(name.startswith("/var/jb/") for name in image["dylibs"]):
+                    raise ValueError("RootHide links to a fixed rootless path")
     return {"package": path.name, "sha256": hashlib.sha256(data).hexdigest(),
             "variant": variant, "control": fields, "file_count": len(files), "binaries": binaries,
             "limits": "Static package checks only; signature command presence is not cryptographic or device validation."}
@@ -143,7 +152,7 @@ def verify(path, variant, package_id, library):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("package", type=Path)
-    parser.add_argument("variant", choices=["rootless", "rootful"])
+    parser.add_argument("variant", choices=["rootless", "rootful", "roothide"])
     parser.add_argument("--package-id", default="com.maxblox2999.advanish")
     parser.add_argument("--library", default="advanish")
     args = parser.parse_args()

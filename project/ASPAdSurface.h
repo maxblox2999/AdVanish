@@ -8,6 +8,7 @@
 
 @interface ASPAdSurface : NSObject
 @property (nonatomic, weak) UIView *root;
+@property (nonatomic, weak) UIWindow *window;
 @property (nonatomic, weak) UIViewController *owner;
 @property (nonatomic, strong) id creative;
 @property (nonatomic) BOOL incomplete;
