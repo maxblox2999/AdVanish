@@ -630,7 +630,9 @@ static void testAdaptiveRates(ALBaseVideoViewController *owner, void (^next)(voi
                        @"Rejected native rate corrections stop after eight rounds per item")) return;
             owner.videoPlayer.videoView.player = original;
             [original play];
-            next();
+            waitUntil(^BOOL {
+                return original.timeControlStatus == AVPlayerTimeControlStatusPlaying;
+            }, NSProcessInfo.processInfo.systemUptime + 4, next);
         });
     });
 }
