@@ -10,7 +10,7 @@ AdVanish is derived from maxblox2999/Un-JailedSpeedAds at commit `2f9d7b6566321c
 
 Original authors: 34306 and SoulRune. Fork and AdVanish maintainer: maxblox2999.
 
-The upstream project licenses SoulRune's rewrites and new code from commit `2085624ea5551efc95e7775394e3e24b1893efbb` under GPLv3. It states that 34306's original foundation did not carry an explicit license. That provenance is retained here. The GPLv3 text is included in LICENSE; new AdVanish changes are supplied under GPLv3.
+The upstream project licenses SoulRune's rewrites and new code from commit `2085624ea5551efc95e7775394e3e24b1893efbb` under GPLv3. It states that 34306's original foundation did not carry an explicit license. That provenance is retained here. The full GPLv3 text is in project/licenses/GPL-3.0.txt; new AdVanish changes are supplied under GPLv3.
 
 The original preference domain `com.34306-sr.adspeed` and preference-bundle name remain for migration compatibility. They are internal identifiers, not a second installed tweak. The package conflicts with the older AdSpeed packages to avoid simultaneous hook installations.
 

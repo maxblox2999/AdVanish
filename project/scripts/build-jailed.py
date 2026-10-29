@@ -86,6 +86,7 @@ def build(output, simulator=False):
                 shutil.copy2(output / name, staging / name)
             for name in ["LICENSE", "NOTICE.md"]:
                 shutil.copy2(REPOSITORY / name, staging / name)
+            shutil.copy2(ROOT / "licenses/GPL-3.0.txt", staging / "GPL-3.0.txt")
             archive = shutil.make_archive(str((output / "AdVanish-jailed").resolve()), "zip", staging)
         files = [Path(archive), output / "framework-check.json", output / "build-info.json", output / "inject-ipa.py", output / "sign-ipa.py", output / "ipa_tools.py"]
         (output / "SHA256SUMS").write_text("".join(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n" for path in files))
