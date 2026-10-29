@@ -1,5 +1,11 @@
 # Code audit
 
+## 0.3.1: AppLovin X
+
+The supplied SDK's `ALExitButton` is a `UIView`, not a `UIControl`. The 0.3.0 Close adapter rejected it even after a matching reward. Its reviewed tap-registration helper attaches a `UITapGestureRecognizer` with the SDK's target and action.
+
+The new adapter records that actual registration for the controller's own Close view. It can replay the registered action only after a genuine matching reward, while the creative, owner, view and enabled gesture still match. It does not guess a private close selector, force controller dismissal or create a reward callback. Manual-only mode keeps automatic Close disabled.
+
 ## Follow-up: reported playable, manual and Close failures
 
 Reviewed native discovery, rate ownership, manual selection, reward sessions, WebKit timing and frame messages, preferences, injection/signing, build scripts, Actions, tests and retained evidence for all seven supplied IPAs before changing them. The existing detection families and 16x video implementation are preserved.

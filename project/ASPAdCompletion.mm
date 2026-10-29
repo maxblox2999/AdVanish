@@ -28,9 +28,20 @@
 @implementation ASPRewardSession
 @end
 
+@interface ASPCloseTapRegistration : NSObject
+@property (nonatomic, weak) UITapGestureRecognizer *gesture;
+@property (nonatomic, weak) UIViewController *target;
+@property (nonatomic) SEL action;
+@property (nonatomic) IMP implementation;
+@property (atomic) BOOL invalidated;
+@end
+@implementation ASPCloseTapRegistration
+@end
+
 static BOOL gAutoDismiss;
 static NSMutableArray<ASPRewardSession *> *sessions;
 static NSMutableSet<NSString *> *installed;
+static char kCloseTapRegistration;
 
 static BOOL namedKind(id object, NSString *name) {
     Class cls = NSClassFromString(name);
@@ -116,6 +127,32 @@ static BOOL videoSurfaceMatches(ASPRewardSession *session, ASPAdSurface *surface
     return YES;
 }
 
+static BOOL noArgumentAction(id target, SEL action, IMP *implementation) {
+    if (!target || !action) return NO;
+    Method method = class_getInstanceMethod(object_getClass(target), action);
+    if (!method || method_getNumberOfArguments(method) != 2) return NO;
+    char type[16] = {};
+    method_getReturnType(method, type, sizeof(type));
+    if (strcmp(type, @encode(void)) != 0) return NO;
+    if (implementation) *implementation = method_getImplementation(method);
+    return YES;
+}
+
+static ASPCloseTapRegistration *eligibleCloseTap(UIView *close, UIViewController *owner) {
+    ASPCloseTapRegistration *registration = objc_getAssociatedObject(close, &kCloseTapRegistration);
+    UITapGestureRecognizer *gesture = registration.gesture;
+    IMP implementation = NULL;
+    if (!registration || registration.invalidated || registration.target != owner || !namedKind(owner, @"ALBaseVideoViewController") ||
+        ![gesture isMemberOfClass:UITapGestureRecognizer.class] || !gesture.enabled || gesture.view != close ||
+        gesture.numberOfTapsRequired != 1 || gesture.numberOfTouchesRequired != 1 ||
+        !noArgumentAction(owner, registration.action, &implementation) || implementation != registration.implementation) return nil;
+    NSUInteger taps = 0;
+    for (UIGestureRecognizer *candidate in close.gestureRecognizers) {
+        if ([candidate isKindOfClass:UITapGestureRecognizer.class] && candidate.enabled) taps += 1;
+    }
+    return taps == 1 ? registration : nil;
+}
+
 static void closeIfEligible(ASPRewardSession *session) {
     BOOL eligible = session.requiresReward ? session.rewarded : session.videoCompleted;
     if (!gAutoDismiss || !eligible || session.closeRequested || session.invalidated ||
@@ -133,18 +170,26 @@ static void closeIfEligible(ASPRewardSession *session) {
             return;
         }
         id value = objectValue(surface.owner, NSSelectorFromString(@"closeButton"));
-        if (![value isKindOfClass:UIControl.class]) return;
-        UIControl *close = value;
-        if (!(close.allControlEvents & UIControlEventTouchUpInside) || !close.allTargets.count ||
-            !close.enabled || !close.userInteractionEnabled ||
+        if (![value isKindOfClass:UIView.class]) return;
+        UIView *close = value;
+        if (!close.userInteractionEnabled ||
             !ASPViewVisibleInSurface(close, surface.root)) return;
         CGPoint point = [close convertPoint:CGPointMake(CGRectGetMidX(close.bounds), CGRectGetMidY(close.bounds))
                                      toView:close.window];
         UIView *hit = [close.window hitTest:point withEvent:nil];
         if (hit != close && ![hit isDescendantOfView:close]) return;
-        // This is the SDK's own action after its real reward event, not a forced dismissal.
-        session.closeRequested = YES;
-        [close sendActionsForControlEvents:UIControlEventTouchUpInside];
+        if ([close isKindOfClass:UIControl.class]) {
+            UIControl *control = (UIControl *)close;
+            if (!(control.allControlEvents & UIControlEventTouchUpInside) || !control.allTargets.count || !control.enabled) return;
+            session.closeRequested = YES;
+            [control sendActionsForControlEvents:UIControlEventTouchUpInside];
+        } else {
+            ASPCloseTapRegistration *registration = eligibleCloseTap(close, surface.owner);
+            if (!registration) return;
+            // Replay only the SDK's observed X registration after genuine completion.
+            session.closeRequested = YES;
+            ((void (*)(id, SEL))objc_msgSend)(registration.target, registration.action);
+        }
         return;
     }
 }
@@ -296,6 +341,71 @@ static BOOL replace(Class cls, SEL selector, IMP replacement, const char *encodi
     return YES;
 }
 
+static void installCloseTapRegistration(void) {
+    Class cls = UIView.class;
+    SEL selector = NSSelectorFromString(@"al_addTapHandler:toTarget:");
+    Method method = class_getInstanceMethod(cls, selector);
+    if (!method || method_getNumberOfArguments(method) != 4) return;
+    char type[16] = {};
+    method_getReturnType(method, type, sizeof(type));
+    if (strcmp(type, @encode(void)) != 0) return;
+    method_getArgumentType(method, 2, type, sizeof(type));
+    if (strcmp(type, @encode(SEL)) != 0) return;
+    method_getArgumentType(method, 3, type, sizeof(type));
+    if (type[0] != '@') return;
+    IMP original = method_getImplementation(method);
+    IMP wrapper = imp_implementationWithBlock(^(UIView *view, SEL action, id target) {
+        BOOL track = [NSThread isMainThread] && gAutoDismiss && namedKind(target, @"ALBaseVideoViewController") &&
+            objectValue(target, NSSelectorFromString(@"closeButton")) == view;
+        NSArray<UIGestureRecognizer *> *before = track ? view.gestureRecognizers.copy : nil;
+        ((void (*)(id, SEL, SEL, id))original)(view, selector, action, target);
+        if (!track) return;
+        objc_setAssociatedObject(view, &kCloseTapRegistration, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        IMP implementation = NULL;
+        if (!noArgumentAction(target, action, &implementation)) return;
+        UITapGestureRecognizer *added = nil;
+        for (UIGestureRecognizer *gesture in view.gestureRecognizers) {
+            if ([before containsObject:gesture] || ![gesture isMemberOfClass:UITapGestureRecognizer.class]) continue;
+            if (added) return;
+            added = (UITapGestureRecognizer *)gesture;
+        }
+        if (!added) return;
+        ASPCloseTapRegistration *registration = [ASPCloseTapRegistration new];
+        registration.gesture = added;
+        registration.target = target;
+        registration.action = action;
+        registration.implementation = implementation;
+        objc_setAssociatedObject(view, &kCloseTapRegistration, registration, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(added, &kCloseTapRegistration, registration, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    });
+    replace(cls, selector, wrapper, method_getTypeEncoding(method));
+}
+
+static void installTapMutationHooks(void) {
+    for (NSString *name in @[@"addTarget:action:", @"removeTarget:action:"]) {
+        Class cls = UIGestureRecognizer.class;
+        SEL selector = NSSelectorFromString(name);
+        Method method = class_getInstanceMethod(cls, selector);
+        if (!method || method_getNumberOfArguments(method) != 4) continue;
+        char type[16] = {};
+        method_getReturnType(method, type, sizeof(type));
+        if (strcmp(type, @encode(void)) != 0) continue;
+        method_getArgumentType(method, 2, type, sizeof(type));
+        if (type[0] != '@') continue;
+        method_getArgumentType(method, 3, type, sizeof(type));
+        if (strcmp(type, @encode(SEL)) != 0) continue;
+        BOOL adding = [name isEqualToString:@"addTarget:action:"];
+        IMP original = method_getImplementation(method);
+        IMP wrapper = imp_implementationWithBlock(^(UIGestureRecognizer *gesture, id target, SEL action) {
+            ASPCloseTapRegistration *registration = objc_getAssociatedObject(gesture, &kCloseTapRegistration);
+            if (registration && (adding || ((!target || target == registration.target) &&
+                (!action || action == registration.action)))) registration.invalidated = YES;
+            ((void (*)(id, SEL, id, SEL))original)(gesture, selector, target, action);
+        });
+        replace(cls, selector, wrapper, method_getTypeEncoding(method));
+    }
+}
+
 static void hookMAXDelegate(Class cls) {
     SEL display = NSSelectorFromString(@"didDisplayAd:");
     Method method = class_getInstanceMethod(cls, display);
@@ -320,6 +430,8 @@ static void hookMAXDelegate(Class cls) {
 }
 
 void ASPAdCompletionInstallHooks(void) {
+    installCloseTapRegistration();
+    installTapMutationHooks();
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         [[NSNotificationCenter defaultCenter] addObserverForName:AVPlayerItemDidPlayToEndTimeNotification
