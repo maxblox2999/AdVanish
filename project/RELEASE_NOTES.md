@@ -1,8 +1,7 @@
-# AdVanish 0.5.1
+# AdVanish 0.5.2
 
-- Enable existing tap/swipe assistance on native-owned non-MRAID playables.
-- Keep 16x acceleration active during supported interaction.
-- Require a fresh manual request after a playable is replaced.
-- Add regression and real-browser checks for both paths.
+- Remove title updates from Settings row construction to prevent reentrant loading.
+- Keep the row cache mutable and guard unavailable or incorrectly typed app-registry getters.
+- Add a dedicated simulator test that opens the root and app Settings pages using Apple's Preferences framework.
 
-Test release. Fixtures do not verify real providers, physical-device compatibility or in-game rewards. [Game-ad coverage](https://github.com/maxblox2999/AdVanish/blob/main/project/docs/PROVIDERS.md).
+Test release. The exact device crash cannot be confirmed without its crash report. Physical PreferenceLoader and jailbreak behavior remain unverified.

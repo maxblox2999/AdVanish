@@ -16,7 +16,7 @@ SHA = os.environ["GITHUB_SHA"]
 RUN = os.environ["GITHUB_RUN_ID"]
 INCOMING = ROOT / "incoming"
 OUTPUT = ROOT / "release"
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 OUTPUT.mkdir(exist_ok=True)
 reports = {}
 native = {}
@@ -68,6 +68,10 @@ for variant in ["rootless", "rootful", "roothide", "jailed"]:
             assert report["passed"] and report["source_commit"] == SHA
             assert len(report["checks"]) >= 71
             native["helpers"] = report
+            settings_report = json.loads((folder / "ios-settings.json").read_text())
+            assert settings_report["passed"] and settings_report["source_commit"] == SHA
+            assert settings_report["settings_controller"] and len(settings_report["checks"]) >= 15
+            native["settings"] = settings_report
 
 source_folder = INCOMING / ("advanish-source-" + SHA)
 source = source_folder / "AdVanish-source.tar.gz"

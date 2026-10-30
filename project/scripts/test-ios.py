@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import platform
 import plistlib
 import shutil
@@ -38,8 +39,10 @@ def source_commit():
         return None
 
 
-def main(video, output, injected=False, manual=False):
+def main(video, output, injected=False, manual=False, settings=False):
     output.unlink(missing_ok=True)
+    if settings and (injected or manual):
+        raise ValueError("Settings verification runs separately from ad injection")
     if manual and not injected:
         raise ValueError("Manual-mode verification requires the injected framework")
     sdk = run("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
@@ -85,7 +88,23 @@ def main(video, output, injected=False, manual=False):
             shutil.copyfile(video, app / "fixture.mp4")
             command = ["xcrun", "--sdk", "iphonesimulator", "clang++", "-fobjc-arc", "-fblocks", "-std=c++11",
                        "-isysroot", sdk, "-target", platform.machine() + "-apple-ios15.0-simulator", "-I", str(ROOT)]
-            if injected:
+            if settings:
+                includes = Path(os.environ["THEOS"]) / "include"
+                stub = Path(directory) / "Preferences.framework"
+                stub.mkdir()
+                target_name = platform.machine() + "-ios-simulator"
+                (stub / "Preferences.tbd").write_text(
+                    "--- !tapi-tbd\n"
+                    "tbd-version: 4\n"
+                    "targets: [ " + target_name + " ]\n"
+                    "install-name: '/System/Library/PrivateFrameworks/Preferences.framework/Preferences'\n"
+                    "exports:\n"
+                    "  - targets: [ " + target_name + " ]\n"
+                    "    objc-classes: [ PSListController, PSSpecifier ]\n"
+                    "...\n")
+                command += ["-I", str(includes), "-F", directory, "-framework", "Preferences",
+                            "-x", "objective-c++", str(ROOT / "tests/ios/SettingsFixture.m")]
+            elif injected:
                 frameworks = app / "Frameworks"
                 subprocess.run([sys.executable, str(ROOT / "scripts/build-jailed.py"), "--simulator", "--output", str(frameworks)], check=True, timeout=300)
                 command += [str(ROOT / "tests/ios/InjectedFixture.mm"), "-F", str(frameworks), "-framework", "AdVanish",
@@ -128,6 +147,7 @@ def main(video, output, injected=False, manual=False):
             report["injected_framework"] = injected
             report["source_commit"] = source_commit()
             report["manual_mode"] = manual
+            report["settings_controller"] = settings
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(json.dumps(report, indent=2) + "\n")
             print(json.dumps(report))
@@ -147,7 +167,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, default=ROOT / "dist/ios-simulator.json")
     parser.add_argument("--injected", action="store_true")
     parser.add_argument("--manual", action="store_true", help="Check manual-only mode in the injected framework")
+    parser.add_argument("--settings", action="store_true", help="Open production Settings against real simulator Preferences")
     args = parser.parse_args()
     if args.manual and not args.injected:
         parser.error("--manual requires --injected")
-    main(args.video, args.output, args.injected, args.manual)
+    main(args.video, args.output, args.injected, args.manual, args.settings)
