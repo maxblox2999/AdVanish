@@ -788,6 +788,58 @@ async function main() {
             assert.deepEqual(result.errors, []);
         }, true, false));
     }
+
+    cases.push(await runCase('native-owned-non-mraid-tap-and-swipe', `
+        delete window.mraid;
+        const button = document.createElement('button');
+        button.textContent = 'Start game';
+        button.style.cssText = 'width:240px;height:120px';
+        let clicks = 0, moves = 0, releases = 0;
+        button.addEventListener('click', () => { clicks++; button.textContent = 'Swipe left'; });
+        button.addEventListener('pointermove', () => moves++);
+        button.addEventListener('pointerup', () => releases++);
+        document.body.append(button);
+        __adspeed.setAdContext(true);
+        const start = {real:realNow(),virtual:performance.now()};
+        await until(() => __adspeed.stats.interactions === 2, 'original tap and swipe handlers');
+        const timing = {real:realNow()-start.real,virtual:performance.now()-start.virtual};
+        return {clicks,moves,releases,timing,...state()};
+    `, result => {
+        assert.equal(result.clicks, 1);
+        assert.equal(result.moves, 6);
+        assert.equal(result.releases, 2);
+        assert.ok(result.timing.virtual > result.timing.real * 8);
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }));
+    cases.push(await runCase('replaced-manual-playable-requires-new-request', `
+        delete window.mraid;
+        const first = document.createElement('canvas');
+        first.width = 320; first.height = 180;
+        document.body.append(first);
+        __adspeed.setAdContext(true);
+        const action = await __adspeed.skipAsync();
+        const before = {real:realNow(),virtual:performance.now()};
+        await sleep(120);
+        const fast = {real:realNow()-before.real,virtual:performance.now()-before.virtual};
+        const replacement = document.createElement('canvas');
+        replacement.width = 320; replacement.height = 180;
+        first.replaceWith(replacement);
+        await sleep(300);
+        const normalStart = {real:realNow(),virtual:performance.now()};
+        await sleep(120);
+        const normal = {real:realNow()-normalStart.real,virtual:performance.now()-normalStart.virtual};
+        const fresh = await __adspeed.skipAsync();
+        return {action,fast,normal,fresh,...state()};
+    `, result => {
+        assert.equal(result.action.kind, 'timing');
+        assert.ok(result.fast.virtual > result.fast.real * 8);
+        assert.ok(result.normal.virtual < result.normal.real * 1.5);
+        assert.equal(result.fresh.handled, 1);
+        assert.equal(result.fresh.kind, 'timing');
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }, true, false));
     const report = {
         sourceSha256,
         browser: version,

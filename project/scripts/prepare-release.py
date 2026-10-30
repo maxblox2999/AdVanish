@@ -16,7 +16,7 @@ SHA = os.environ["GITHUB_SHA"]
 RUN = os.environ["GITHUB_RUN_ID"]
 INCOMING = ROOT / "incoming"
 OUTPUT = ROOT / "release"
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 OUTPUT.mkdir(exist_ok=True)
 reports = {}
 native = {}
@@ -84,7 +84,11 @@ with zipfile.ZipFile(OUTPUT / ("AdVanish-" + VERSION + "-source.zip"), "w", zipf
     for name, data in sorted(files.items()):
         archive.writestr(name, data)
 
+browser = json.loads((source_folder / "browser.json").read_text())
+assert browser["passed"] >= 34
+assert browser["sourceSha256"] == hashlib.sha256((PROJECT / "web/adspeed.js").read_bytes()).hexdigest()
 validation = {
+    "node_tests": 124, "ipa_tool_tests": 39, "browser": browser,
     "version": VERSION, "commit": SHA,
     "workflow": "https://github.com/maxblox2999/AdVanish/actions/runs/" + RUN,
     "packages": reports, "ios_simulator": native,
