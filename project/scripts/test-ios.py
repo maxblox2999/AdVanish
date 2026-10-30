@@ -128,6 +128,7 @@ def main(video, output, injected=False, manual=False, settings=False):
             run("xcrun", "simctl", "install", device, str(app))
             container = Path(run("xcrun", "simctl", "get_app_container", device, BUNDLE, "data"))
             report_path = container / "Documents/result.json"
+            launch_started = time.time()
             with tempfile.TemporaryFile(mode="w+t") as launch_log:
                 launcher = subprocess.Popen(["xcrun", "simctl", "launch", device, BUNDLE], stdout=launch_log, stderr=subprocess.STDOUT, text=True)
                 try:
@@ -146,7 +147,28 @@ def main(video, output, injected=False, manual=False, settings=False):
                             launcher.kill()
                             launcher.wait(timeout=10)
             if not report_path.exists():
-                raise RuntimeError("Native fixture did not write a result")
+                diagnostics = {"phase": "missing result", "settings": settings, "source_commit": source_commit()}
+                progress = container / "Documents/settings-progress.json"
+                if progress.is_file():
+                    diagnostics["progress"] = progress.read_text()[:65536]
+                try:
+                    logs = subprocess.run(["xcrun", "simctl", "spawn", device, "log", "show",
+                        "--last", "3m", "--style", "compact", "--predicate",
+                        'process == "AdVanishFixture" OR eventMessage CONTAINS "AdVanishFixture"'],
+                        capture_output=True, text=True, timeout=30)
+                    diagnostics["simulator_log"] = (logs.stdout + logs.stderr)[-180000:]
+                except subprocess.TimeoutExpired:
+                    diagnostics["simulator_log"] = "log collection timed out"
+                reports = Path.home() / "Library/Logs/DiagnosticReports"
+                crashes = sorted(reports.glob("AdVanishFixture*"), key=lambda p: p.stat().st_mtime, reverse=True)
+                diagnostics["crash_reports"] = [
+                    {"name": path.name, "content": path.read_text(errors="replace")[:180000]}
+                    for path in crashes[:3] if path.is_file() and path.stat().st_mtime >= launch_started - 10]
+                output.parent.mkdir(parents=True, exist_ok=True)
+                diagnostic_path = output.with_name(output.stem + "-diagnostics.json")
+                diagnostic_path.write_text(json.dumps(diagnostics, indent=2) + "\n")
+                print(json.dumps(diagnostics), flush=True)
+                raise RuntimeError("Native fixture did not write a result; see " + str(diagnostic_path))
             report = json.loads(report_path.read_text())
             report["runtime"] = runtime["version"]
             report["injected_framework"] = injected
