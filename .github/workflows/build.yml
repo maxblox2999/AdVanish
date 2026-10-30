@@ -83,6 +83,9 @@ jobs:
       - name: Exercise native skipping and pending reward protection in iOS Simulator
         if: matrix.variant == 'rootless'
         run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --output dist/rootless/ios-simulator.json
+      - name: Open production Settings pages in iOS Simulator
+        if: matrix.variant == 'rootless'
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --settings --output dist/rootless/ios-settings.json
       - name: Exercise injected initialization and production hooks in iOS Simulator
         if: matrix.variant == 'jailed'
         run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --output dist/jailed/ios-injected.json
@@ -120,13 +123,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="v0.5.1"
+          tag="v0.5.2"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release already exists; refusing to replace its assets."
             exit 1
           fi
           tail -n +2 project/RELEASE_NOTES.md > release-notes.md
-          gh release create "$tag" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AdVanish 0.5.1" --notes-file release-notes.md --prerelease --draft
+          gh release create "$tag" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AdVanish 0.5.2" --notes-file release-notes.md --prerelease --draft
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
       - name: Verify public downloads
         run: python3 project/scripts/verify-release.py
@@ -135,7 +138,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for tag in v0.2.0 v0.2.1 v0.3.0 v0.3.1 v0.5.0; do
+          for tag in v0.2.0 v0.2.1 v0.3.0 v0.3.1 v0.5.0 v0.5.1; do
             if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
             fi

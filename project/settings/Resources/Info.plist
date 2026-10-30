@@ -5,6 +5,6 @@
 <key>CFBundleExecutable</key><string>adspeedprefs</string>
 <key>CFBundleName</key><string>AdVanish</string>
 <key>CFBundlePackageType</key><string>BNDL</string>
-<key>CFBundleVersion</key><string>0.5.1</string>
+<key>CFBundleVersion</key><string>0.5.2</string>
 <key>NSPrincipalClass</key><string>AVNSettingsController</string>
 </dict></plist>

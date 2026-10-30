@@ -5,6 +5,18 @@
 #import <objc/message.h>
 #import "../ASPPaths.h"
 
+
+static id AVNSettingsObject(id receiver, NSString *name) {
+    SEL selector = NSSelectorFromString(name);
+    @try {
+        NSMethodSignature *signature = [receiver methodSignatureForSelector:selector];
+        if (!signature || signature.numberOfArguments != 2 || signature.methodReturnType[0] != '@') return nil;
+        return ((id (*)(id, SEL))objc_msgSend)(receiver, selector);
+    } @catch (NSException *exception) {
+        return nil;
+    }
+}
+
 @interface AVNSettingsController : PSListController
 @property (nonatomic, strong) NSMutableDictionary *cachedValues;
 @end
@@ -17,17 +29,19 @@
     }
     return self.cachedValues;
 }
-- (NSString *)application {
-    return [self.specifier propertyForKey:@"AVNApplication"];
+- (NSString *)avnApplicationIdentifier {
+    id value = [self.specifier propertyForKey:@"AVNApplication"];
+    return [value isKindOfClass:NSString.class] ? value : nil;
 }
 - (NSString *)storageKey:(NSString *)feature {
-    NSString *application = self.application;
+    NSString *application = self.avnApplicationIdentifier;
     if (!application.length) return feature;
     if ([feature isEqualToString:@"Enabled"]) return [@"enabled-" stringByAppendingString:application];
     return [NSString stringWithFormat:@"%@-%@", application, feature];
 }
 - (id)valueForControl:(PSSpecifier *)control {
-    id saved = self.database[[control propertyForKey:@"AVNKey"]];
+    id key = [control propertyForKey:@"AVNKey"];
+    id saved = [key isKindOfClass:NSString.class] ? self.database[key] : nil;
     return saved ?: [control propertyForKey:@"default"];
 }
 - (void)changeValue:(id)value forControl:(PSSpecifier *)control {
@@ -37,6 +51,7 @@
         NSString *automatic = [self storageKey:@"AutomaticAds"];
         if (!database[automatic]) database[automatic] = @(![database[key] boolValue]);
     }
+    if (![key isKindOfClass:NSString.class] || !key.length || !value) return;
     database[key] = value;
     NSString *file = ASPPrefsWritePath(@"com.34306-sr.adspeed");
     [NSFileManager.defaultManager createDirectoryAtPath:file.stringByDeletingLastPathComponent
@@ -64,28 +79,20 @@
     [control setProperty:@(initial) forKey:@"default"];
     return control;
 }
-- (NSArray<NSDictionary *> *)applications {
+- (NSArray<NSDictionary *> *)avnInstalledApplications {
     Class registry = NSClassFromString(@"LSApplicationWorkspace");
-    SEL singleton = NSSelectorFromString(@"defaultWorkspace");
-    SEL listing = NSSelectorFromString(@"allApplications");
-    if (![registry respondsToSelector:singleton]) return @[];
-    id workspace = ((id (*)(id, SEL))objc_msgSend)(registry, singleton);
-    if (![workspace respondsToSelector:listing]) return @[];
-    id collection = ((id (*)(id, SEL))objc_msgSend)(workspace, listing);
+    id workspace = AVNSettingsObject(registry, @"defaultWorkspace");
+    id collection = AVNSettingsObject(workspace, @"allApplications");
     if (![collection isKindOfClass:NSArray.class]) return @[];
     NSMutableArray *result = NSMutableArray.array;
     for (id proxy in collection) {
-        NSMutableDictionary *values = NSMutableDictionary.dictionary;
-        for (NSString *property in @[@"applicationType", @"applicationIdentifier", @"localizedName"]) {
-            SEL selector = NSSelectorFromString(property);
-            if ([proxy respondsToSelector:selector]) {
-                id value = ((id (*)(id, SEL))objc_msgSend)(proxy, selector);
-                if ([value isKindOfClass:NSString.class]) values[property] = value;
-            }
-        }
-        NSString *identifier = values[@"applicationIdentifier"];
-        if (![values[@"applicationType"] isEqual:@"User"] || !identifier.length) continue;
-        [result addObject:@{@"identifier": identifier, @"title": values[@"localizedName"] ?: identifier}];
+        id type = AVNSettingsObject(proxy, @"applicationType");
+        id identifier = AVNSettingsObject(proxy, @"applicationIdentifier");
+        id name = AVNSettingsObject(proxy, @"localizedName");
+        if (![type isKindOfClass:NSString.class] || ![type isEqualToString:@"User"] ||
+            ![identifier isKindOfClass:NSString.class] || ![identifier length]) continue;
+        [result addObject:@{@"identifier": identifier,
+            @"title": [name isKindOfClass:NSString.class] && [name length] ? name : identifier}];
     }
     return [result sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
         return [left[@"title"] localizedCaseInsensitiveCompare:right[@"title"]];
@@ -99,19 +106,17 @@
 - (NSArray *)specifiers {
     if (_specifiers) return _specifiers;
     NSMutableArray *rows = NSMutableArray.array;
-    if (!self.application.length) {
-        self.title = @"AdVanish";
+    if (!self.avnApplicationIdentifier.length) {
         [rows addObject:[self section:nil note:@"maxblox2999"]];
         [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:YES]];
         [rows addObject:[self section:@"Apps" note:@"Changes apply after reopening the app."]];
-        for (NSDictionary *app in self.applications) {
+        for (NSDictionary *app in self.avnApplicationIdentifiers) {
             PSSpecifier *link = [PSSpecifier preferenceSpecifierNamed:app[@"title"] target:nil set:NULL get:NULL
                 detail:AVNSettingsController.class cell:PSLinkCell edit:Nil];
             [link setProperty:app[@"identifier"] forKey:@"AVNApplication"];
             [rows addObject:link];
         }
     } else {
-        self.title = self.specifier.name;
         NSMutableDictionary *database = self.database;
         BOOL defaultAutomatic = ![database[[self storageKey:@"ManualSkip"]] boolValue];
         [rows addObject:[self section:nil note:@"Manual mode waits for the button and never presses Close."]];
@@ -130,7 +135,7 @@
         ];
         for (NSArray *feature in features) [rows addObject:[self toggle:feature[0] feature:feature[1] initial:[feature[2] boolValue]]];
     }
-    _specifiers = rows.copy;
+    _specifiers = rows;
     return _specifiers;
 }
 @end
