@@ -27,6 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
       - name: Test web engine and check generated source
         run: |
           node scripts/embed-web.cjs
@@ -35,6 +38,10 @@ jobs:
           bash -n scripts/setup-theos.sh scripts/build.sh
           python3 -m py_compile scripts/*.py
           python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Test Chromium media and playable paths
+        env:
+          BROWSER_PATH: /usr/bin/google-chrome
+        run: node tests/browser/verify.cjs
       - name: Archive complete source
         run: |
           mkdir -p dist/source "$RUNNER_TEMP/source-id"
@@ -42,6 +49,7 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/source-id/SOURCE_COMMIT"
           tar --append --file="$RUNNER_TEMP/advanish-source.tar" --transform='s,^,AdVanish/,' -C "$RUNNER_TEMP/source-id" SOURCE_COMMIT
           gzip -n < "$RUNNER_TEMP/advanish-source.tar" > dist/source/AdVanish-source.tar.gz
+          cp dist/browser.json dist/source/browser.json
           cd dist/source
           sha256sum AdVanish-source.tar.gz > SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -112,13 +120,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="v0.5.0"
+          tag="v0.5.1"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release already exists; refusing to replace its assets."
             exit 1
           fi
           tail -n +2 project/RELEASE_NOTES.md > release-notes.md
-          gh release create "$tag" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AdVanish 0.5.0" --notes-file release-notes.md --prerelease --draft
+          gh release create "$tag" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AdVanish 0.5.1" --notes-file release-notes.md --prerelease --draft
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
       - name: Verify public downloads
         run: python3 project/scripts/verify-release.py
@@ -127,7 +135,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for tag in v0.2.0 v0.2.1 v0.3.0 v0.3.1; do
+          for tag in v0.2.0 v0.2.1 v0.3.0 v0.3.1 v0.5.0; do
             if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
             fi

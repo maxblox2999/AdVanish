@@ -31,7 +31,8 @@ function environment(configuration = {}, options = {}) {
         },
         querySelectorAll(selector) {
             if (selector === 'iframe,frame') return frameNodes;
-            if (selector === 'canvas,[role="timer"],time') return controls.filter(node => node.tagName === 'CANVAS');
+            if (selector === 'canvas,[role="timer"],time') return controls.filter(node => node.tagName === 'CANVAS' || node.tagName === 'TIME'
+                || (node.getAttribute && node.getAttribute('role') === 'timer'));
             assert.equal(selector, 'button,[role="button"],[aria-label]');
             return controls;
         },
@@ -1833,4 +1834,108 @@ test('a later video cannot inherit another video manual rate authorization', asy
     assert.equal(first.playbackRate, 16);
     assert.equal(later.playbackRate, 1);
     assert.deepEqual(later.rates, []);
+});
+
+for (const label of ['Tap to play', 'Swipe left', 'Swipe right', 'Swipe up', 'Swipe down']) {
+    test('native-owned non-MRAID playable executes ' + label + ' at 16x', () => {
+        const env = environment(adConfig);
+        env.document.readyState = 'complete';
+        const node = control(env, label);
+        env.sandbox.__adspeed.setAdContext(true);
+        env.advance(400);
+        assert.equal(node.events[0].type, 'pointerdown');
+        assert.ok(node.events.some(event => event.type === 'pointerup'));
+        assert.equal(node.events.filter(event => event.type === 'pointermove').length,
+            label.startsWith('Swipe') ? 6 : 0);
+        assert.equal(env.sandbox.__adspeed.stats.interactions, 1);
+        assert.equal(env.sandbox.performance.now(), 6400);
+    });
+}
+
+for (const context of [false, null]) {
+    test('non-MRAID unknown content has no interaction for context ' + context, () => {
+        const env = environment({...adConfig, recognizedAd: context});
+        env.document.readyState = 'complete';
+        const node = control(env, 'Start game');
+        env.advance(500);
+        assert.equal(node.events.length, 0);
+        assert.equal(env.sandbox.performance.now(), 500);
+    });
+}
+
+test('native-owned non-MRAID document waits for loading to finish', () => {
+    const env = environment(adConfig);
+    env.document.readyState = 'loading';
+    const node = control(env, 'Start game');
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(300);
+    assert.equal(node.events.length, 0);
+    env.document.readyState = 'complete';
+    env.advance(300);
+    assert.equal(node.events.at(-1).type, 'click');
+});
+
+test('manual non-MRAID timing never sends gameplay input', async () => {
+    const env = environment(manualAdConfig);
+    env.document.readyState = 'complete';
+    const node = control(env, 'Start game');
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(200);
+    assert.equal(node.events.length, 0);
+    const action = await env.sandbox.__adspeed.skipAsync();
+    assert.equal(action.kind, 'timing');
+    env.advance(200);
+    assert.equal(node.events.length, 0);
+});
+
+for (const kind of ['CANVAS', 'TIME', 'BUTTON']) {
+    test('manual timing token rejects a replaced ' + kind + ' surface', async () => {
+        const env = environment(manualAdConfig);
+        const first = control(env, kind === 'BUTTON' ? 'Start game' : '', {tagName: kind});
+        env.sandbox.__adspeed.setAdContext(true);
+        const before = await env.sandbox.__adspeed.inspectAsync();
+        assert.equal(before.count, 1);
+        first.isConnected = false;
+        env.controls.splice(env.controls.indexOf(first), 1);
+        const next = control(env, kind === 'BUTTON' ? 'Start game' : '', {tagName: kind});
+        env.observers[0].callback([]);
+        assert.equal((await env.sandbox.__adspeed.skipAsync(before.token)).handled, 0);
+        env.advance(100);
+        assert.equal(env.sandbox.performance.now(), 100);
+        assert.equal(next.events.length, 0);
+    });
+}
+for (const kind of ['CANVAS', 'BUTTON']) {
+    test('replacing active manual ' + kind + ' timing requires a fresh press', async () => {
+        const env = environment(manualAdConfig);
+        const first = control(env, kind === 'BUTTON' ? 'Start game' : '', {tagName: kind});
+        env.sandbox.__adspeed.setAdContext(true);
+        assert.equal((await env.sandbox.__adspeed.skipAsync()).kind, 'timing');
+        env.advance(100);
+        assert.equal(env.sandbox.performance.now(), 1600);
+        first.isConnected = false;
+        env.controls.splice(env.controls.indexOf(first), 1);
+        const next = control(env, kind === 'BUTTON' ? 'Start game' : '', {tagName: kind});
+        env.observers[0].callback([]);
+        env.advance(100);
+        assert.equal(env.sandbox.performance.now(), 1700);
+        assert.equal((await env.sandbox.__adspeed.skipAsync()).kind, 'timing');
+        env.advance(100);
+        assert.equal(env.sandbox.performance.now(), 3300);
+        assert.equal(next.events.length, 0);
+    });
+}
+test('same playable timer text and added HUD do not cancel manual acceleration', async () => {
+    const env = environment(manualAdConfig);
+    const timer = control(env, '3', {tagName: 'TIME'});
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).kind, 'timing');
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1600);
+    timer.textContent = '2';
+    const hud = control(env, 'Continue playing');
+    env.observers[0].callback([]);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 3200);
+    assert.equal(timer.events.length + hud.events.length, 0);
 });

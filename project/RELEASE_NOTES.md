@@ -1,8 +1,8 @@
-# AdVanish 0.5.0
+# AdVanish 0.5.1
 
-- Replace the old startup, preference and hook scaffolding with a new runtime.
-- Replace Settings with one cached settings controller.
-- Remove jailbreak bypass and Logos/Substrate linkage from the payload.
-- Preserve video/playable acceleration, manual controls, genuine reward observation and RootHide packaging.
+- Enable existing tap/swipe assistance on native-owned non-MRAID playables.
+- Keep 16x acceleration active during supported interaction.
+- Require a fresh manual request after a playable is replaced.
+- Add regression and real-browser checks for both paths.
 
-Test release. Real-game rewards and physical-device compatibility remain unverified. Original-code licensing is in LICENSE; third-party and earlier GPL rights remain applicable.
+Test release. Fixtures do not verify real providers, physical-device compatibility or in-game rewards. [Game-ad coverage](https://github.com/maxblox2999/AdVanish/blob/main/project/docs/PROVIDERS.md).

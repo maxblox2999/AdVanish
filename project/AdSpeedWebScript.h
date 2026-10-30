@@ -693,6 +693,12 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
         }
     }
 
+    function interactionReady() {
+        if (window.mraid != null) return readyMraid();
+        return contextPolicy === true && recognizedAd && !pageHidden()
+            && document.readyState !== 'loading';
+    }
+
     function controlAction(node) {
         if (!node || node.disabled || (node.getAttribute && node.getAttribute('aria-disabled') === 'true')) return null;
         var parent = node;
@@ -758,7 +764,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
             try {
                 if (canceled) return;
                 if (started !== contextGeneration || !recognizedAd || pageHidden() || !visible(node)
-                    || !exposed(node) || !readyMraid()) {
+                    || !exposed(node) || !interactionReady()) {
                     cancel();
                     return;
                 }
@@ -789,7 +795,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
 
     function interact() {
         readyMraid();
-        if (!automatic || !autoComplete || !recognizedAd || pageHidden() || interactionBusy || interactionCount >= 12 || !readyMraid()) return;
+        if (!automatic || !autoComplete || !recognizedAd || pageHidden() || interactionBusy || interactionCount >= 12 || !interactionReady()) return;
         var controls = document.querySelectorAll('button,[role="button"],[aria-label]');
         for (var index = 0; index < Math.min(controls.length, 128); index += 1) {
             var node = controls[index];
@@ -880,12 +886,12 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
     function playableSurface() {
         var nodes = document.querySelectorAll('canvas,[role="timer"],time');
         for (var index = 0; index < Math.min(nodes.length, 64); index += 1) {
-            if (visible(nodes[index]) && exposed(nodes[index])) return true;
+            if (visible(nodes[index]) && exposed(nodes[index])) return nodes[index];
         }
         var controls = document.querySelectorAll('button,[role="button"],[aria-label]');
         for (var controlIndex = 0; controlIndex < Math.min(controls.length, 128); controlIndex += 1) {
             var node = controls[controlIndex];
-            if (controlAction(node) && visible(node) && exposed(node)) return true;
+            if (controlAction(node) && visible(node) && exposed(node)) return node;
         }
         if (accelerateClock && typeof document.getAnimations === 'function') {
             try {
@@ -893,22 +899,23 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
                 for (var animationIndex = 0; animationIndex < Math.min(animations.length, 64); animationIndex += 1) {
                     var animation = animations[animationIndex];
                     var target = animation.effect && animation.effect.target;
-                    if (target && animation.playState === 'running' && visible(target) && exposed(target)) return true;
+                    if (target && animation.playState === 'running' && visible(target) && exposed(target)) return target;
                 }
             } catch (error) {
                 stats.animationFailures += 1;
             }
         }
-        return false;
+        return null;
     }
 
     function capture() {
         var frames = frameCandidates();
         var snapshot = {generation: generation, context: contextGeneration, videos: [], children: frames.children,
             unresolved: frames.unresolved, blockedMedia: false, candidates: []};
-        snapshot.timing = recognizedAd && !pageHidden() && timingAvailable()
+        snapshot.timingNode = recognizedAd && !pageHidden() && timingAvailable()
             && document.readyState !== 'loading' && (contextPolicy === true || recognizedMraid())
-            && playableSurface();
+            ? playableSurface() : null;
+        snapshot.timing = snapshot.timingNode !== null;
         if (pageHidden()) snapshot.unresolved = 1;
         try {
             var videos = document.getElementsByTagName('video');
@@ -942,6 +949,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
         var current = capture();
         if (current.unresolved !== snapshot.unresolved || current.videos.length !== snapshot.videos.length
             || current.children.length !== snapshot.children.length || current.timing !== snapshot.timing
+            || current.timingNode !== snapshot.timingNode
             || current.blockedMedia !== snapshot.blockedMedia) return false;
         for (var index = 0; index < snapshot.videos.length; index += 1) {
             var before = snapshot.videos[index];
