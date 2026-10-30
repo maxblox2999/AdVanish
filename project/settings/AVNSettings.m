@@ -100,7 +100,6 @@ static id AVNSettingsObject(id receiver, NSString *name) {
 }
 - (void)viewWillAppear:(BOOL)animated {
     self.cachedValues = nil;
-    _specifiers = nil;
     [super viewWillAppear:animated];
 }
 - (NSArray *)specifiers {
