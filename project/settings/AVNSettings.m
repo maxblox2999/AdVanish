@@ -110,7 +110,7 @@ static id AVNSettingsObject(id receiver, NSString *name) {
         [rows addObject:[self section:nil note:@"maxblox2999"]];
         [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:YES]];
         [rows addObject:[self section:@"Apps" note:@"Changes apply after reopening the app."]];
-        for (NSDictionary *app in self.avnApplicationIdentifiers) {
+        for (NSDictionary *app in self.avnInstalledApplications) {
             PSSpecifier *link = [PSSpecifier preferenceSpecifierNamed:app[@"title"] target:nil set:NULL get:NULL
                 detail:AVNSettingsController.class cell:PSLinkCell edit:Nil];
             [link setProperty:app[@"identifier"] forKey:@"AVNApplication"];
