@@ -89,7 +89,11 @@ def main(video, output, injected=False, manual=False, settings=False):
             command = ["xcrun", "--sdk", "iphonesimulator", "clang++", "-fobjc-arc", "-fblocks", "-std=c++11",
                        "-isysroot", sdk, "-target", platform.machine() + "-apple-ios15.0-simulator", "-I", str(ROOT)]
             if settings:
-                includes = Path(os.environ["THEOS"]) / "include"
+                theos = Path(os.environ["THEOS"])
+                include_paths = [theos / "include", theos / "vendor/include"]
+                if not any((path / "Preferences/PSListController.h").is_file() for path in include_paths):
+                    raise RuntimeError("Pinned Theos Preferences headers are missing")
+                command += [argument for path in include_paths for argument in ("-I", str(path))]
                 stub = Path(directory) / "Preferences.framework"
                 stub.mkdir()
                 target_name = platform.machine() + "-ios-simulator"
@@ -102,7 +106,7 @@ def main(video, output, injected=False, manual=False, settings=False):
                     "  - targets: [ " + target_name + " ]\n"
                     "    objc-classes: [ PSListController, PSSpecifier ]\n"
                     "...\n")
-                command += ["-I", str(includes), "-F", directory, "-framework", "Preferences",
+                command += ["-F", directory, "-framework", "Preferences",
                             "-x", "objective-c++", str(ROOT / "tests/ios/SettingsFixture.m")]
             elif injected:
                 frameworks = app / "Frameworks"

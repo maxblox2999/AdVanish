@@ -80,12 +80,12 @@ jobs:
       - name: Build and inspect package
         id: package_build
         run: bash scripts/build.sh "${{ matrix.variant }}"
-      - name: Exercise native skipping and pending reward protection in iOS Simulator
-        if: matrix.variant == 'rootless'
-        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --output dist/rootless/ios-simulator.json
       - name: Open production Settings pages in iOS Simulator
         if: matrix.variant == 'rootless'
         run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --settings --output dist/rootless/ios-settings.json
+      - name: Exercise native skipping and pending reward protection in iOS Simulator
+        if: matrix.variant == 'rootless'
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --output dist/rootless/ios-simulator.json
       - name: Exercise injected initialization and production hooks in iOS Simulator
         if: matrix.variant == 'jailed'
         run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --output dist/jailed/ios-injected.json
