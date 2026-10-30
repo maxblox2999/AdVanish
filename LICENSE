@@ -1,147 +1,17 @@
 Copyright (C) 2026 maxblox2999. All rights reserved.
 
-Maintainer: maxblox2999
+These terms apply only to original code owned by maxblox2999.
+Third-party licenses, required notices and earlier license grants remain applicable and take precedence for the material they cover.
 
-This license applies to AdVanish and all original code owned by
-maxblox2999. Third-party code remains subject to its respective
-copyright notices and licenses.
+You may use AdVanish personally and privately give an unmodified copy to a friend, with its license and notices included. You may rebuild unmodified source for personal use.
 
-1. Permissions
+Without written permission from maxblox2999, you may not:
+- Publish, upload, sell or otherwise redistribute AdVanish, except the private sharing allowed above.
+- Copy, extract, modify or reuse its original source code or parts of it in another project.
+- Claim ownership or authorship of someone else's work.
+- Impersonate maxblox2999, publish under their name, or describe an unofficial copy as official.
+- Remove or falsify copyright, license or attribution notices.
 
-You may download, use, and share unmodified copies of AdVanish.
+Rights not expressly granted are reserved. These terms do not revoke rights already granted under other applicable licenses.
 
-When sharing AdVanish, you must preserve the original copyright,
-license, and attribution notices.
-
-You may not claim that you created, developed, or contributed to
-AdVanish unless you actually did so.
-
-You may not misrepresent the origin of AdVanish, take credit for
-someone else's work, or present yourself as an official developer
-or maintainer without authorization.
-
-You may fork AdVanish solely to rebuild it for your own use.
-If your fork is only intended for rebuilding AdVanish, you may
-not modify, remove, replace, or add anything to the source code.
-
-You may compile and rebuild the original, unmodified source code
-without requesting additional permission.
-
-Modifications are only permitted when contributing through the
-process described in Section 2, or with prior written permission
-from maxblox2999.
-
-2. Contributions
-
-If you want to contribute to AdVanish, you may create a fork of
-the official repository for the purpose of proposing improvements.
-
-You may add features, fix bugs, improve existing functionality,
-and make other changes within your contribution fork.
-
-Once your changes are ready, submit a pull request to the official
-AdVanish repository.
-
-maxblox2999 will review the proposed changes and decide whether
-to approve, reject, or request further improvements.
-
-If your changes work correctly and are considered beneficial to
-the project, they may be merged into the main repository.
-
-Submitting a contribution does not guarantee approval or acceptance.
-
-If your contribution is rejected, you are requested to remove
-your fork unless you have received permission to maintain it.
-
-This removal request is voluntary and does not override any
-applicable third-party license rights.
-
-Contribution forks may not be used to publish unofficial releases,
-distribute modified builds, or misrepresent the project as an
-official AdVanish release.
-
-All contribution forks must retain the original copyright,
-license, and attribution notices.
-
-By submitting a contribution, you grant maxblox2999 a perpetual,
-worldwide, non-exclusive, royalty-free license to use, modify,
-reproduce, distribute, and incorporate your submitted contribution
-into AdVanish, including future versions of the project.
-
-Ownership of contributed code remains with its respective author.
-
-3. Restrictions
-
-You may not:
-
-1. Claim that you created or developed AdVanish if you did not.
-
-2. Claim credit for code or contributions written by someone else.
-
-3. Remove or falsify required copyright, attribution, or license
-   notices.
-
-4. Modify, remove, replace, or add source code in forks created
-   solely for rebuilding AdVanish.
-
-5. Modify AdVanish outside the contribution process or without
-   prior written permission from maxblox2999.
-
-6. Publish or distribute modified versions or unofficial builds
-   without prior written permission from maxblox2999.
-
-7. Present unofficial forks, modifications, or releases as
-   official AdVanish releases.
-
-8. Sell or commercially distribute AdVanish without prior written
-   permission from maxblox2999.
-
-9. Use contribution forks to bypass the restrictions of this license.
-
-Any permissions not expressly granted by this license are reserved
-by their respective copyright holders.
-
-4. Termination
-
-If you violate the terms of this license, your permissions under
-this license automatically terminate.
-
-You must stop any unauthorized use or distribution of AdVanish.
-
-Termination does not affect rights granted under applicable
-third-party licenses.
-
-5. Disclaimer of Warranty
-
-THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
-APPLICABLE LAW.
-
-EXCEPT WHEN OTHERWISE STATED IN WRITING, THE COPYRIGHT HOLDERS
-AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
-OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-FOR A PARTICULAR PURPOSE.
-
-THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
-IS WITH YOU.
-
-SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL
-NECESSARY SERVICING, REPAIR, OR CORRECTION.
-
-6. Limitation of Liability
-
-IN NO EVENT, UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN
-WRITING, WILL ANY COPYRIGHT HOLDER OR CONTRIBUTOR BE LIABLE TO
-YOU FOR DAMAGES, INCLUDING ANY GENERAL, SPECIAL, INCIDENTAL,
-INDIRECT, OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE USE OR
-INABILITY TO USE THE PROGRAM.
-
-THIS INCLUDES, BUT IS NOT LIMITED TO, LOSS OF DATA, INACCURATE
-DATA, SOFTWARE FAILURE, DEVICE MALFUNCTION, FINANCIAL LOSS,
-OR DAMAGE TO OTHER SOFTWARE OR HARDWARE.
-
-THIS LIMITATION APPLIES EVEN IF THE COPYRIGHT HOLDER OR
-CONTRIBUTOR HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
-
-IF THESE LIMITATIONS CANNOT BE FULLY ENFORCED UNDER APPLICABLE
-LAW, THEY SHALL APPLY TO THE MAXIMUM EXTENT PERMITTED BY LAW.
+AdVanish is provided "as is", without warranty. To the extent permitted by law, its copyright holders and contributors are not liable for losses or damages arising from its use.
