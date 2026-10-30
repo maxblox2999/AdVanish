@@ -8,13 +8,15 @@ static void record(NSString *failure) {
     if (finished) return;
     finished = YES;
     NSDictionary *report = @{@"passed": @(!failure), @"failure": failure ?: @"",
-        @"checks": checks, @"scope": @"Production Settings controller and real simulator Preferences.framework; physical PreferenceLoader remains unverified"};
+        @"checks": checks ?: @[], @"scope": @"Production Settings controller and real simulator Preferences.framework; physical PreferenceLoader remains unverified"};
     NSData *data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
     [data writeToFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/result.json"] atomically:YES];
 }
 static void require(BOOL value, NSString *name) {
     if (!value) [NSException raise:@"FixtureFailure" format:@"%@", name];
     [checks addObject:name];
+    NSData *progress = [NSJSONSerialization dataWithJSONObject:@{@"lastCheck": name, @"checks": checks} options:0 error:nil];
+    [progress writeToFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/settings-progress.json"] atomically:YES];
 }
 
 @interface ThrowingProxy : NSObject
@@ -39,10 +41,10 @@ static void require(BOOL value, NSString *name) {
 }
 @end
 
-@interface SettingsDelegate : UIResponder <UIApplicationDelegate>
+@interface AVNSettingsFixtureDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
 @end
-@implementation SettingsDelegate
+@implementation AVNSettingsFixtureDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     checks = NSMutableArray.array;
     @try {
@@ -100,6 +102,13 @@ static void require(BOOL value, NSString *name) {
     return YES;
 }
 @end
+static void AVNSettingsException(NSException *exception) {
+    record([NSString stringWithFormat:@"%@: %@\\n%@", exception.name, exception.reason, exception.callStackSymbols]);
+}
 int main(int argc, char **argv) {
-    @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass(SettingsDelegate.class)); }
+    @autoreleasepool {
+        checks = NSMutableArray.array;
+        NSSetUncaughtExceptionHandler(AVNSettingsException);
+        return UIApplicationMain(argc, argv, nil, NSStringFromClass(AVNSettingsFixtureDelegate.class));
+    }
 }
