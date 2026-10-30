@@ -105,6 +105,7 @@ def main(video, output, injected=False, manual=False, settings=False):
                     "exports:\n"
                     "  - targets: [ " + target_name + " ]\n"
                     "    objc-classes: [ PSListController, PSSpecifier ]\n"
+                    "    objc-ivars: [ PSListController._specifiers ]\n"
                     "...\n")
                 command += ["-F", directory, "-framework", "Preferences",
                             "-x", "objective-c++", str(ROOT / "tests/ios/SettingsFixture.m")]
