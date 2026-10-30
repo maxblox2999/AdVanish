@@ -63,8 +63,13 @@ static id AVNSettingsObject(id receiver, NSString *name) {
     } else {
         self.cachedValues = database;
     }
-    _specifiers = nil;
-    [self reloadSpecifiers];
+    __weak AVNSettingsController *weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        AVNSettingsController *controller = weakSelf;
+        if (controller && [controller.specifiers containsObject:control]) {
+            [controller reloadSpecifier:control animated:NO];
+        }
+    });
 }
 - (PSSpecifier *)section:(NSString *)title note:(NSString *)note {
     PSSpecifier *section = [PSSpecifier groupSpecifierWithName:title];
