@@ -37,8 +37,8 @@ python3 sign-ipa.py Game-AdVanish-unsigned.ipa --output Game-AdVanish-signed.ipa
 
 The injector preserves the original IPA and accepts authorized decrypted, thin arm64 executables with sufficient header padding. Encrypted, fat, arm64e, duplicate and unsafe archives are rejected. The optional macOS signer supports a single app with a matching profile; extensions require another signing tool. Build signatures are ad-hoc; signed-device installation remains unverified.
 
-Optional `--config AdVanish.plist` accepts boolean keys: `Enabled`, `AutomaticAds`, `ManualSkip`, `SpeedUpVideo`, `CompressTimers`, `AccelerateClock`, `ForceInline`, `SpeedNativeVideo`, `AutoInteract`, `AutoDismiss`, `BlockRedirects`. The app's `NSUserDefaults` dictionary `AdVanish` can override them. `AutomaticAds=false` requires the button; it disables automatic input and Close.
+Optional `--config AdVanish.plist` accepts boolean keys: `Enabled`, `AutomaticAds`, `ManualSkip`, `SpeedUpVideo`, `CompressTimers`, `AccelerateClock`, `ForceInline`, `AutoInteract`, `AutoDismiss`, `BlockRedirects`. The app's `NSUserDefaults` dictionary `AdVanish` can override them. `AutomaticAds=false` requires the button; it disables automatic input and Close.
 
 [Cyanide compatibility](docs/CYANIDE.md) · [Ad types](docs/AD_TYPES.md).
 
-The injected framework uses the Objective-C runtime directly; it no longer needs Logos or Substrate to build. Jailbreak packages still need their platform injection loader.
+Hooks are written in Logos. All builds require the pinned Theos checkout. Jailbreak packages use the MobileSubstrate generator with the platform loader; jailed builds use the internal generator and have no Substrate dependency.

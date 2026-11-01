@@ -88,6 +88,10 @@ class PackageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.verify(data, "roothide")
 
+    def test_rejects_missing_hook_loader(self):
+        with self.assertRaises(ValueError):
+            self.verify(package("iphoneos-arm64", "var/jb/", "", None), "rootless")
+
     def test_existing_package_schemes(self):
         for variant, architecture, prefix, loader in [
             ("rootless", "iphoneos-arm64", "var/jb/", "@rpath/libsubstrate.dylib"),

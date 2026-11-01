@@ -23,8 +23,8 @@ const config = {
 };
 let portA;
 let portB;
-function html(child, playback, automatic) {
-    return `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#eee}video{display:block;width:320px;height:180px}iframe{width:360px;height:210px;border:0}</style><script>window.realNow=performance.now.bind(performance);window.realTimeout=setTimeout.bind(window);</script><script src="/engine.js?playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}"></script><script>
+function html(child, playback, automatic, compatibility = false) {
+    return `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#eee}video{display:block;width:320px;height:180px}iframe{width:360px;height:210px;border:0}</style><script>window.realNow=performance.now.bind(performance);window.realTimeout=setTimeout.bind(window);</script><script src="/engine.js?playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}"></script><script>
     window.fixture = {messages:[],closes:0,errors:[]};
     window.addEventListener('error',e=>fixture.errors.push(String(e.message)));
     window.addEventListener('unhandledrejection',e=>fixture.errors.push(String(e.reason)));
@@ -46,7 +46,7 @@ function html(child, playback, automatic) {
             report('playable-ready');
         }
     });
-    window.addFrame=async video=>{const frame=document.createElement('iframe');frame.src='http://127.0.0.1:${portB}/child?video='+(video?'1':'0')+'&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}';document.body.append(frame);await until(()=>fixture.messages.some(m=>m.source===frame.contentWindow&&m.phase==='ready'),'frame ready');return frame};
+    window.addFrame=async video=>{const frame=document.createElement('iframe');frame.src='http://127.0.0.1:${portB}/child?video='+(video?'1':'0')+'&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}';document.body.append(frame);await until(()=>fixture.messages.some(m=>m.source===frame.contentWindow&&m.phase==='ready'),'frame ready');return frame};
     ${child ? `window.addEventListener('DOMContentLoaded',async()=>{try{if(new URL(location.href).searchParams.get('video')==='1')await addVideo();report('ready')}catch(e){fixture.errors.push(String(e));report('error')}});` : ''}
     </script><body></body>`;
 }
@@ -54,7 +54,8 @@ function serve(req, res) {
     const url = new URL(req.url, 'http://127.0.0.1');
     if (url.pathname === '/engine.js') {
         const script = source.replace('__ADSPEED_CONFIG__', JSON.stringify({
-            ...config, automatic: url.searchParams.get('automatic') !== '0'
+            ...config, automatic: url.searchParams.get('automatic') !== '0',
+            compatibilityPlayback: url.searchParams.get('compatibility') === '1'
         }));
         res.writeHead(200, { 'Content-Type': 'text/javascript' });
         res.end(script);
@@ -84,7 +85,7 @@ function serve(req, res) {
         return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(html(url.pathname === '/child', url.searchParams.get('playback') === '1', url.searchParams.get('automatic') !== '0'));
+    res.end(html(url.pathname === '/child', url.searchParams.get('playback') === '1', url.searchParams.get('automatic') !== '0', url.searchParams.get('compatibility') === '1'));
 }
 const serverA = http.createServer(serve);
 const serverB = http.createServer(serve);
@@ -114,9 +115,9 @@ async function evaluate(sessionId, expression) {
     if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails));
     return r.result.value;
 }
-async function runCase(name, body, verify, playback = false, automatic = true) {
+async function runCase(name, body, verify, playback = false, automatic = true, compatibility = false) {
     const { targetId } = await command('Target.createTarget', {
-        url: `http://127.0.0.1:${portA}/?case=${name}&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}`
+        url: `http://127.0.0.1:${portA}/?case=${name}&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}`
     });
     const { sessionId } = await command('Target.attachToTarget', { targetId, flatten: true });
     try {
@@ -889,6 +890,40 @@ async function main() {
             assert.equal(result.closes, 0);
             assert.deepEqual(result.errors, []);
         }, false, automatic));
+    }
+
+    for (const [compatibility, automatic] of [[true, true], [false, true], [true, false]]) {
+        cases.push(await runCase('broad-playback-' + compatibility + '-' + automatic, `
+            delete window.mraid;
+            const button = document.createElement('button');
+            button.textContent = 'Start game';
+            button.style.cssText = 'width:160px;height:80px';
+            let input = 0, closes = 0;
+            button.addEventListener('click', () => input++);
+            document.body.append(button);
+            const close = document.createElement('button');
+            close.textContent = 'Close';
+            close.addEventListener('click', () => closes++);
+            document.body.append(close);
+            const video = await addVideo();
+            __adspeed.setAdContext(false);
+            const realStart = realNow(), virtualStart = performance.now();
+            let timerDone = false;
+            setTimeout(() => timerDone = true, 1600);
+            await sleep(200);
+            return {rate:video.playbackRate,real:realNow()-realStart,virtual:performance.now()-virtualStart,
+                timerDone,input,closes,interactions:__adspeed.stats.interactions,redirects:__adspeed.stats.redirectsBlocked,...state()};
+        `, result => {
+            const broad = compatibility && automatic;
+            assert.equal(result.rate, broad ? 16 : 1);
+            assert.equal(result.timerDone, broad);
+            assert.ok(broad ? result.virtual > result.real * 8 : result.virtual < result.real * 1.5);
+            assert.equal(result.input, 0);
+            assert.equal(result.closes, 0);
+            assert.equal(result.interactions, 0);
+            assert.equal(result.redirects, 0);
+            assert.deepEqual(result.errors, []);
+        }, true, automatic, compatibility));
     }
     const report = {
         sourceSha256,

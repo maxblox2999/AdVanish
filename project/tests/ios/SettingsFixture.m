@@ -84,7 +84,7 @@ static void require(BOOL value, NSString *name) {
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                 @try {
                 [child.view layoutIfNeeded];
-                require(child.specifiers.count == 16, [NSString stringWithFormat:@"The app Settings page has every control (rows=%lu, app=%@)", (unsigned long)child.specifiers.count, child.avnApplicationIdentifier]);
+                require(child.specifiers.count == 15, [NSString stringWithFormat:@"The app Settings page has every control (rows=%lu, app=%@)", (unsigned long)child.specifiers.count, child.avnApplicationIdentifier]);
                 require(child.view.window == self.window, @"The app Settings page is attached to the window");
                 NSMutableArray *groups = NSMutableArray.array;
                 for (PSSpecifier *row in child.specifiers) {
@@ -120,7 +120,7 @@ static void require(BOOL value, NSString *name) {
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
                 @try {
                 [child.view layoutIfNeeded];
-                require(child.specifiers.count == 16 && child.view.window == self.window, @"Saved switches reload without invalidating Settings rows");
+                require(child.specifiers.count == 15 && child.view.window == self.window, @"Saved switches reload without invalidating Settings rows");
                 [navigation popViewControllerAnimated:NO];
                 [root.view layoutIfNeeded];
                 require(root.specifiers.count == 5, @"Returning to the root rebuilds a usable row cache");

@@ -11,6 +11,7 @@
 #import "ASPSpeed.h"
 #import "ASPAdCompletion.h"
 #include "AdSpeedWebScript.h"
+#import "AVNRuntime.h"
 
 @interface AVNOptions : NSObject
 @property (nonatomic) BOOL enabled;
@@ -23,7 +24,6 @@
 @property (nonatomic) BOOL dismissal;
 @property (nonatomic) BOOL redirects;
 @property (nonatomic) BOOL inlineVideo;
-@property (nonatomic) BOOL broadVideo;
 + (instancetype)readConfiguration;
 @end
 
@@ -58,24 +58,10 @@
     options.dismissal = flag(@"AutoDismiss", YES);
     options.redirects = flag(@"BlockRedirects", YES);
     options.inlineVideo = flag(@"ForceInline", NO);
-    options.broadVideo = flag(@"SpeedNativeVideo", NO);
     if ([NSBundle.mainBundle.bundlePath.pathExtension isEqualToString:@"appex"]) options.enabled = NO;
     return options;
 }
 @end
-
-static IMP AVNExchange(Class type, SEL selector, IMP replacement) {
-    Method found = class_getInstanceMethod(type, selector);
-    if (!found) {
-        imp_removeBlock(replacement);
-        return NULL;
-    }
-    IMP previous = method_getImplementation(found);
-    if (!class_addMethod(type, selector, replacement, method_getTypeEncoding(found))) {
-        method_setImplementation(class_getInstanceMethod(type, selector), replacement);
-    }
-    return previous;
-}
 
 @interface AVNRuntime : NSObject <WKScriptMessageHandler>
 @property (nonatomic, strong) AVNOptions *options;
@@ -106,6 +92,7 @@ static IMP AVNExchange(Class type, SEL selector, IMP replacement) {
         AVNOptions *o = runtime.options;
         NSDictionary *configuration = @{
             @"rate": @16, @"automatic": @(o.automatic), @"speedVideo": @(o.video),
+            @"compatibilityPlayback": @YES,
             @"compressTimers": @(o.timers), @"accelerateClock": @(o.clocks),
             @"forceInline": @(o.inlineVideo), @"recognizedAd": @NO,
             @"autoComplete": @(o.interaction && o.automatic), @"preventRedirects": @(o.redirects),
@@ -187,9 +174,6 @@ static IMP AVNExchange(Class type, SEL selector, IMP replacement) {
     if (active) {
         for (ASPAdSurface *surface in surfaces) {
             ASPAdCompletionTrackController(surface.owner);
-            if (self.options.automatic && self.options.video) {
-                for (AVPlayer *player in surface.players) ASPSpeedAcceleratePlayer(player, surface.root);
-            }
         }
     }
     BOOL needed = active && (surfaces.count || self.pages.count);
@@ -227,74 +211,62 @@ static IMP AVNExchange(Class type, SEL selector, IMP replacement) {
 }
 @end
 
-@interface WKWebView (AVNCreation)
-- (instancetype)avn_createWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration __attribute__((objc_method_family(init)));
-- (instancetype)avn_createWithCoder:(NSCoder *)coder __attribute__((objc_method_family(init)));
-@end
 
-@implementation WKWebView (AVNCreation)
-- (instancetype)avn_createWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration {
+static void AVNImagesChanged(const struct mach_header *header, intptr_t slide) {
+    [AVNRuntime.shared requestAdapters];
+}
+
+BOOL AVNRuntimeEnabled(void) {
+    return AVNRuntime.shared.options.enabled;
+}
+
+void AVNStartRuntime(void) {
+    [AVNRuntime.shared begin];
+    _dyld_register_func_for_add_image(AVNImagesChanged);
+}
+
+void AVNObserveController(UIViewController *controller) {
+    [AVNRuntime.shared observe:controller];
+}
+
+void AVNPrepareWebConfiguration(WKWebViewConfiguration *configuration) {
     AVNRuntime *runtime = AVNRuntime.shared;
     if (runtime.options.inlineVideo && runtime.options.video) {
         configuration.allowsInlineMediaPlayback = YES;
         configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
     }
     [runtime prepare:configuration];
-    return [self avn_createWithFrame:frame configuration:configuration];
-}
-- (instancetype)avn_createWithCoder:(NSCoder *)coder {
-    WKWebView *view = [self avn_createWithCoder:coder];
-    [AVNRuntime.shared prepare:view.configuration];
-    return view;
-}
-@end
-
-static void AVNImagesChanged(const struct mach_header *header, intptr_t slide) {
-    [AVNRuntime.shared requestAdapters];
 }
 
-__attribute__((constructor)) static void AVNInitialize(void) {
-    @autoreleasepool {
-        AVNRuntime *runtime = AVNRuntime.shared;
-        if (!runtime.options.enabled) return;
-        __block IMP appearance;
-        appearance = AVNExchange(UIViewController.class, @selector(viewDidAppear:), imp_implementationWithBlock(^(UIViewController *controller, BOOL animated) {
-            ((void (*)(id, SEL, BOOL))appearance)(controller, @selector(viewDidAppear:), animated);
-            [runtime observe:controller];
-        }));
-        __block IMP rateSetter;
-        rateSetter = AVNExchange(AVPlayer.class, @selector(setRate:), imp_implementationWithBlock(^(AVPlayer *player, float rate) {
-            BOOL requested = runtime.options.automatic && runtime.options.video && !ASPSpeedInternalChange() && std::isfinite(rate) && rate > 0;
-            if (requested) ASPSpeedPrepareRate(player);
-            ((void (*)(id, SEL, float))rateSetter)(player, @selector(setRate:), rate);
-            if (!requested) return;
-            ASPAdSurface *surface = ASPManualSkipSurfaceForPlayer(player, !runtime.options.broadVideo);
-            if (surface) ASPSpeedRequestRate(player, surface.root, rate, fminf(16, rate * 16));
-        }));
-        Method frameAlias = class_getInstanceMethod(WKWebView.class, @selector(avn_createWithFrame:configuration:));
-        IMP frameOriginal = AVNExchange(WKWebView.class, @selector(initWithFrame:configuration:), method_getImplementation(frameAlias));
-        if (frameOriginal) method_setImplementation(frameAlias, frameOriginal);
-        Method coderAlias = class_getInstanceMethod(WKWebView.class, @selector(avn_createWithCoder:));
-        IMP coderOriginal = AVNExchange(WKWebView.class, @selector(initWithCoder:), method_getImplementation(coderAlias));
-        if (coderOriginal) method_setImplementation(coderAlias, coderOriginal);
-        __block IMP mounting;
-        mounting = AVNExchange(WKWebView.class, @selector(didMoveToWindow), imp_implementationWithBlock(^(WKWebView *page) {
-            ((void (*)(id, SEL))mounting)(page, @selector(didMoveToWindow));
-            [runtime mount:page];
-        }));
-        __block IMP urlOpening;
-        urlOpening = AVNExchange(UIApplication.class, @selector(openURL:options:completionHandler:), imp_implementationWithBlock(^(UIApplication *app, NSURL *url, NSDictionary *options, void (^completion)(BOOL)) {
-            if ([runtime blocks:url]) {
-                if (completion) completion(NO);
-            } else {
-                ((void (*)(id, SEL, id, id, id))urlOpening)(app, @selector(openURL:options:completionHandler:), url, options, completion);
-            }
-        }));
-        __block IMP legacyOpening;
-        legacyOpening = AVNExchange(UIApplication.class, @selector(openURL:), imp_implementationWithBlock(^BOOL(UIApplication *app, NSURL *url) {
-            return [runtime blocks:url] ? NO : ((BOOL (*)(id, SEL, id))legacyOpening)(app, @selector(openURL:), url);
-        }));
-        [runtime begin];
-        _dyld_register_func_for_add_image(AVNImagesChanged);
+void AVNMountWebView(WKWebView *view) {
+    [AVNRuntime.shared mount:view];
+}
+
+float AVNPlaybackRate(float requested) {
+    AVNOptions *options = AVNRuntime.shared.options;
+    if (!options.enabled || !options.automatic || !options.video ||
+        ASPSpeedInternalChange() || !std::isfinite(requested) || requested <= 0) return requested;
+    return fminf(ASPSpeedRate(), requested * ASPSpeedRate());
+}
+
+void AVNResumePlayer(AVPlayer *player) {
+    AVNOptions *options = AVNRuntime.shared.options;
+    if (options.enabled && options.automatic && options.video && !ASPSpeedInternalChange()) {
+        @try { ASPSpeedSetRate(player, ASPSpeedRate()); } @catch (NSException *exception) {}
+        AVNFinishPlaybackRate(player, 1, ASPSpeedRate());
     }
+}
+
+BOOL AVNBlocksURL(NSURL *url) {
+    return [AVNRuntime.shared blocks:url];
+}
+
+void AVNFinishPlaybackRate(AVPlayer *player, float requested, float applied) {
+    if (applied == requested || requested <= 0 || ASPSpeedInternalChange()) return;
+    if (player.rate >= applied * 0.9f) return;
+    for (float candidate = applied / 2; candidate > requested && candidate >= 2; candidate /= 2) {
+        @try { ASPSpeedSetRate(player, candidate); } @catch (NSException *exception) { continue; }
+        if (player.rate >= candidate * 0.9f) return;
+    }
+    @try { ASPSpeedSetRate(player, requested); } @catch (NSException *exception) {}
 }

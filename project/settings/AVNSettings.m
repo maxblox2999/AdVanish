@@ -146,11 +146,10 @@ static id AVNSettingsObject(id receiver, NSString *name) {
         [rows addObject:[self section:@"Ad playback" note:@"Automatic ads runs without a press. When off, use the fast-forward button."]];
         [rows addObject:[self toggle:@"Automatic ads" feature:@"AutomaticAds" initial:defaultAutomatic]];
         [rows addObject:[self toggle:@"Show fast-forward button" feature:@"ManualSkip" initial:YES]];
-        [rows addObject:[self section:@"Video" note:@"16x playback with lower-rate fallback when required."]];
+        [rows addObject:[self section:@"Video" note:@"Speeds AVPlayer playback throughout this enabled app, including non-ad video."]];
         [rows addObject:[self toggle:@"Video speed" feature:@"SpeedUpVideo" initial:YES]];
         [rows addObject:[self toggle:@"Force inline video" feature:@"ForceInline" initial:NO]];
-        [rows addObject:[self toggle:@"Include other native video" feature:@"SpeedNativeVideo" initial:NO]];
-        [rows addObject:[self section:@"Ad countdowns" note:@"Accelerates supported web timers and gameplay clocks. Native SDK and server timers may remain unchanged."]];
+        [rows addObject:[self section:@"Ad countdowns" note:@"Speeds web timers and clocks throughout this enabled app. Native SDK and server timers may remain unchanged."]];
         [rows addObject:[self toggle:@"Web countdowns" feature:@"CompressTimers" initial:YES]];
         [rows addObject:[self toggle:@"Gameplay clock" feature:@"AccelerateClock" initial:YES]];
         [rows addObject:[self section:@"Completion" note:@"Automatic mode assists supported playables. Closing waits for SDK eligibility; rewards remain controlled by the app."]];

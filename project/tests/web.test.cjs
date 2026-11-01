@@ -2008,3 +2008,77 @@ test('automatic owned ordinary countdown keeps its original callback at 16x', ()
     env.advance(1);
     assert.equal(calls, 1);
 });
+
+test('compatibility playback accelerates ordinary web video timers and clocks without inventing ad context', () => {
+    const env = environment({...adConfig, compatibilityPlayback: true});
+    const media = video(env);
+    const play = control(env, 'Start game');
+    const close = control(env, 'Close');
+    const link = control(env, 'Install', {tagName: 'A'});
+    let calls = 0;
+    env.sandbox.setTimeout(() => calls++, 1600);
+    env.emit('play', media);
+    env.advance(100);
+    assert.equal(media.playbackRate, 16);
+    assert.equal(env.sandbox.performance.now(), 1600);
+    assert.equal(calls, 1);
+    assert.equal(env.sandbox.__adspeed.stats.interactions, 0);
+    assert.equal(env.sandbox.__adspeed.stats.redirectsBlocked, 0);
+    assert.equal(env.sandbox.open('https://example.invalid'), 'opened');
+    assert.equal(play.events.length + close.events.length + link.events.length, 0);
+    assert.deepEqual(media.seeks, []);
+});
+test('compatibility playback leaves the strict default unchanged when disabled', () => {
+    const env = environment({...adConfig, compatibilityPlayback: false});
+    const media = video(env);
+    let calls = 0;
+    env.sandbox.setTimeout(() => calls++, 1600);
+    env.emit('play', media);
+    env.advance(100);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(env.sandbox.performance.now(), 100);
+    assert.equal(calls, 0);
+});
+test('compatibility playback never enables automatic acceleration in manual mode', async () => {
+    const env = environment({...manualAdConfig, compatibilityPlayback: true});
+    const media = video(env);
+    const play = control(env, 'Start game');
+    let calls = 0;
+    env.sandbox.setTimeout(() => calls++, 1600);
+    env.emit('play', media);
+    env.advance(100);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(env.sandbox.performance.now(), 100);
+    assert.equal(calls, 0);
+    assert.equal(play.events.length, 0);
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(100);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(env.sandbox.performance.now(), 200);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 1);
+    assert.equal(media.playbackRate, 16);
+});
+test('compatibility playback covers a playing covered video while strict ad detection stays false', () => {
+    const env = environment({...adConfig, compatibilityPlayback: true});
+    const media = video(env, {loop: true});
+    env.document.elementFromPoint = () => ({contains() { return false; }});
+    env.emit('play', media);
+    assert.equal(media.playbackRate, 16);
+    assert.equal(env.sandbox.__adspeed.stats.interactions, 0);
+    assert.deepEqual(media.seeks, []);
+});
+test('compatibility playback suspends while the document is hidden and resumes on return', () => {
+    const env = environment({...adConfig, compatibilityPlayback: true});
+    const media = video(env);
+    env.emit('play', media);
+    env.advance(100);
+    assert.equal(media.playbackRate, 16);
+    env.hide(true);
+    assert.equal(media.playbackRate, 1);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1700);
+    env.hide(false);
+    env.advance(100);
+    assert.equal(media.playbackRate, 16);
+    assert.equal(env.sandbox.performance.now(), 3300);
+});

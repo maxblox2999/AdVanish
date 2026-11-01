@@ -134,6 +134,8 @@ def verify(path, variant, package_id, library):
         if not any("/UIKit.framework/" in name for name in image["dylibs"]):
             raise ValueError("Missing UIKit runtime dependency")
         loads = [name for name in image["dylibs"] if "substrate" in name.lower()]
+        if not loads:
+            raise ValueError("Missing Logos tweak-loader dependency")
         if variant == "rootless" and any(not name.startswith("@rpath/") for name in loads):
             raise ValueError("Unexpected tweak-loader linkage")
         if variant == "roothide" and any(not name.startswith("@loader_path/.jbroot/") for name in loads):

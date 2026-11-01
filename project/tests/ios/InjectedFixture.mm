@@ -526,7 +526,14 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
             self.ordinaryPlayer.currentItem.status == AVPlayerItemStatusReadyToPlay;
     }, deadline, ^{
         self.ordinaryPlayer.rate = 1;
-        if (!check(self.ordinaryPlayer.rate == 1, @"The production AVPlayer hook preserves ordinary playback")) return;
+        if (!check(self.ordinaryPlayer.rate == (manualMode ? 1 : 16),
+            @"Logos playback accelerates enabled automatic apps without ad-owner checks and preserves manual mode")) return;
+        [self.ordinaryPlayer play];
+        if (!check(self.ordinaryPlayer.rate == (manualMode ? 1 : 16), @"The Logos play hook follows automatic and manual policy")) return;
+        [self.ordinaryPlayer playImmediatelyAtRate:1];
+        if (!check(self.ordinaryPlayer.rate == (manualMode ? 1 : 16), @"The Logos immediate-play hook follows automatic and manual policy")) return;
+        [self.ordinaryPlayer pause];
+        if (!check(self.ordinaryPlayer.rate == 0, @"The Logos playback hooks preserve pause requests")) return;
         [self.ordinaryPlayer pause];
         if (manualMode) {
             [self runManualNative:owner];
@@ -537,12 +544,12 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
             if (!check(owner.avPlayer.rate == 16, @"Recognized SDK playback reaches 16x through the production hook")) return;
             owner.avPlayer.rate = 0.5;
             owner.videoPlayer.videoView.hidden = YES;
-            waitUntil(^BOOL { return owner.avPlayer.rate == 0.5; }, deadline, ^{
-                if (!check(owner.avPlayer.rate == 0.5, @"Hidden playback restores the SDK's latest requested rate")) return;
+            waitUntil(^BOOL { return owner.avPlayer.rate == 8; }, deadline, ^{
+                if (!check(owner.avPlayer.rate == 8, @"Automatic compatibility playback continues without visibility gating")) return;
                 owner.videoPlayer.videoView.hidden = NO;
                 owner.avPlayer.rate = 1;
                 waitUntil(^BOOL { return owner.avPlayer.rate == 16; }, deadline, ^{
-                    if (!check(owner.avPlayer.rate == 16, @"Visible playback accelerates again after rate cleanup")) return;
+                    if (!check(owner.avPlayer.rate == 16, @"The Logos hook preserves subsequent SDK playback requests")) return;
                     waitUntil(^BOOL { return owner.ended; }, deadline, ^{
                         if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) >= 95.95,
                                    @"Accelerated playback reaches a real end event without seeking")) return;

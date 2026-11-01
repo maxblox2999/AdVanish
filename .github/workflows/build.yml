@@ -78,7 +78,6 @@ jobs:
           brew install ldid dpkg make
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
       - name: Set up pinned Theos and SDK
-        if: matrix.variant != 'jailed'
         run: |
           bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" "${{ matrix.variant }}"
           echo "THEOS=$RUNNER_TEMP/advanish-tools/theos" >> "$GITHUB_ENV"
@@ -130,13 +129,13 @@ jobs:
           set -euo pipefail
           current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
           test "$current" = "$GITHUB_SHA" || { echo "A newer commit supersedes this build."; exit 1; }
-          tag="v0.5.3"
+          tag="v0.6.0"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release already exists; refusing to replace its assets."
             exit 1
           fi
           tail -n +2 project/RELEASE_NOTES.md > release-notes.md
-          gh release create "$tag" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AdVanish 0.5.3" --notes-file release-notes.md --prerelease --draft
+          gh release create "$tag" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AdVanish 0.6.0" --notes-file release-notes.md --prerelease --draft
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
       - name: Verify public downloads
         run: python3 project/scripts/verify-release.py

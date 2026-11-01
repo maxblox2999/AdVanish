@@ -16,7 +16,7 @@ SHA = os.environ["GITHUB_SHA"]
 RUN = os.environ["GITHUB_RUN_ID"]
 INCOMING = ROOT / "incoming"
 OUTPUT = ROOT / "release"
-VERSION = "0.5.3"
+VERSION = "0.6.0"
 OUTPUT.mkdir(exist_ok=True)
 reports = {}
 native = {}
@@ -40,11 +40,11 @@ for variant in ["rootless", "rootful", "roothide", "jailed"]:
             assert archive.read("LICENSE") == (ROOT / "LICENSE").read_bytes()
             assert archive.read("NOTICE.md") == (ROOT / "NOTICE.md").read_bytes()
             info = json.loads(archive.read("build-info.json"))
-            assert info["commit"] == SHA and info["hook_engine"] == "Objective-C runtime"
+            assert info["commit"] == SHA and info["hook_engine"] == "Logos internal"
         shutil.copyfile(payload, OUTPUT / ("AdVanish-" + VERSION + "-jailed.zip"))
         for key, name, count in [
-            ("injected", "ios-injected.json", 18),
-            ("manual", "ios-injected-manual.json", 23),
+            ("injected", "ios-injected.json", 21),
+            ("manual", "ios-injected-manual.json", 26),
         ]:
             report = json.loads((folder / name).read_text())
             assert report["passed"] and report["source_commit"] == SHA
@@ -89,10 +89,10 @@ with zipfile.ZipFile(OUTPUT / ("AdVanish-" + VERSION + "-source.zip"), "w", zipf
         archive.writestr(name, data)
 
 browser = json.loads((source_folder / "browser.json").read_text())
-assert browser["passed"] >= 36
+assert browser["passed"] >= 39
 assert browser["sourceSha256"] == hashlib.sha256((PROJECT / "web/adspeed.js").read_bytes()).hexdigest()
 validation = {
-    "node_tests": 130, "ipa_tool_tests": 39, "browser": browser,
+    "node_tests": 135, "ipa_tool_tests": 40, "browser": browser,
     "version": VERSION, "commit": SHA,
     "workflow": "https://github.com/maxblox2999/AdVanish/actions/runs/" + RUN,
     "packages": reports, "ios_simulator": native,

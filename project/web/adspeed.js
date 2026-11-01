@@ -23,6 +23,7 @@
     var contextPolicy = configuration && configuration.recognizedAd === null ? null : recognizedAd;
     var autoComplete = !!(configuration && configuration.autoComplete);
     var automatic = !(configuration && configuration.automatic === false);
+    var compatibilityPlayback = !!(configuration && configuration.compatibilityPlayback);
     var manualContext = false;
     var manualTimingOnly = false;
     var manualTimingSnapshot = null;
@@ -104,8 +105,12 @@
         fast = nextFast;
     }
 
+    function broadPlaybackActive() {
+        return compatibilityPlayback && automatic && !pageHidden();
+    }
+
     function accelerationActive() {
-        return recognizedAd && (automatic || manualContext) && !pageHidden();
+        return broadPlaybackActive() || (recognizedAd && (automatic || manualContext) && !pageHidden());
     }
 
     function timingAvailable() {
@@ -293,7 +298,8 @@
             for (var index = 0; index < Math.min(animations.length, 64); index += 1) {
                 var animation = animations[index];
                 var target = animation.effect && animation.effect.target;
-                if (!target || animation.playState !== 'running' || !visible(target) || !exposed(target)) continue;
+                if (!target || animation.playState !== 'running'
+                    || (!broadPlaybackActive() && (!visible(target) || !exposed(target)))) continue;
                 current.add(animation);
                 var lease = animationLeases.get(animation);
                 var base = animation.playbackRate;
@@ -409,7 +415,9 @@
             for (var index = 0; index < count; index += 1) {
                 var video = videos[index];
                 try {
-                    if (!playing(video) || !exposed(video)) {
+                    if (broadPlaybackActive()
+                        ? !video || video.paused || video.ended || video.seeking || video.readyState < 2
+                        : !playing(video) || !exposed(video)) {
                         continue;
                     }
                     var state = mediaState(video);
@@ -443,7 +451,7 @@
 
     function schedulePoll() {
         if (pollHandle !== null || pageHidden() || typeof nativeTimeout !== 'function'
-            || !((recognizedAd || contextPolicy === null) && (speedVideo || compressTimers || accelerateClock || autoComplete))) {
+            || !((recognizedAd || contextPolicy === null || broadPlaybackActive()) && (speedVideo || compressTimers || accelerateClock || autoComplete))) {
             return;
         }
         pollHandle = nativeTimeout.call(window, function () {

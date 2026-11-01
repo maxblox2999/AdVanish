@@ -40,11 +40,19 @@ def build(output, simulator=False):
                "-std=c++11", "-fno-rtti", "-fno-exceptions", "-DNDEBUG", "-DADSPEED_JAILED=1",
                "-isysroot", sdk, "-target", target, "-I", str(ROOT),
                "-install_name", "@rpath/AdVanish.framework/AdVanish", "-Wl,-headerpad_max_install_names"]
+    logos = Path(os.environ.get("THEOS", "")) / "bin/logos.pl"
+    if not logos.is_file():
+        raise RuntimeError("Set THEOS to the pinned Theos checkout; Logos is required")
     command += [str(ROOT / name) for name in NATIVE]
     for name in FRAMEWORKS:
         command += ["-framework", name]
     command += ["-o", str(framework / "AdVanish")]
-    subprocess.run(command, check=True, timeout=180)
+    with tempfile.TemporaryDirectory(prefix="advanish-logos-") as directory:
+        generated = Path(directory) / "Hooks.mm"
+        with generated.open("w") as source:
+            subprocess.run(["perl", str(logos), "-c", "generator=internal", str(ROOT / "Hooks.xm")],
+                           stdout=source, check=True, timeout=60)
+        subprocess.run(command + [str(generated)], check=True, timeout=180)
     subprocess.run(["codesign", "--force", "--sign", "-", str(framework)], check=True, timeout=60)
     subprocess.run(["codesign", "--verify", "--strict", str(framework)], check=True, timeout=60)
     if not simulator:
@@ -62,7 +70,7 @@ def build(output, simulator=False):
             "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True).strip(),
             "clang": subprocess.check_output(["xcrun", "--sdk", sdkname, "clang++", "--version"], text=True).strip(),
             "python": platform.python_version(),
-            "hook_engine": "Objective-C runtime",
+            "hook_engine": "Logos internal",
         }
         (output / "build-info.json").write_text(json.dumps(toolchain, indent=2) + "\n")
         shutil.copy2(ROOT / "scripts/inject-ipa.py", output)
