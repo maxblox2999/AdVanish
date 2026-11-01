@@ -77,7 +77,11 @@ static void require(BOOL value, NSString *name) {
                 child.specifier = link;
                 [navigation pushViewController:child animated:NO];
                 [child.view layoutIfNeeded];
-                require(child.specifiers.count == 12 && child.view.window == self.window, @"The app Settings page opens with every control");
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                @try {
+                [child.view layoutIfNeeded];
+                require(child.specifiers.count == 12, [NSString stringWithFormat:@"The app Settings page has every control (rows=%lu, app=%@)", (unsigned long)child.specifiers.count, child.avnApplicationIdentifier]);
+                require(child.view.window == self.window, @"The app Settings page is attached to the window");
                 PSSpecifier *enabled = child.specifiers[1];
                 require([[enabled propertyForKey:@"AVNKey"] isEqual:@"enabled-com.maxblox2999.fixture"], @"Existing app-enabled preference keys are preserved");
                 require([[child valueForControl:enabled] respondsToSelector:@selector(boolValue)], @"Switch values load without invalid dictionary access");
@@ -91,6 +95,8 @@ static void require(BOOL value, NSString *name) {
                 [child changeValue:@YES forControl:invalid];
                 require(YES, @"Missing switch keys do not write or crash");
                 record(nil);
+                } @catch (NSException *exception) { record(exception.reason); }
+                });
             } @catch (NSException *exception) {
                 record(exception.reason);
             }
