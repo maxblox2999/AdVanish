@@ -125,7 +125,7 @@ def main(video, output, injected=False, manual=False, settings=False):
             run("xcrun", "simctl", "boot", device)
             booted = True
             run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
-            run("xcrun", "simctl", "install", device, str(app))
+            run("xcrun", "simctl", "install", device, str(app), timeout=240)
             container = Path(run("xcrun", "simctl", "get_app_container", device, BUNDLE, "data"))
             report_path = container / "Documents/result.json"
             launch_started = time.time()
@@ -146,8 +146,12 @@ def main(video, output, injected=False, manual=False, settings=False):
                         except subprocess.TimeoutExpired:
                             launcher.kill()
                             launcher.wait(timeout=10)
+                launch_log.seek(0)
+                launch_output = launch_log.read()[-32768:]
+                launch_exit_code = launcher.returncode
             if not report_path.exists():
-                diagnostics = {"phase": "missing result", "settings": settings, "source_commit": source_commit()}
+                diagnostics = {"phase": "missing result", "settings": settings, "source_commit": source_commit(),
+                    "launcher_exit_code": launch_exit_code, "launcher_output": launch_output}
                 progress = container / "Documents/settings-progress.json"
                 if progress.is_file():
                     diagnostics["progress"] = progress.read_text()[:65536]

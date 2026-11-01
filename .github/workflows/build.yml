@@ -65,6 +65,7 @@ jobs:
 
   package:
     needs: checks
+    timeout-minutes: 20
     runs-on: ${{ inputs.runner || 'macos-15' }}
     strategy:
       fail-fast: false
