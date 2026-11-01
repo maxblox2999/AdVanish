@@ -64,7 +64,6 @@ jobs:
           overwrite: true
 
   package:
-    needs: checks
     timeout-minutes: 20
     runs-on: ${{ inputs.runner || 'macos-15' }}
     strategy:

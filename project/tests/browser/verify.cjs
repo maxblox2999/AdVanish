@@ -129,7 +129,10 @@ async function runCase(name, body, verify, playback = false, automatic = true, c
             await sleep(30);
         }
         const value = await evaluate(sessionId, `(async()=>{${body}})()`);
-        verify(value);
+        try { verify(value); } catch (error) {
+            console.error(JSON.stringify({case: name, passed: false, ...value}));
+            throw error;
+        }
         console.log(JSON.stringify({ case: name, passed: true, ...value }));
         return { case: name, passed: true, ...value };
     } finally {
@@ -911,8 +914,8 @@ async function main() {
             let timerDone = false;
             setTimeout(() => timerDone = true, 1600);
             await sleep(200);
-            return {rate:video.playbackRate,real:realNow()-realStart,virtual:performance.now()-virtualStart,
-                timerDone,input,closes,interactions:__adspeed.stats.interactions,redirects:__adspeed.stats.redirectsBlocked,...state()};
+            return {...state(),rate:video.playbackRate,real:realNow()-realStart,virtual:performance.now()-virtualStart,
+                timerDone,input,closes,interactions:__adspeed.stats.interactions,redirects:__adspeed.stats.redirectsBlocked};
         `, result => {
             const broad = compatibility && automatic;
             assert.equal(result.rate, broad ? 16 : 1);
