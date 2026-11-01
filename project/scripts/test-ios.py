@@ -52,6 +52,14 @@ def launch_app(device, report_path, timeout=90):
         return launcher.returncode, launch_log.read()[-32768:]
 
 
+def reset_simulator(device):
+    """A launch that hangs usually means the simulator is wedged; reboot it."""
+    subprocess.run(["xcrun", "simctl", "terminate", device, BUNDLE], check=False, timeout=45)
+    subprocess.run(["xcrun", "simctl", "shutdown", device], check=False, timeout=90)
+    subprocess.run(["xcrun", "simctl", "boot", device], check=False, timeout=120)
+    subprocess.run(["xcrun", "simctl", "bootstatus", device, "-b"], check=False, timeout=240)
+
+
 def source_commit():
     record = ROOT.parent / "SOURCE_COMMIT"
     if record.is_file():
@@ -164,6 +172,7 @@ def main(video, output, injected=False, manual=False, settings=False):
                     print(json.dumps({"phase": "relaunch", "attempt": launch_attempts,
                                       "launcher_exit_code": launch_exit_code,
                                       "launcher_output": launch_output[-4096:]}), flush=True)
+                    reset_simulator(device)
             if not report_path.exists():
                 diagnostics = {"phase": "missing result", "settings": settings, "source_commit": source_commit(),
                     "launch_attempts": launch_attempts,

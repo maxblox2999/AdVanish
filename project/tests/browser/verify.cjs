@@ -152,29 +152,47 @@ async function main() {
     portA = serverA.address().port;
     await new Promise((r) => serverB.listen(0, '127.0.0.1', r));
     portB = serverB.address().port;
-    profile = fs.mkdtempSync(path.join(os.tmpdir(), 'advanish-browser-'));
-    browser = spawn(
-        executable,
-        [
-            '--headless=new',
-            '--disable-gpu',
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--autoplay-policy=no-user-gesture-required',
-            '--remote-debugging-port=0',
-            '--user-data-dir=' + profile,
-            'about:blank'
-        ],
-        { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] }
-    );
-    let stderr = '';
-    browser.stderr.on('data', (d) => (stderr += d));
-    const portFile = path.join(profile, 'DevToolsActivePort');
-    for (let i = 0; i < 200 && !fs.existsSync(portFile); i++) {
-        if (browser.exitCode !== null) throw Error('Browser exited ' + browser.exitCode + ' ' + stderr);
-        await sleep(50);
+    async function startBrowser() {
+        profile = fs.mkdtempSync(path.join(os.tmpdir(), 'advanish-browser-'));
+        browser = spawn(
+            executable,
+            [
+                '--headless=new',
+                '--disable-gpu',
+                '--no-first-run',
+                '--no-default-browser-check',
+                '--autoplay-policy=no-user-gesture-required',
+                '--remote-debugging-port=0',
+                '--user-data-dir=' + profile,
+                'about:blank'
+            ],
+            { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] }
+        );
+        let stderr = '';
+        browser.stderr.on('data', (d) => (stderr += d));
+        const portFile = path.join(profile, 'DevToolsActivePort');
+        const deadline = Date.now() + 60000;
+        while (!fs.existsSync(portFile) && Date.now() < deadline) {
+            if (browser.exitCode !== null) break;
+            await sleep(100);
+        }
+        if (!fs.existsSync(portFile)) {
+            if (browser.exitCode === null) browser.kill();
+            throw Error('Browser did not publish a DevTools port: ' + stderr);
+        }
+        return fs.readFileSync(portFile, 'utf8').trim().split(/\r?\n/);
     }
-    const [port, endpoint] = fs.readFileSync(portFile, 'utf8').trim().split(/\r?\n/);
+    let endpointPair;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            endpointPair = await startBrowser();
+            break;
+        } catch (error) {
+            if (attempt === 2) throw error;
+            console.log(JSON.stringify({ phase: 'browser startup retry', attempt, error: String(error) }));
+        }
+    }
+    const [port, endpoint] = endpointPair;
     socket = new WebSocket('ws://127.0.0.1:' + port + endpoint);
     await new Promise((r, j) => {
         socket.onopen = r;
