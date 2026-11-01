@@ -221,7 +221,7 @@ BOOL AVNRuntimeEnabled(void) {
 }
 
 void AVNStartRuntime(void) {
-    [AVNRuntime.shared begin];
+    if (AVNRuntimeEnabled()) [AVNRuntime.shared begin];
     _dyld_register_func_for_add_image(AVNImagesChanged);
 }
 

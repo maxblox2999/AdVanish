@@ -123,7 +123,7 @@ static id AVNSettingsObject(id receiver, NSString *name) {
     if (_specifiers) return _specifiers;
     NSMutableArray *rows = NSMutableArray.array;
     if (!self.avnApplicationIdentifier.length) {
-        [rows addObject:[self section:@"AdVanish" note:@"Enable the apps you want to accelerate."]];
+        [rows addObject:[self section:@"AdVanish" note:@"16x speed applies inside every app unless you disable it below."]];
         [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:YES]];
         NSArray *applications = self.avnInstalledApplications;
         for (NSNumber *enabled in @[@YES, @NO]) {
@@ -131,7 +131,9 @@ static id AVNSettingsObject(id receiver, NSString *name) {
                 note:enabled.boolValue ? @"16x speed applies inside enabled apps." : nil]];
             for (NSDictionary *app in applications) {
                 NSString *key = [@"enabled-" stringByAppendingString:app[@"identifier"]];
-                if ([self.database[key] boolValue] != enabled.boolValue) continue;
+                id stored = self.database[key];
+                BOOL appEnabled = stored ? [stored boolValue] : YES;
+                if (appEnabled != enabled.boolValue) continue;
                 PSSpecifier *link = [PSSpecifier preferenceSpecifierNamed:app[@"title"] target:self set:NULL get:NULL
                     detail:AVNSettingsController.class cell:PSLinkCell edit:Nil];
                 [link setProperty:@YES forKey:@"isController"];
@@ -142,7 +144,7 @@ static id AVNSettingsObject(id receiver, NSString *name) {
     } else {
         BOOL defaultAutomatic = ![self.database[[self storageKey:@"ManualSkip"]] boolValue];
         [rows addObject:[self section:@"This app" note:@"Reopen the app after changing settings."]];
-        [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:NO]];
+        [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:YES]];
         [rows addObject:[self section:@"Ad playback" note:@"Automatic ads runs without a press. When off, use the fast-forward button."]];
         [rows addObject:[self toggle:@"Automatic ads" feature:@"AutomaticAds" initial:defaultAutomatic]];
         [rows addObject:[self toggle:@"Show fast-forward button" feature:@"ManualSkip" initial:YES]];

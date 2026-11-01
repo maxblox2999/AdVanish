@@ -38,7 +38,7 @@ static inline NSMutableDictionary *ASPApplicationPreferences(NSDictionary *store
             values[[key substringFromIndex:prefix.length]] = stored[key];
         }
     }
-    values[@"AppEnabled"] = stored[[@"enabled-" stringByAppendingString:bundle]] ?: @NO;
+    values[@"AppEnabled"] = stored[[@"enabled-" stringByAppendingString:bundle]] ?: (stored[@"Enabled"] ?: @YES);
     return values;
 }
 static inline BOOL ASPPreferenceFlag(NSDictionary *values, NSString *key, BOOL fallback) {
