@@ -12,8 +12,11 @@
 %hook AVPlayer
 - (void)setRate:(float)rate {
     float applied = AVNPlaybackRate(rate);
-    @try { %orig(applied); }
-    @catch (NSException *exception) { if (applied == rate) @throw; }
+    @try {
+        %orig(applied);
+    } @catch (NSException *exception) {
+        if (applied == rate) @throw;
+    }
     AVNFinishPlaybackRate(self, rate, applied);
 }
 - (void)play {
