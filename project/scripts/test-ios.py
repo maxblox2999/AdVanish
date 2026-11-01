@@ -29,6 +29,29 @@ def simulator_devices():
         return json.loads(run("xcrun", "simctl", "list", "-j"))
 
 
+def launch_app(device, report_path, timeout=90):
+    """Launch the fixture, killing a simctl that never returns."""
+    with tempfile.TemporaryFile(mode="w+t") as launch_log:
+        launcher = subprocess.Popen(["xcrun", "simctl", "launch", device, BUNDLE],
+                                    stdout=launch_log, stderr=subprocess.STDOUT, text=True)
+        try:
+            deadline = time.monotonic() + timeout
+            while not report_path.exists() and time.monotonic() < deadline:
+                if launcher.poll() not in (None, 0):
+                    break
+                time.sleep(0.25)
+        finally:
+            if launcher.poll() is None:
+                launcher.terminate()
+                try:
+                    launcher.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    launcher.kill()
+                    launcher.wait(timeout=10)
+        launch_log.seek(0)
+        return launcher.returncode, launch_log.read()[-32768:]
+
+
 def source_commit():
     record = ROOT.parent / "SOURCE_COMMIT"
     if record.is_file():
@@ -129,28 +152,21 @@ def main(video, output, injected=False, manual=False, settings=False):
             container = Path(run("xcrun", "simctl", "get_app_container", device, BUNDLE, "data"))
             report_path = container / "Documents/result.json"
             launch_started = time.time()
-            with tempfile.TemporaryFile(mode="w+t") as launch_log:
-                launcher = subprocess.Popen(["xcrun", "simctl", "launch", device, BUNDLE], stdout=launch_log, stderr=subprocess.STDOUT, text=True)
-                try:
-                    deadline = time.monotonic() + 90
-                    while not report_path.exists() and time.monotonic() < deadline:
-                        if launcher.poll() not in (None, 0):
-                            launch_log.seek(0)
-                            raise RuntimeError("Simulator launch failed: " + launch_log.read())
-                        time.sleep(0.25)
-                finally:
-                    if launcher.poll() is None:
-                        launcher.terminate()
-                        try:
-                            launcher.wait(timeout=10)
-                        except subprocess.TimeoutExpired:
-                            launcher.kill()
-                            launcher.wait(timeout=10)
-                launch_log.seek(0)
-                launch_output = launch_log.read()[-32768:]
-                launch_exit_code = launcher.returncode
+            launch_output = ""
+            launch_exit_code = None
+            launch_attempts = 0
+            for attempt in range(2):
+                launch_attempts = attempt + 1
+                launch_exit_code, launch_output = launch_app(device, report_path)
+                if report_path.exists():
+                    break
+                if attempt == 0:
+                    print(json.dumps({"phase": "relaunch", "attempt": launch_attempts,
+                                      "launcher_exit_code": launch_exit_code,
+                                      "launcher_output": launch_output[-4096:]}), flush=True)
             if not report_path.exists():
                 diagnostics = {"phase": "missing result", "settings": settings, "source_commit": source_commit(),
+                    "launch_attempts": launch_attempts,
                     "launcher_exit_code": launch_exit_code, "launcher_output": launch_output}
                 progress = container / "Documents/settings-progress.json"
                 if progress.is_file():

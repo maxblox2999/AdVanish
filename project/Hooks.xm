@@ -62,9 +62,7 @@
 
 %ctor {
     @autoreleasepool {
-        if (AVNRuntimeEnabled()) {
-            %init(AVNPlaybackHooks);
-            AVNStartRuntime();
-        }
+        %init(AVNPlaybackHooks);
+        AVNStartRuntime();
     }
 }
