@@ -22,9 +22,12 @@ static id AVNSettingsObject(id receiver, NSString *name) {
 @end
 
 @implementation AVNSettingsController
+- (NSArray<NSString *> *)preferencePaths {
+    return ASPPrefsPaths(@"com.34306-sr.adspeed");
+}
 - (NSMutableDictionary *)database {
     if (!self.cachedValues) {
-        NSDictionary *loaded = [NSDictionary dictionaryWithContentsOfFile:ASPPrefsWritePath(@"com.34306-sr.adspeed")];
+        NSDictionary *loaded = ASPReadPreferencesAtPaths(self.preferencePaths);
         self.cachedValues = loaded ? loaded.mutableCopy : NSMutableDictionary.dictionary;
     }
     return self.cachedValues;
@@ -45,15 +48,15 @@ static id AVNSettingsObject(id receiver, NSString *name) {
     return saved ?: [control propertyForKey:@"default"];
 }
 - (void)changeValue:(id)value forControl:(PSSpecifier *)control {
+    id key = [control propertyForKey:@"AVNKey"];
+    if (![key isKindOfClass:NSString.class] || ![key length] || !value) return;
     NSMutableDictionary *database = self.database.mutableCopy;
-    NSString *key = [control propertyForKey:@"AVNKey"];
     if ([key isEqualToString:[self storageKey:@"ManualSkip"]]) {
         NSString *automatic = [self storageKey:@"AutomaticAds"];
         if (!database[automatic]) database[automatic] = @(![database[key] boolValue]);
     }
-    if (![key isKindOfClass:NSString.class] || !key.length || !value) return;
     database[key] = value;
-    NSString *file = ASPPrefsWritePath(@"com.34306-sr.adspeed");
+    NSString *file = self.preferencePaths.firstObject;
     [NSFileManager.defaultManager createDirectoryAtPath:file.stringByDeletingLastPathComponent
         withIntermediateDirectories:YES attributes:nil error:nil];
     if (![database writeToFile:file atomically:YES]) {
@@ -106,38 +109,54 @@ static id AVNSettingsObject(id receiver, NSString *name) {
 - (void)viewWillAppear:(BOOL)animated {
     self.cachedValues = nil;
     [super viewWillAppear:animated];
+    if (!self.avnApplicationIdentifier.length) {
+        __weak AVNSettingsController *weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            AVNSettingsController *controller = weakSelf;
+            if (!controller.viewIfLoaded.window || controller.avnApplicationIdentifier.length) return;
+            controller->_specifiers = nil;
+            [controller reloadSpecifiers];
+        });
+    }
 }
 - (NSArray *)specifiers {
     if (_specifiers) return _specifiers;
     NSMutableArray *rows = NSMutableArray.array;
     if (!self.avnApplicationIdentifier.length) {
-        [rows addObject:[self section:nil note:@"maxblox2999"]];
+        [rows addObject:[self section:@"AdVanish" note:@"Enable the apps you want to accelerate."]];
         [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:YES]];
-        [rows addObject:[self section:@"Apps" note:@"Changes apply after reopening the app."]];
-        for (NSDictionary *app in self.avnInstalledApplications) {
-            PSSpecifier *link = [PSSpecifier preferenceSpecifierNamed:app[@"title"] target:nil set:NULL get:NULL
-                detail:AVNSettingsController.class cell:PSLinkCell edit:Nil];
-            [link setProperty:app[@"identifier"] forKey:@"AVNApplication"];
-            [rows addObject:link];
+        NSArray *applications = self.avnInstalledApplications;
+        for (NSNumber *enabled in @[@YES, @NO]) {
+            [rows addObject:[self section:enabled.boolValue ? @"Enabled apps" : @"Not enabled"
+                note:enabled.boolValue ? @"16x speed applies inside enabled apps." : nil]];
+            for (NSDictionary *app in applications) {
+                NSString *key = [@"enabled-" stringByAppendingString:app[@"identifier"]];
+                if ([self.database[key] boolValue] != enabled.boolValue) continue;
+                PSSpecifier *link = [PSSpecifier preferenceSpecifierNamed:app[@"title"] target:self set:NULL get:NULL
+                    detail:AVNSettingsController.class cell:PSLinkCell edit:Nil];
+                [link setProperty:@YES forKey:@"isController"];
+                [link setProperty:app[@"identifier"] forKey:@"AVNApplication"];
+                [rows addObject:link];
+            }
         }
     } else {
-        NSMutableDictionary *database = self.database;
-        BOOL defaultAutomatic = ![database[[self storageKey:@"ManualSkip"]] boolValue];
-        [rows addObject:[self section:nil note:@"Manual mode waits for the button and never presses Close."]];
+        BOOL defaultAutomatic = ![self.database[[self storageKey:@"ManualSkip"]] boolValue];
+        [rows addObject:[self section:@"This app" note:@"Reopen the app after changing settings."]];
         [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:NO]];
+        [rows addObject:[self section:@"Ad playback" note:@"Automatic ads runs without a press. When off, use the fast-forward button."]];
         [rows addObject:[self toggle:@"Automatic ads" feature:@"AutomaticAds" initial:defaultAutomatic]];
         [rows addObject:[self toggle:@"Show fast-forward button" feature:@"ManualSkip" initial:YES]];
-        NSArray *features = @[
-            @[@"Video speed", @"SpeedUpVideo", @YES],
-            @[@"Web countdowns", @"CompressTimers", @YES],
-            @[@"Gameplay clock", @"AccelerateClock", @YES],
-            @[@"Playable assistance", @"AutoInteract", @YES],
-            @[@"Close completed ads", @"AutoDismiss", @YES],
-            @[@"Block ad redirects", @"BlockRedirects", @YES],
-            @[@"Force inline video", @"ForceInline", @NO],
-            @[@"Include other native video", @"SpeedNativeVideo", @NO]
-        ];
-        for (NSArray *feature in features) [rows addObject:[self toggle:feature[0] feature:feature[1] initial:[feature[2] boolValue]]];
+        [rows addObject:[self section:@"Video" note:@"16x playback with lower-rate fallback when required."]];
+        [rows addObject:[self toggle:@"Video speed" feature:@"SpeedUpVideo" initial:YES]];
+        [rows addObject:[self toggle:@"Force inline video" feature:@"ForceInline" initial:NO]];
+        [rows addObject:[self toggle:@"Include other native video" feature:@"SpeedNativeVideo" initial:NO]];
+        [rows addObject:[self section:@"Ad countdowns" note:@"Accelerates supported web timers and gameplay clocks. Native SDK and server timers may remain unchanged."]];
+        [rows addObject:[self toggle:@"Web countdowns" feature:@"CompressTimers" initial:YES]];
+        [rows addObject:[self toggle:@"Gameplay clock" feature:@"AccelerateClock" initial:YES]];
+        [rows addObject:[self section:@"Completion" note:@"Automatic mode assists supported playables. Closing waits for SDK eligibility; rewards remain controlled by the app."]];
+        [rows addObject:[self toggle:@"Playable assistance" feature:@"AutoInteract" initial:YES]];
+        [rows addObject:[self toggle:@"Close completed ads" feature:@"AutoDismiss" initial:YES]];
+        [rows addObject:[self toggle:@"Block ad redirects" feature:@"BlockRedirects" initial:YES]];
     }
     _specifiers = rows;
     return _specifiers;

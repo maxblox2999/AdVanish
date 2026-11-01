@@ -1,8 +1,9 @@
-# AdVanish 0.5.2
+# AdVanish 0.5.3
 
-- Keep Settings row indexes valid while opening the menu and changing switches.
-- Remove title updates from row construction.
-- Guard unavailable or incorrectly typed app-registry getters.
-- Add a simulator test that opens the root and app Settings pages using Apple's Preferences framework.
+- Restore categorized Settings and enabled-app sections.
+- Keep preferences from both supported storage paths.
+- Restore the original MA fullscreen ad detector alongside newer SDK owners.
+- Recognize ordinary web countdown labels for manual 16x timing.
+- Test switch saving, manual mode and countdown behavior.
 
-Test release. Physical PreferenceLoader and jailbreak behavior remain unverified.
+Test release. Native SDK waits, physical-device behavior and real game rewards remain unverified.

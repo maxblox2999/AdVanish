@@ -36,21 +36,11 @@
     if (file) [values addEntriesFromDictionary:[NSDictionary dictionaryWithContentsOfFile:file] ?: @{}];
     [values addEntriesFromDictionary:[NSUserDefaults.standardUserDefaults dictionaryForKey:@"AdVanish"] ?: @{}];
 #else
-    NSDictionary *stored;
-    for (NSString *file in ASPPrefsPaths(@"com.34306-sr.adspeed")) {
-        stored = [NSDictionary dictionaryWithContentsOfFile:file];
-        if (stored) break;
-    }
-    values[@"Enabled"] = stored[@"Enabled"] ?: @YES;
-    NSString *prefix = [bundle stringByAppendingString:@"-"];
-    for (NSString *key in stored) {
-        if ([key hasPrefix:prefix]) values[[key substringFromIndex:prefix.length]] = stored[key];
-    }
-    values[@"AppEnabled"] = stored[[@"enabled-" stringByAppendingString:bundle]] ?: @NO;
+    NSDictionary *stored = ASPReadPreferencesAtPaths(ASPPrefsPaths(@"com.34306-sr.adspeed"));
+    [values addEntriesFromDictionary:ASPApplicationPreferences(stored, bundle)];
 #endif
     BOOL (^flag)(NSString *, BOOL) = ^BOOL(NSString *key, BOOL fallback) {
-        id raw = values[key];
-        return [raw respondsToSelector:@selector(boolValue)] ? [raw boolValue] : fallback;
+        return ASPPreferenceFlag(values, key, fallback);
     };
     AVNOptions *options = [AVNOptions new];
     options.enabled = flag(@"Enabled", YES);
@@ -60,7 +50,7 @@
 #endif
 #endif
     options.button = flag(@"ManualSkip", YES);
-    options.automatic = flag(@"AutomaticAds", !flag(@"ManualSkip", NO));
+    options.automatic = ASPAutomaticAdsEnabled(values);
     options.video = flag(@"SpeedUpVideo", YES);
     options.timers = flag(@"CompressTimers", YES);
     options.clocks = flag(@"AccelerateClock", YES);

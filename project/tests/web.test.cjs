@@ -31,6 +31,7 @@ function environment(configuration = {}, options = {}) {
         },
         querySelectorAll(selector) {
             if (selector === 'iframe,frame') return frameNodes;
+            if (selector === 'div[id],span[id],div[class],span[class]') return controls.filter(node => /^(DIV|SPAN)$/.test(node.tagName));
             if (selector === 'canvas,[role="timer"],time') return controls.filter(node => node.tagName === 'CANVAS' || node.tagName === 'TIME'
                 || (node.getAttribute && node.getAttribute('role') === 'timer'));
             assert.equal(selector, 'button,[role="button"],[aria-label]');
@@ -1938,4 +1939,72 @@ test('same playable timer text and added HUD do not cancel manual acceleration',
     env.advance(100);
     assert.equal(env.sandbox.performance.now(), 3200);
     assert.equal(timer.events.length + hud.events.length, 0);
+});
+
+for (const tagName of ['DIV', 'SPAN']) {
+    test('manual timing accelerates an owned ordinary ' + tagName + ' countdown only after a press', async () => {
+        const env = environment(manualAdConfig);
+        const node = control(env, '20 seconds', {tagName, className: 'ad-countdown-label'});
+        env.sandbox.__adspeed.setAdContext(true);
+        env.advance(100);
+        assert.equal(env.sandbox.performance.now(), 100);
+        const action = await env.sandbox.__adspeed.skipAsync();
+        assert.equal(action.handled, 1);
+        assert.equal(action.kind, 'timing');
+        env.advance(100);
+        assert.equal(env.sandbox.performance.now(), 1700);
+        node.textContent = '19 seconds';
+        env.observers[0].callback([]);
+        env.advance(100);
+        assert.equal(env.sandbox.performance.now(), 3300);
+        assert.equal(node.events.length, 0);
+    });
+}
+test('ordinary countdown candidates reject unrelated numbers and clickable or hidden controls', async () => {
+    for (const overrides of [
+        {className: ''}, {className: 'notimer'}, {textContent: 'Install 20 games'},
+        {hidden: true}, {parentElement: {tagName: 'BUTTON', getAttribute() { return null; }}},
+        {getAttribute(name) { return name === 'role' ? 'link' : null; }}
+    ]) {
+        const env = environment(manualAdConfig);
+        control(env, '20', {tagName: 'DIV', className: 'ad-timer', ...overrides});
+        env.sandbox.__adspeed.setAdContext(true);
+        assert.equal((await env.sandbox.__adspeed.inspectAsync()).count, 0);
+        env.advance(100);
+        assert.equal(env.sandbox.performance.now(), 100);
+    }
+});
+test('ordinary timer markup never authorizes an unknown page', async () => {
+    for (const context of [false, null]) {
+        const env = environment({...manualAdConfig, recognizedAd: context});
+        control(env, '20', {tagName: 'SPAN', id: 'countdownLabel'});
+        assert.equal((await env.sandbox.__adspeed.skipAsync()).handled, 0);
+        env.advance(100);
+        assert.equal(env.sandbox.performance.now(), 100);
+    }
+});
+test('ordinary countdown replacement requires another manual timing request', async () => {
+    const env = environment(manualAdConfig);
+    const first = control(env, '20', {tagName: 'SPAN', id: 'countdownLabel'});
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).kind, 'timing');
+    env.advance(100);
+    first.isConnected = false;
+    env.controls.splice(env.controls.indexOf(first), 1);
+    control(env, '20', {tagName: 'SPAN', id: 'countdownLabel'});
+    env.observers[0].callback([]);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 1700);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).kind, 'timing');
+});
+test('automatic owned ordinary countdown keeps its original callback at 16x', () => {
+    const env = environment(adConfig);
+    control(env, '20', {tagName: 'DIV', className: 'count-down'});
+    let calls = 0;
+    env.sandbox.setTimeout(() => calls++, 1600);
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(99);
+    assert.equal(calls, 0);
+    env.advance(1);
+    assert.equal(calls, 1);
 });

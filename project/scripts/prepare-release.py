@@ -16,7 +16,7 @@ SHA = os.environ["GITHUB_SHA"]
 RUN = os.environ["GITHUB_RUN_ID"]
 INCOMING = ROOT / "incoming"
 OUTPUT = ROOT / "release"
-VERSION = "0.5.2"
+VERSION = "0.5.3"
 OUTPUT.mkdir(exist_ok=True)
 reports = {}
 native = {}
@@ -66,11 +66,11 @@ for variant in ["rootless", "rootful", "roothide", "jailed"]:
         if variant == "rootless":
             report = json.loads((folder / "ios-simulator.json").read_text())
             assert report["passed"] and report["source_commit"] == SHA
-            assert len(report["checks"]) >= 71
+            assert len(report["checks"]) >= 72
             native["helpers"] = report
             settings_report = json.loads((folder / "ios-settings.json").read_text())
             assert settings_report["passed"] and settings_report["source_commit"] == SHA
-            assert settings_report["settings_controller"] and len(settings_report["checks"]) >= 15
+            assert settings_report["settings_controller"] and len(settings_report["checks"]) >= 25
             native["settings"] = settings_report
 
 source_folder = INCOMING / ("advanish-source-" + SHA)
@@ -89,10 +89,10 @@ with zipfile.ZipFile(OUTPUT / ("AdVanish-" + VERSION + "-source.zip"), "w", zipf
         archive.writestr(name, data)
 
 browser = json.loads((source_folder / "browser.json").read_text())
-assert browser["passed"] >= 34
+assert browser["passed"] >= 36
 assert browser["sourceSha256"] == hashlib.sha256((PROJECT / "web/adspeed.js").read_bytes()).hexdigest()
 validation = {
-    "node_tests": 124, "ipa_tool_tests": 39, "browser": browser,
+    "node_tests": 130, "ipa_tool_tests": 39, "browser": browser,
     "version": VERSION, "commit": SHA,
     "workflow": "https://github.com/maxblox2999/AdVanish/actions/runs/" + RUN,
     "packages": reports, "ios_simulator": native,

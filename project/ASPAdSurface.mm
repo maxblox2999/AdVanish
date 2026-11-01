@@ -13,9 +13,9 @@ static BOOL kindOfNamedClass(id object, NSString *name) {
 }
 
 static BOOL adController(UIViewController *controller) {
-    // These owners occur in the supplied SDK method lists. Resolve at use time
+    // Resolve supported owners at use time
     // so a framework loaded after the tweak constructor is covered as well.
-    for (NSString *name in @[@"GADFullScreenAdViewController", @"ALBaseVideoViewController",
+    for (NSString *name in @[@"GADFullScreenAdViewController", @"MAFullscreenAdViewController", @"ALBaseVideoViewController",
                             @"_TtC8UnityAds30WebViewContainerViewController", @"UADSViewController"]) {
         if (kindOfNamedClass(controller, name)) return YES;
     }

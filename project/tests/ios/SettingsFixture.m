@@ -36,6 +36,9 @@ static void require(BOOL value, NSString *name) {
     [super setTitle:title];
     self.titleDepth -= 1;
 }
+- (NSArray<NSString *> *)preferencePaths {
+    return @[[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/preferences.plist"]];
+}
 - (NSArray *)avnInstalledApplications {
     return @[@{@"identifier": @"com.maxblox2999.fixture", @"title": @"Fixture game"}];
 }
@@ -47,6 +50,7 @@ static void require(BOOL value, NSString *name) {
 @implementation AVNSettingsFixtureDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     checks = NSMutableArray.array;
+    [NSFileManager.defaultManager removeItemAtPath:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/preferences.plist"] error:nil];
     @try {
         NSString *framework = [NSBundle bundleForClass:PSListController.class].bundlePath;
         require([framework containsString:@"/System/Library/PrivateFrameworks/Preferences.framework"],
@@ -62,7 +66,7 @@ static void require(BOOL value, NSString *name) {
         ReentrantSettingsController *root = [ReentrantSettingsController new];
         root.specifier = [PSSpecifier preferenceSpecifierNamed:@"AdVanish" target:nil set:NULL get:NULL detail:Nil cell:PSLinkCell edit:Nil];
         root.title = @"AdVanish";
-        require(root.specifiers.count == 4, @"Reentrant title updates build root rows without recursion");
+        require(root.specifiers.count == 5, @"Reentrant title updates build root rows without recursion");
         self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
         UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:root];
         self.window.rootViewController = navigation;
@@ -73,21 +77,53 @@ static void require(BOOL value, NSString *name) {
                 require(root.isViewLoaded && root.view.window == self.window, @"The root Settings page opens and lays out");
                 PSSpecifier *link = root.specifiers.lastObject;
                 require([[link propertyForKey:@"AVNApplication"] isEqual:@"com.maxblox2999.fixture"], @"App rows retain their bundle identifier");
-                AVNSettingsController *child = [AVNSettingsController new];
+                AVNSettingsController *child = [ReentrantSettingsController new];
                 child.specifier = link;
                 [navigation pushViewController:child animated:NO];
                 [child.view layoutIfNeeded];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                 @try {
                 [child.view layoutIfNeeded];
-                require(child.specifiers.count == 12, [NSString stringWithFormat:@"The app Settings page has every control (rows=%lu, app=%@)", (unsigned long)child.specifiers.count, child.avnApplicationIdentifier]);
+                require(child.specifiers.count == 16, [NSString stringWithFormat:@"The app Settings page has every control (rows=%lu, app=%@)", (unsigned long)child.specifiers.count, child.avnApplicationIdentifier]);
                 require(child.view.window == self.window, @"The app Settings page is attached to the window");
+                NSMutableArray *groups = NSMutableArray.array;
+                for (PSSpecifier *row in child.specifiers) {
+                    if (![row propertyForKey:@"AVNKey"]) [groups addObject:row.name ?: @""];
+                }
+                require([groups isEqual:@[@"This app", @"Ad playback", @"Video", @"Ad countdowns", @"Completion"]], @"Per-app controls retain the categorized layout");
                 PSSpecifier *enabled = child.specifiers[1];
                 require([[enabled propertyForKey:@"AVNKey"] isEqual:@"enabled-com.maxblox2999.fixture"], @"Existing app-enabled preference keys are preserved");
                 require([[child valueForControl:enabled] respondsToSelector:@selector(boolValue)], @"Switch values load without invalid dictionary access");
+                [child changeValue:@YES forControl:enabled];
+                PSSpecifier *automatic = child.specifiers[3];
+                PSSpecifier *button = child.specifiers[4];
+                [child changeValue:@NO forControl:automatic];
+                [child changeValue:@YES forControl:button];
+                NSDictionary *saved = [NSDictionary dictionaryWithContentsOfFile:child.preferencePaths.firstObject];
+                require([saved[@"enabled-com.maxblox2999.fixture"] boolValue], @"Enabling an app persists the runtime preference");
+                require([saved[@"com.maxblox2999.fixture-AutomaticAds"] isEqual:@NO] &&
+                    [saved[@"com.maxblox2999.fixture-ManualSkip"] isEqual:@YES], @"Showing the manual button preserves explicit manual mode");
+                NSString *fallback = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/fallback.plist"];
+                [@{@"fallback-enabled": @YES, @"com.maxblox2999.fixture-AutomaticAds": @YES} writeToFile:fallback atomically:YES];
+                NSDictionary *merged = ASPReadPreferencesAtPaths(@[child.preferencePaths.firstObject, fallback]);
+                require([merged[@"fallback-enabled"] boolValue] && [merged[@"com.maxblox2999.fixture-AutomaticAds"] isEqual:@NO],
+                    @"Fallback preference keys survive while preferred values retain priority");
+                NSDictionary *runtimeValues = ASPApplicationPreferences(merged, @"com.maxblox2999.fixture");
+                require(ASPPreferenceFlag(runtimeValues, @"Enabled", YES) &&
+                    ASPPreferenceFlag(runtimeValues, @"AppEnabled", NO), @"Jailbreak configuration resolves the master and app enable switches");
+                require(!ASPAutomaticAdsEnabled(runtimeValues), @"Jailbreak configuration preserves explicit manual mode");
+                require(!ASPAutomaticAdsEnabled(@{@"ManualSkip": @YES}) &&
+                    ASPAutomaticAdsEnabled(@{}) && ASPAutomaticAdsEnabled(@{@"ManualSkip": @YES, @"AutomaticAds": @YES}),
+                    @"Legacy button preferences and explicit automatic mode resolve consistently");
+                require(!ASPPreferenceFlag(ASPApplicationPreferences(@{}, @"com.maxblox2999.fixture"), @"AppEnabled", NO),
+                    @"Apps remain opt-in when no enable preference exists");
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                @try {
+                [child.view layoutIfNeeded];
+                require(child.specifiers.count == 16 && child.view.window == self.window, @"Saved switches reload without invalidating Settings rows");
                 [navigation popViewControllerAnimated:NO];
                 [root.view layoutIfNeeded];
-                require(root.specifiers.count == 4, @"Returning to the root rebuilds a usable row cache");
+                require(root.specifiers.count == 5, @"Returning to the root rebuilds a usable row cache");
                 PSSpecifier *invalid = [PSSpecifier groupSpecifierWithName:@"Invalid"];
                 [invalid setProperty:@YES forKey:@"AVNApplication"];
                 child.specifier = invalid;
@@ -95,6 +131,8 @@ static void require(BOOL value, NSString *name) {
                 [child changeValue:@YES forControl:invalid];
                 require(YES, @"Missing switch keys do not write or crash");
                 record(nil);
+                } @catch (NSException *exception) { record(exception.reason); }
+                });
                 } @catch (NSException *exception) { record(exception.reason); }
                 });
             } @catch (NSException *exception) {

@@ -840,6 +840,56 @@ async function main() {
         assert.equal(result.closes, 0);
         assert.deepEqual(result.errors, []);
     }, true, false));
+
+    for (const automatic of [false, true]) {
+        cases.push(await runCase('ordinary-countdown-' + (automatic ? 'automatic' : 'manual'), `
+            delete window.mraid;
+            const unrelated = document.createElement('span');
+            unrelated.textContent = '20';
+            document.body.append(unrelated);
+            __adspeed.setAdContext(true);
+            const unrelatedInspection = await __adspeed.inspectAsync();
+            const timer = document.createElement('div');
+            timer.id = 'countdownLabel';
+            timer.textContent = '20 seconds';
+            timer.style.cssText = 'width:240px;height:80px';
+            document.body.append(timer);
+            let clicks = 0;
+            timer.addEventListener('click', () => clicks++);
+            __adspeed.setAdContext(false);
+            const unknown = await __adspeed.inspectAsync();
+            __adspeed.setAdContext(true);
+            let done = false;
+            setTimeout(() => done = true, 4000);
+            await sleep(120);
+            const before = done;
+            const inspection = await __adspeed.inspectAsync();
+            const started = realNow();
+            const action = ${automatic} ? null : await __adspeed.skipAsync(inspection.token);
+            await until(() => done, 'ordinary countdown callback', 2000);
+            const elapsed = realNow() - started;
+            __adspeed.setAdContext(false);
+            const normalStart = {real:realNow(),virtual:performance.now()};
+            await sleep(120);
+            const normal = {real:realNow()-normalStart.real,virtual:performance.now()-normalStart.virtual};
+            return {unknown,unrelatedInspection,before,inspection,action,elapsed,normal,clicks,...state()};
+        `, result => {
+            assert.equal(result.unknown.count, 0);
+            assert.equal(result.unrelatedInspection.count, 0);
+            assert.equal(result.before, false);
+            assert.equal(result.inspection.count, 1);
+            assert.equal(result.inspection.unresolved, 0);
+            if (!automatic) {
+                assert.equal(result.action.handled, 1);
+                assert.equal(result.action.kind, 'timing');
+            }
+            assert.ok(result.elapsed < 1500);
+            assert.ok(result.normal.virtual < result.normal.real * 1.5);
+            assert.equal(result.clicks, 0);
+            assert.equal(result.closes, 0);
+            assert.deepEqual(result.errors, []);
+        }, false, automatic));
+    }
     const report = {
         sourceSha256,
         browser: version,

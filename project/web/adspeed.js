@@ -881,6 +881,29 @@
         return result;
     }
 
+    function countdownSurface() {
+        var nodes = document.querySelectorAll('div[id],span[id],div[class],span[class]');
+        for (var index = 0; index < Math.min(nodes.length, 128); index += 1) {
+            var node = nodes[index];
+            var marker = String(node.id || '') + ' ' + String(node.className || '');
+            marker = marker.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
+            if (!/(?:^|[\s_-])(?:countdown|count-down|timer)(?:$|[\s_-])/.test(marker)) continue;
+            var label = String(node.textContent || '').trim();
+            if (!/^(?:(?:skip|close|reward|continue)(?:\s+ad)?\s+in\s+)?\d{1,3}(?:\s*(?:s|secs?|seconds?))?$/i.test(label)) continue;
+            var interactive = false;
+            for (var parent = node, depth = 0; parent && depth < 16; parent = parent.parentElement, depth += 1) {
+                var tag = String(parent.tagName).toLowerCase();
+                var role = parent.getAttribute && parent.getAttribute('role');
+                if (tag === 'button' || tag === 'a' || role === 'button' || role === 'link') {
+                    interactive = true;
+                    break;
+                }
+            }
+            if (!interactive && !parent && visible(node) && exposed(node)) return node;
+        }
+        return null;
+    }
+
     function playableSurface() {
         var nodes = document.querySelectorAll('canvas,[role="timer"],time');
         for (var index = 0; index < Math.min(nodes.length, 64); index += 1) {
@@ -903,7 +926,7 @@
                 stats.animationFailures += 1;
             }
         }
-        return null;
+        return countdownSurface();
     }
 
     function capture() {

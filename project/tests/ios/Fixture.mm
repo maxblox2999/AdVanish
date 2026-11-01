@@ -210,6 +210,11 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 }
 @end
 
+@interface MAFullscreenAdViewController : UIViewController
+@end
+@implementation MAFullscreenAdViewController
+@end
+
 @interface GADFullScreenAdViewController : ALBaseVideoViewController
 @end
 @implementation GADFullScreenAdViewController
@@ -669,6 +674,17 @@ static void runFixture(ALBaseVideoViewController *owner) {
         if (!check(ASPViewVisibleInSurface(owner.videoPlayer.videoView, owner.view.window),
                    @"A window root includes its visible content")) return;
         if (!check(owner.displayEvents == 1, @"The SDK display callback is forwarded unchanged")) return;
+        MAFullscreenAdViewController *legacyOwner = [MAFullscreenAdViewController new];
+        [owner addChildViewController:legacyOwner];
+        legacyOwner.view.frame = owner.view.bounds;
+        [owner.view addSubview:legacyOwner.view];
+        [legacyOwner didMoveToParentViewController:owner];
+        ASPAdSurface *legacySurface = ASPFindAdSurface(@[owner.view.window], YES);
+        BOOL originalOwnerRecognized = legacySurface.owner == legacyOwner && legacySurface.recognized;
+        [legacyOwner willMoveToParentViewController:nil];
+        [legacyOwner.view removeFromSuperview];
+        [legacyOwner removeFromParentViewController];
+        if (!check(originalOwnerRecognized, @"The original MA fullscreen owner remains recognized alongside newer SDK owners")) return;
         if (!testCreativeOwnership(owner)) return;
         if (!testMediatedOwnership(owner)) return;
         if (!testWebWindowExposure(owner)) return;
