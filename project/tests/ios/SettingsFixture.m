@@ -75,8 +75,16 @@ static void require(BOOL value, NSString *name) {
             @try {
                 [root.view layoutIfNeeded];
                 require(root.isViewLoaded && root.view.window == self.window, @"The root Settings page opens and lays out");
-                PSSpecifier *link = root.specifiers.lastObject;
+                PSSpecifier *link = nil;
+                for (PSSpecifier *row in root.specifiers) {
+                    if ([row propertyForKey:@"AVNApplication"]) { link = row; break; }
+                }
                 require([[link propertyForKey:@"AVNApplication"] isEqual:@"com.maxblox2999.fixture"], @"App rows retain their bundle identifier");
+                NSUInteger enabledSection = [root.specifiers indexOfObjectPassingTest:^BOOL(PSSpecifier *row, NSUInteger index, BOOL *stop) {
+                    return [row.name isEqual:@"Enabled apps"];
+                }];
+                require(enabledSection != NSNotFound && [root.specifiers indexOfObject:link] > enabledSection,
+                    @"An app with no stored key is listed as enabled");
                 AVNSettingsController *child = [ReentrantSettingsController new];
                 child.specifier = link;
                 [navigation pushViewController:child animated:NO];
@@ -115,8 +123,10 @@ static void require(BOOL value, NSString *name) {
                 require(!ASPAutomaticAdsEnabled(@{@"ManualSkip": @YES}) &&
                     ASPAutomaticAdsEnabled(@{}) && ASPAutomaticAdsEnabled(@{@"ManualSkip": @YES, @"AutomaticAds": @YES}),
                     @"Legacy button preferences and explicit automatic mode resolve consistently");
-                require(!ASPPreferenceFlag(ASPApplicationPreferences(@{}, @"com.maxblox2999.fixture"), @"AppEnabled", NO),
-                    @"Apps remain opt-in when no enable preference exists");
+                require(ASPPreferenceFlag(ASPApplicationPreferences(@{}, @"com.maxblox2999.fixture"), @"AppEnabled", NO),
+                    @"Apps stay enabled when no enable preference exists");
+                require(!ASPPreferenceFlag(ASPApplicationPreferences(@{@"enabled-com.maxblox2999.fixture": @NO}, @"com.maxblox2999.fixture"), @"AppEnabled", YES),
+                    @"An explicit disable preference still wins");
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
                 @try {
                 [child.view layoutIfNeeded];

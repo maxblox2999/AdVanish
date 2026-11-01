@@ -29,6 +29,11 @@ class ApplicationDefaultTests(unittest.TestCase):
         self.assertNotIn("@NO", expression,
                          "an app without an explicit key must not start disabled")
 
+    def test_settings_lists_a_missing_key_as_enabled(self):
+        """The Settings UI must group an unset app the same way the runtime reads it."""
+        source = (ROOT / "settings/AVNSettings.m").read_text()
+        self.assertIn("BOOL appEnabled = stored ? [stored boolValue] : YES;", source)
+
 
 if __name__ == "__main__":
     unittest.main()

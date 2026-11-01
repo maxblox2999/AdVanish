@@ -29,15 +29,17 @@ def simulator_devices():
         return json.loads(run("xcrun", "simctl", "list", "-j"))
 
 
-def launch_app(device, report_path, timeout=90):
-    """Launch the fixture, killing a simctl that never returns."""
+def launch(device, bundle, report_path=None, timeout=90):
+    """Run simctl launch, killing it if it never returns."""
     with tempfile.TemporaryFile(mode="w+t") as launch_log:
-        launcher = subprocess.Popen(["xcrun", "simctl", "launch", device, BUNDLE],
+        launcher = subprocess.Popen(["xcrun", "simctl", "launch", "--terminate-running-process", device, bundle],
                                     stdout=launch_log, stderr=subprocess.STDOUT, text=True)
         try:
             deadline = time.monotonic() + timeout
-            while not report_path.exists() and time.monotonic() < deadline:
-                if launcher.poll() not in (None, 0):
+            while time.monotonic() < deadline:
+                if report_path is not None and report_path.exists():
+                    break
+                if launcher.poll() is not None and (report_path is None or launcher.returncode != 0):
                     break
                 time.sleep(0.25)
         finally:
@@ -52,12 +54,31 @@ def launch_app(device, report_path, timeout=90):
         return launcher.returncode, launch_log.read()[-32768:]
 
 
+def launch_app(device, report_path, timeout=90):
+    return launch(device, BUNDLE, report_path, timeout)
+
+
+def warm_up(device, timeout=60):
+    """The first launch after boot can hang while SpringBoard is still starting."""
+    code, _ = launch(device, "com.apple.Preferences", timeout=timeout)
+    try:
+        subprocess.run(["xcrun", "simctl", "terminate", device, "com.apple.Preferences"],
+                       check=False, timeout=45)
+    except subprocess.TimeoutExpired:
+        pass
+    return code == 0
+
+
 def reset_simulator(device):
     """A launch that hangs usually means the simulator is wedged; reboot it."""
-    subprocess.run(["xcrun", "simctl", "terminate", device, BUNDLE], check=False, timeout=45)
-    subprocess.run(["xcrun", "simctl", "shutdown", device], check=False, timeout=90)
-    subprocess.run(["xcrun", "simctl", "boot", device], check=False, timeout=120)
-    subprocess.run(["xcrun", "simctl", "bootstatus", device, "-b"], check=False, timeout=240)
+    for command, timeout in ((("terminate", device, BUNDLE), 45),
+                             (("shutdown", device), 90),
+                             (("boot", device), 120),
+                             (("bootstatus", device, "-b"), 240)):
+        try:
+            subprocess.run(["xcrun", "simctl", *command], check=False, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print(json.dumps({"phase": "simulator reset", "step": command[0], "timeout": timeout}), flush=True)
 
 
 def source_commit():
@@ -157,6 +178,10 @@ def main(video, output, injected=False, manual=False, settings=False):
             booted = True
             run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
             run("xcrun", "simctl", "install", device, str(app), timeout=240)
+            if not warm_up(device):
+                print(json.dumps({"phase": "warm up", "retry": 1}), flush=True)
+                reset_simulator(device)
+                warm_up(device)
             container = Path(run("xcrun", "simctl", "get_app_container", device, BUNDLE, "data"))
             report_path = container / "Documents/result.json"
             launch_started = time.time()
