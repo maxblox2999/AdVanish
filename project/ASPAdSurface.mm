@@ -80,7 +80,7 @@ static id objectGetter(id owner, NSString *name) {
 
 static AVPlayer *ownedAppLovinPlayer(UIViewController *owner) {
     if (!kindOfNamedClass(owner, @"ALBaseVideoViewController")) return nil;
-    // The owned avPlayer follows videoPlayer -> videoView -> player.
+    // Resolve the owned player through videoPlayer -> videoView -> player.
     id videoView = objectGetter(objectGetter(owner, @"videoPlayer"), @"videoView");
     if (![videoView isKindOfClass:[UIView class]] ||
         !ASPViewVisibleInSurface(videoView, owner.viewIfLoaded)) return nil;

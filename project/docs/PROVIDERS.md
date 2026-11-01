@@ -1,11 +1,6 @@
 # Game-ad coverage
 
-
-| Evidence | Providers |
-| --- | --- |
-| Selected native SDK and callback findings | Google Mobile Ads, Unity Ads, ironSource, Vungle |
-| Bundled web-resource markers from the earlier local audit | MRAID, VPAID, HSADX, VSDK, Canvas/WebGL |
-
+Integration coverage includes AppLovin, Google Mobile Ads, Unity Ads, ironSource and Vungle callback paths, plus recognized web surfaces using MRAID, VPAID, HSADX, VSDK and Canvas/WebGL. Detection markers and mediation adapters do not establish compatibility with every provider or creative.
 
 The 0.5.1 audit found:
 - Explicitly native-authorized non-MRAID playables were excluded from the existing semantic tap/swipe assistance.

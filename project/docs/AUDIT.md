@@ -14,3 +14,4 @@
 | Failed builds retained stale reports/artifacts | Clear reports before startup; allow artifact replacement on reruns |
 | RootHide uses a randomized root | Separate toolchain and package; resolve preference paths through jbroot |
 
+[Tests](VALIDATION.md) · [Ad types and limits](AD_TYPES.md).

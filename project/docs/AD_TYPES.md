@@ -19,10 +19,4 @@ Detection, acceleration, completion and rewards are separate. Recognizing an ad 
 
 The manual button selects an eligible video or a recognized playable timing surface. It does not solve arbitrary games, grant rewards or force controller dismissal. Ambiguous surfaces, inaccessible frames, stale sessions and rejected playback rates abstain rather than selecting unrelated media.
 
-
-
-| Sample | AppLovin | Other embedded framework metadata |
-| --- | --- | --- |
-
-
-Manual timing freezes its primary playable node. Replacing that node requires a new press; same-node countdown updates keep their speed. [Provider audit](PROVIDERS.md).
+Manual timing freezes its primary playable node. Replacing that node requires a new press; same-node countdown updates keep their speed. [Completion adapters](SUPPORT.md) · [Test scope](VALIDATION.md).
