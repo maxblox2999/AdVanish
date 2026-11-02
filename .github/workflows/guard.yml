@@ -1,0 +1,80 @@
+name: Main guard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-guard-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Verify main exists and has not moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          default_branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
+          test "$default_branch" = "main" || { echo "default branch is $default_branch"; exit 1; }
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          echo "main is at $current"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            test "$current" = "$GITHUB_SHA" || { echo "main moved to $current while building $GITHUB_SHA"; exit 1; }
+          fi
+
+      - name: Verify main is protected against deletion and force push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          protected=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .protected)
+          test "$protected" = "true" || { echo "main is not protected"; exit 1; }
+          echo "main is protected"
+
+      - name: Verify main history is intact and linear
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || { echo "checkout does not match origin/main"; exit 1; }
+          git fsck --no-progress --connectivity-only
+          echo "history intact"
+
+      - name: Verify the newest release points into main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=1" --jq '.[0].tag_name // empty')
+          if [ -z "$tag" ]; then
+            echo "no releases yet"
+            exit 0
+          fi
+          target=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=1" --jq '.[0].target_commitish')
+          if [[ "$target" =~ ^[0-9a-f]{40}$ ]]; then
+            git merge-base --is-ancestor "$target" HEAD || { echo "release $tag targets $target, which is not in main"; exit 1; }
+          fi
+          echo "release $tag is contained in main"
+
+      - name: Verify main is green outside a push
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs?branch=main&per_page=1" --jq '.workflow_runs[0].conclusion // "none"')
+          test "$conclusion" = "success" || { echo "latest Build on main finished as $conclusion"; exit 1; }
+          echo "latest Build on main is green"
