@@ -14,6 +14,14 @@ on:
         options:
           - macos-15
           - macos-15-intel
+      runner_fallback:
+        description: Internal runner retry (prevents retry loops)
+        type: boolean
+        default: false
+      source_commit:
+        description: Expected commit for a runner retry
+        type: string
+        default: ''
 
 concurrency:
   group: build-${{ github.ref }}
@@ -27,10 +35,32 @@ defaults:
     working-directory: project
 
 jobs:
+  runner_fallback:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 32
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Retry an idle macOS queue on Intel once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/runner-fallback.py
+
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify runner retry commit
+        if: inputs.runner_fallback
+        env:
+          EXPECTED_COMMIT: ${{ inputs.source_commit }}
+          RETRY_RUNNER: ${{ inputs.runner }}
+        run: |
+          test "$EXPECTED_COMMIT" = "$GITHUB_SHA"
+          test "$RETRY_RUNNER" = macos-15-intel
       - name: Reject CRLF in tracked text files
         working-directory: .
         run: |
@@ -143,7 +173,7 @@ jobs:
           overwrite: true
 
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.runner_fallback && inputs.source_commit == github.sha))
     needs: [checks, package, ios]
     runs-on: ubuntu-latest
     permissions:

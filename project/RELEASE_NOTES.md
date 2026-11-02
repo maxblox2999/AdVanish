@@ -7,4 +7,5 @@
 - Native countdown timers accelerate only during a visible ad.
 - Run Settings, native, injected and manual simulator checks in parallel.
 - Stop recovery when shutdown, reboot or app readiness fails.
+- Retry an idle macOS runner queue once on Intel.
 - The release tag and package version come from `control`.

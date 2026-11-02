@@ -2,6 +2,8 @@
 
 Fork the repository, enable Actions and run **Build** on `main`. Artifacts contain rootless, rootful, RootHide, jailed and full-source builds.
 
+Push builds retry once on `macos-15-intel` after five minutes with queued macOS jobs and none running. Running jobs and failed tests are left alone. You can also select the runner under **Run workflow**.
+
 ## macOS
 
 Requires Xcode, Node.js 18+ and Python 3.9+. Run from `project/`:
