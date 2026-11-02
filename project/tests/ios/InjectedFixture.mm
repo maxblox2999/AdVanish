@@ -404,10 +404,11 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
         UIButton *button = [self manualButton];
         if (!check(button != nil, @"The manual native request uses the production floating button")) return;
         double before = CMTimeGetSeconds(owner.avPlayer.currentTime);
+        NSTimeInterval requestStarted = NSProcessInfo.processInfo.systemUptime;
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
         NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 15;
         waitUntil(^BOOL { return owner.avPlayer.rate == ASPSpeedRate(); }, deadline, ^{
-            if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 1,
+            if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) < before + (NSProcessInfo.processInfo.systemUptime - requestStarted) * ASPSpeedRate() + 1,
                        @"A manual press retains 80x native playback without a seek")) return;
             waitUntil(^BOOL { return owner.ended; }, deadline, ^{
                 if (!check(owner.closes == 0 && owner.avPlayer.rate == 0,

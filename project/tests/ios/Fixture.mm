@@ -704,8 +704,9 @@ static void runFixture(ALBaseVideoViewController *owner) {
         if (!testWebWindowExposure(owner)) return;
         testAdaptiveRates(owner, ^{
             double before = CMTimeGetSeconds(owner.avPlayer.currentTime);
+        NSTimeInterval requestStarted = NSProcessInfo.processInfo.systemUptime;
             [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-            if (!check(owner.avPlayer.rate == ASPSpeedRate() && CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 0.5,
+            if (!check(owner.avPlayer.rate == ASPSpeedRate() && CMTimeGetSeconds(owner.avPlayer.currentTime) < before + (NSProcessInfo.processInfo.systemUptime - requestStarted) * ASPSpeedRate() + 0.5,
                        @"Manual action requests 80x playback without a time jump")) return;
             owner.videoPlayer.videoView.hidden = YES;
             waitUntil(^BOOL {
