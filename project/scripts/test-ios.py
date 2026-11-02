@@ -96,19 +96,20 @@ def warm_up(device, timeout=60):
 
 
 def reset(device):
-    """A launch that hangs means the device is wedged; reboot it, then the service."""
-    for arguments, timeout in ((("terminate", device, BUNDLE), 30),
-                               (("shutdown", device), 60),
-                               (("boot", device), 90),
-                               (("bootstatus", device, "-b"), 240)):
+    """Recovery succeeds only after shutdown, reboot and a real app launch."""
+    simctl_quiet("terminate", device, BUNDLE, timeout=15)
+    for arguments, timeout in ((("shutdown", device), 30),
+                               (("boot", device), 60),
+                               (("bootstatus", device, "-b"), 120)):
         if not simctl_quiet(*arguments, timeout=timeout):
-            note({"phase": "simulator reset", "step": arguments[0]})
-    if simctl_quiet("bootstatus", device, "-b", timeout=60):
-        return True
-    note({"phase": "simulator reset", "step": "service"})
-    subprocess.run(["killall", "-9", "com.apple.CoreSimulator.CoreSimulatorService"], check=False)
-    time.sleep(5)
-    return simctl_quiet("boot", device, timeout=120) and simctl_quiet("bootstatus", device, "-b", timeout=300)
+            note({"phase": "simulator reset", "failed_step": arguments[0]})
+            return False
+    return warm_up(device, timeout=30)
+
+
+def require_reset(device):
+    if not reset(device):
+        raise RuntimeError("Simulator recovery failed; refusing to reuse an unhealthy device")
 
 
 def prepare(name):
@@ -117,11 +118,17 @@ def prepare(name):
     note({"phase": "target", "elapsed": round(time.monotonic() - started, 1)})
     device = simctl("create", name, device_type, runtime, timeout=60)
     note({"phase": "created", "elapsed": round(time.monotonic() - started, 1)})
-    simctl("boot", device, timeout=120)
-    note({"phase": "booted", "elapsed": round(time.monotonic() - started, 1)})
-    simctl("bootstatus", device, "-b", timeout=300)
-    warm_up(device)
-    note({"phase": "ready", "runtime": version, "device": device, "elapsed": round(time.monotonic() - started, 1)})
+    try:
+        simctl("boot", device, timeout=120)
+        note({"phase": "booted", "elapsed": round(time.monotonic() - started, 1)})
+        simctl("bootstatus", device, "-b", timeout=300)
+        if not warm_up(device):
+            if not reset(device):
+                raise RuntimeError("Simulator did not become ready")
+        note({"phase": "ready", "runtime": version, "device": device, "elapsed": round(time.monotonic() - started, 1)})
+    except Exception:
+        delete(device)
+        raise
     return device
 
 
@@ -280,7 +287,7 @@ def main(video, output, injected=False, manual=False, settings=False, device=Non
                     if time.monotonic() >= deadline or attempt == 2:
                         raise
                     note({"phase": "app container", "retry": attempt + 1})
-                    reset(device)
+                    require_reset(device)
             report_path = container / "Documents/result.json"
             report_path.unlink(missing_ok=True)
             launch_started = time.time()
@@ -289,14 +296,14 @@ def main(video, output, injected=False, manual=False, settings=False, device=Non
             launch_attempts = 0
             for attempt in range(2):
                 launch_attempts = attempt + 1
-                launch_exit_code, launch_output = launch(device, BUNDLE, report_path)
+                launch_exit_code, launch_output = launch(device, BUNDLE, report_path, timeout=max(1, min(90, deadline - time.monotonic())))
                 if report_path.exists():
                     break
                 if attempt == 0 and time.monotonic() < deadline:
                     note({"phase": "relaunch", "attempt": launch_attempts,
                           "launcher_exit_code": launch_exit_code,
                           "launcher_output": launch_output[-4096:]})
-                    reset(device)
+                    require_reset(device)
             if not report_path.exists():
                 path = diagnostics(output, device, "Native fixture did not write a result", container)
                 raise RuntimeError("Native fixture did not write a result; see " + str(path))
@@ -317,8 +324,7 @@ def main(video, output, injected=False, manual=False, settings=False, device=Non
             if not report["passed"]:
                 raise RuntimeError(report["failure"])
     except Exception as failure:
-        if container is None:
-            diagnostics(output, device, failure)
+        diagnostics(output, device, failure, container)
         raise
     finally:
         if booted:

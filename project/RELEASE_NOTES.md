@@ -5,5 +5,6 @@
 - Turning off the fast-forward button no longer turns automatic mode off.
 - 80x playback with a lower-rate fallback when a player rejects it.
 - Native countdown timers accelerate only during a visible ad.
-- Simulator tests reuse one booted device; a wedged simulator is reset instead of hanging the build.
+- Run Settings, native, injected and manual simulator checks in parallel.
+- Stop recovery when shutdown, reboot or app readiness fails.
 - The release tag and package version come from `control`.

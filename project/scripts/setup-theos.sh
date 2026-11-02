@@ -32,11 +32,13 @@ checkout_revision() {
 
 checkout_revision "$theos_url" "$tools_dir/theos" "$theos_revision"
 git -C "$tools_dir/theos" submodule update --init --recursive --depth=1
-checkout_revision https://github.com/theos/sdks.git "$tools_dir/sdks" "$SDK_REVISION"
-test -d "$tools_dir/sdks/iPhoneOS$IOS_SDK.sdk"
-mkdir -p "$tools_dir/theos/sdks"
-sdk_link="$tools_dir/theos/sdks/iPhoneOS$IOS_SDK.sdk"
-if [ ! -e "$sdk_link" ]; then
-    ln -s "$tools_dir/sdks/iPhoneOS$IOS_SDK.sdk" "$sdk_link"
+if [ "$variant" != jailed ]; then
+    checkout_revision https://github.com/theos/sdks.git "$tools_dir/sdks" "$SDK_REVISION"
+    test -d "$tools_dir/sdks/iPhoneOS$IOS_SDK.sdk"
+    mkdir -p "$tools_dir/theos/sdks"
+    sdk_link="$tools_dir/theos/sdks/iPhoneOS$IOS_SDK.sdk"
+    if [ ! -e "$sdk_link" ]; then
+        ln -s "$tools_dir/sdks/iPhoneOS$IOS_SDK.sdk" "$sdk_link"
+    fi
 fi
 printf 'THEOS=%s\n' "$tools_dir/theos"

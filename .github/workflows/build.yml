@@ -76,47 +76,14 @@ jobs:
         variant: [rootless, rootful, roothide, jailed]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Build package and prepare simulator
-        id: package_build
+      - name: Build and inspect package
         run: |
           set -euo pipefail
-          prepare=
-          case "${{ matrix.variant }}" in
-            rootless|jailed)
-              python3 scripts/test-ios.py --prepare "AdVanish-${{ matrix.variant }}-${{ github.run_id }}" \
-                > "$RUNNER_TEMP/advanish-udid" &
-              prepare=$!
-              ;;
-          esac
           brew install ldid dpkg make
           export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
           bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" "${{ matrix.variant }}"
           export THEOS="$RUNNER_TEMP/advanish-tools/theos"
-          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
           bash scripts/build.sh "${{ matrix.variant }}"
-          if [ -n "$prepare" ]; then
-            wait "$prepare"
-            echo "SIM_UDID=$(cat "$RUNNER_TEMP/advanish-udid")" >> "$GITHUB_ENV"
-          fi
-      - name: Build injected framework
-        if: matrix.variant == 'jailed'
-        run: python3 scripts/build-jailed.py --simulator --output "$RUNNER_TEMP/advanish-framework"
-      - name: Open production Settings pages in iOS Simulator
-        if: matrix.variant == 'rootless'
-        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --settings --device "$SIM_UDID" --output dist/rootless/ios-settings.json
-      - name: Exercise native skipping and pending reward protection in iOS Simulator
-        if: matrix.variant == 'rootless'
-        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --device "$SIM_UDID" --output dist/rootless/ios-simulator.json
-      - name: Exercise injected initialization and production hooks in iOS Simulator
-        if: matrix.variant == 'jailed'
-        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --framework "$RUNNER_TEMP/advanish-framework" --device "$SIM_UDID" --output dist/jailed/ios-injected.json
-      - name: Verify manual-only injected mode stays idle until a button request
-        if: ${{ !cancelled() && matrix.variant == 'jailed' && steps.package_build.outcome == 'success' }}
-        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --manual --framework "$RUNNER_TEMP/advanish-framework" --device "$SIM_UDID" --output dist/jailed/ios-injected-manual.json
-      - name: Delete simulator
-        if: always() && (matrix.variant == 'rootless' || matrix.variant == 'jailed')
-        run: |
-          if [ -n "${SIM_UDID:-}" ]; then python3 scripts/test-ios.py --delete "$SIM_UDID"; fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -125,9 +92,59 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
+  ios:
+    timeout-minutes: 12
+    runs-on: ${{ inputs.runner || 'macos-15' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [settings, native, injected, manual]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare simulator and fixture tools
+        run: |
+          set -euo pipefail
+          python3 scripts/test-ios.py --prepare "AdVanish-${{ matrix.fixture }}-${{ github.run_id }}" > "$RUNNER_TEMP/advanish-udid" &
+          prepare=$!
+          if [ "${{ matrix.fixture }}" != native ]; then
+            bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" jailed
+            export THEOS="$RUNNER_TEMP/advanish-tools/theos"
+            echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          fi
+          case "${{ matrix.fixture }}" in
+            injected|manual) python3 scripts/build-jailed.py --simulator --output "$RUNNER_TEMP/advanish-framework" ;;
+          esac
+          wait "$prepare"
+          echo "SIM_UDID=$(cat "$RUNNER_TEMP/advanish-udid")" >> "$GITHUB_ENV"
+      - name: Run complete simulator fixture
+        env:
+          FIXTURE: ${{ matrix.fixture }}
+        run: |
+          set -euo pipefail
+          args=()
+          case "$FIXTURE" in
+            settings) args+=(--settings); report=ios-settings.json ;;
+            native) report=ios-simulator.json ;;
+            injected) args+=(--injected --framework "$RUNNER_TEMP/advanish-framework"); report=ios-injected.json ;;
+            manual) args+=(--injected --manual --framework "$RUNNER_TEMP/advanish-framework"); report=ios-injected-manual.json ;;
+          esac
+          python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --device "$SIM_UDID" "${args[@]}" --output "dist/ios/$report"
+      - name: Delete simulator
+        if: always()
+        run: |
+          device="${SIM_UDID:-$(cat "$RUNNER_TEMP/advanish-udid" 2>/dev/null || true)}"
+          if [ -n "$device" ]; then python3 scripts/test-ios.py --delete "$device"; fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: advanish-ios-${{ matrix.fixture }}-${{ github.sha }}
+          path: project/dist/ios/
+          if-no-files-found: error
+          overwrite: true
+
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [checks, package]
+    needs: [checks, package, ios]
     runs-on: ubuntu-latest
     permissions:
       contents: write
