@@ -25,7 +25,7 @@ on:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'push' || inputs.runner_fallback == true }}
 
 permissions:
   contents: read
@@ -189,7 +189,7 @@ jobs:
       runner: ${{ inputs.runner || 'macos-15' }}
 
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.runner_fallback && inputs.source_commit == github.sha))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [checks, rootless, jailed, rootful, roothide]
     runs-on: ubuntu-latest
     permissions:
