@@ -35,10 +35,8 @@ python3 inject-ipa.py Game.ipa --framework AdVanish.framework --output Game-AdVa
 python3 sign-ipa.py Game-AdVanish-unsigned.ipa --output Game-AdVanish-signed.ipa --identity "Apple Development: Your Name (TEAMID)" --profile Game.mobileprovision
 ```
 
-The injector preserves the original IPA and accepts authorized decrypted, thin arm64 executables with sufficient header padding. Encrypted, fat, arm64e, duplicate and unsafe archives are rejected. The optional macOS signer supports a single app with a matching profile; extensions require another signing tool. Build signatures are ad-hoc; signed-device installation remains unverified.
+The injector keeps the original IPA and accepts authorized decrypted, thin arm64 executables with enough header padding. Encrypted, fat, arm64e, duplicate and unsafe archives are rejected. The optional macOS signer handles one app with a matching profile; extensions need another signing tool.
 
-Optional `--config AdVanish.plist` accepts boolean keys: `Enabled`, `AutomaticAds`, `ManualSkip`, `SpeedUpVideo`, `CompressTimers`, `AccelerateClock`, `ForceInline`, `AutoInteract`, `AutoDismiss`, `BlockRedirects`. The app's `NSUserDefaults` dictionary `AdVanish` can override them. `AutomaticAds=false` requires the button; it disables automatic input and Close.
+Optional `--config AdVanish.plist` accepts boolean keys: `Enabled`, `AutomaticAds`, `ManualSkip`, `SpeedUpVideo`, `CompressTimers`, `AccelerateClock`, `ForceInline`, `AutoInteract`, `AutoDismiss`, `BlockRedirects`. The app's `NSUserDefaults` dictionary `AdVanish` overrides them. `AutomaticAds=false` requires the button and disables automatic input and Close.
 
-[Cyanide compatibility](docs/CYANIDE.md) · [Ad types](docs/AD_TYPES.md).
-
-Hooks are written in Logos. All builds require the pinned Theos checkout. Jailbreak packages use the MobileSubstrate generator with the platform loader; jailed builds use the internal generator and have no Substrate dependency.
+Hooks use Logos. Every build needs the pinned Theos checkout. Jailbreak packages use the MobileSubstrate generator; jailed builds use the internal generator and need no Substrate.

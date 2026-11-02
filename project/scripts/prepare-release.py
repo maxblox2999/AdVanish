@@ -99,7 +99,6 @@ validation = {
     "complete_source_matches_repository": True,
     "physical_iphone_tested": False, "real_sdk_rewards_verified": False,
     "signed_device_injection_verified": False, "physical_roothide_tested": False,
-    "cyanide_quickloader_supported": False,
     "limits": "Simulator SDK events are mocked. Real games, rewards and physical device loaders remain unverified."
 }
 (OUTPUT / ("AdVanish-" + VERSION + "-validation.json")).write_text(json.dumps(validation, indent=2) + "\n")

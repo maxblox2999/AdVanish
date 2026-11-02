@@ -64,7 +64,7 @@ jobs:
           overwrite: true
 
   package:
-    timeout-minutes: 20
+    timeout-minutes: 15
     runs-on: ${{ inputs.runner || 'macos-15' }}
     strategy:
       fail-fast: false
@@ -72,29 +72,47 @@ jobs:
         variant: [rootless, rootful, roothide, jailed]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install build tools
-        run: |
-          brew install ldid dpkg make
-          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
-      - name: Set up pinned Theos and SDK
-        run: |
-          bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" "${{ matrix.variant }}"
-          echo "THEOS=$RUNNER_TEMP/advanish-tools/theos" >> "$GITHUB_ENV"
-      - name: Build and inspect package
+      - name: Build package and prepare simulator
         id: package_build
-        run: bash scripts/build.sh "${{ matrix.variant }}"
+        run: |
+          set -euo pipefail
+          prepare=
+          case "${{ matrix.variant }}" in
+            rootless|jailed)
+              python3 scripts/test-ios.py --prepare "AdVanish-${{ matrix.variant }}-${{ github.run_id }}" \
+                > "$RUNNER_TEMP/advanish-udid" &
+              prepare=$!
+              ;;
+          esac
+          brew install ldid dpkg make
+          export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+          bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" "${{ matrix.variant }}"
+          export THEOS="$RUNNER_TEMP/advanish-tools/theos"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          bash scripts/build.sh "${{ matrix.variant }}"
+          if [ -n "$prepare" ]; then
+            wait "$prepare"
+            echo "SIM_UDID=$(cat "$RUNNER_TEMP/advanish-udid")" >> "$GITHUB_ENV"
+          fi
+      - name: Build injected framework
+        if: matrix.variant == 'jailed'
+        run: python3 scripts/build-jailed.py --simulator --output "$RUNNER_TEMP/advanish-framework"
       - name: Open production Settings pages in iOS Simulator
         if: matrix.variant == 'rootless'
-        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --settings --output dist/rootless/ios-settings.json
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --settings --device "$SIM_UDID" --output dist/rootless/ios-settings.json
       - name: Exercise native skipping and pending reward protection in iOS Simulator
         if: matrix.variant == 'rootless'
-        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --output dist/rootless/ios-simulator.json
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --device "$SIM_UDID" --output dist/rootless/ios-simulator.json
       - name: Exercise injected initialization and production hooks in iOS Simulator
         if: matrix.variant == 'jailed'
-        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --output dist/jailed/ios-injected.json
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --framework "$RUNNER_TEMP/advanish-framework" --device "$SIM_UDID" --output dist/jailed/ios-injected.json
       - name: Verify manual-only injected mode stays idle until a button request
         if: ${{ !cancelled() && matrix.variant == 'jailed' && steps.package_build.outcome == 'success' }}
-        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --manual --output dist/jailed/ios-injected-manual.json
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --manual --framework "$RUNNER_TEMP/advanish-framework" --device "$SIM_UDID" --output dist/jailed/ios-injected-manual.json
+      - name: Delete simulator
+        if: always() && (matrix.variant == 'rootless' || matrix.variant == 'jailed')
+        run: |
+          if [ -n "${SIM_UDID:-}" ]; then python3 scripts/test-ios.py --delete "$SIM_UDID"; fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

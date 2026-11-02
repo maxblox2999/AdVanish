@@ -18,15 +18,15 @@
 
 **Jailed:** inject the framework into an authorized decrypted IPA, then re-sign it. [Instructions](project/BUILD.md#ipa-injection).
 
-**Automatic ads** enables supported acceleration and completion. Turn it off for button-only acceleration. Speed targets **80x**, with lower rates when a player rejects it.
+**Automatic ads** enables acceleration and completion. Turn it off for button-only acceleration. Targets **80x**, falling back to a lower rate when a player rejects it.
 
 Rewards and server validation stay with the app.
 
 ## Support
 
-Rootless, rootful, RootHide and jailed injection. Targets **iOS 15–18**. **iOS 26 is experimental, with a low chance of working.**
+Rootless, rootful, RootHide and jailed injection. **iOS 15–18**. **iOS 26 is experimental.**
 
-Test release. Some playables still need input. Real-game rewards and device compatibility are unverified. [Ad types](project/docs/AD_TYPES.md) · [Tests](project/docs/VALIDATION.md) · [Cyanide](project/docs/CYANIDE.md).
+Test release. Some playables still need input. [Ad types](project/docs/AD_TYPES.md) · [Tests](project/docs/VALIDATION.md).
 
 Source, tests and build tools are in [`project/`](project/).
 

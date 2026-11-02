@@ -1,9 +1,9 @@
 # AdVanish 0.8.0
 
-- Raise native and web acceleration targets from 16x to 80x.
-- Keep lower playback rates when a player rejects faster speeds.
-- Prevent nested native timer constructors from compressing twice.
-- Respect disabled apps and preserve manual mode.
-- Check Settings/package versions and require Main guard success before publishing.
+- 80x target for native and web acceleration, with 40x/20x/16x/8x/4x/2x fallback when a player rejects it.
+- Native NSTimer countdowns accelerate inside an active ad.
+- Nested timer constructors compress once.
+- Disabled apps skip injection, playback hooks and timers.
+- Manual mode stays idle until a press.
 
-80x is a target, not a guaranteed speed for every creative. Native timers in the supported range may include other app tasks. Server waits and rewards remain controlled by the app. Physical-device behavior remains unverified.
+80x is a target, not a guarantee for every creative. Server waits and rewards stay with the app.
