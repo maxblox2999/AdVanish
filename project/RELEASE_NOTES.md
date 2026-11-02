@@ -1,4 +1,4 @@
-# AdVanish 0.8.6
+# AdVanish 0.8.7
 
 Choose your download:
 
