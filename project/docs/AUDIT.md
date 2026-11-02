@@ -2,6 +2,7 @@
 
 | Issue | Change |
 | --- | --- |
+| Only five ad controllers were recognized | Recognize common SDK full-screen controllers and ad-named controllers |
 | Turning off the fast-forward button disabled automatic mode | Derive the automatic default from the new manual value |
 | Settings could not be saved on rootless | Prefer the real preferences path, then the /var/jb copy |
 | Settings changes did not reach other apps | Write through CFPreferences as well as the plist |
