@@ -168,7 +168,12 @@ static void closeIfEligible(ASPRewardSession *session) {
             session.invalidated = YES;
             return;
         }
-        id value = objectValue(surface.owner, NSSelectorFromString(@"closeButton"));
+        id value = nil;
+        for (NSString *propertyName in @[@"closeButton", @"close", @"skipButton", @"dismissButton", @"xButton"]) {
+            value = objectValue(surface.owner, NSSelectorFromString(propertyName));
+            if ([value isKindOfClass:UIView.class]) break;
+            value = nil;
+        }
         if (![value isKindOfClass:UIView.class]) return;
         UIView *close = value;
         if (!close.userInteractionEnabled ||
@@ -354,8 +359,12 @@ static void installCloseTapRegistration(void) {
     if (type[0] != '@') return;
     IMP original = method_getImplementation(method);
     IMP wrapper = imp_implementationWithBlock(^(UIView *view, SEL action, id target) {
-        BOOL track = [NSThread isMainThread] && gAutoDismiss && namedKind(target, @"ALBaseVideoViewController") &&
-            objectValue(target, NSSelectorFromString(@"closeButton")) == view;
+        BOOL track = NO;
+        if ([NSThread isMainThread] && gAutoDismiss && namedKind(target, @"ALBaseVideoViewController")) {
+            for (NSString *propertyName in @[@"closeButton", @"close", @"skipButton", @"dismissButton", @"xButton"]) {
+                if (objectValue(target, NSSelectorFromString(propertyName)) == view) { track = YES; break; }
+            }
+        }
         NSArray<UIGestureRecognizer *> *before = track ? view.gestureRecognizers.copy : nil;
         ((void (*)(id, SEL, SEL, id))original)(view, selector, action, target);
         if (!track) return;
