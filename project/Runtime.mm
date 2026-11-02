@@ -100,7 +100,7 @@
             @"compatibilityPlayback": @YES,
             @"compressTimers": @(o.timers), @"accelerateClock": @(o.clocks),
             @"forceInline": @(o.inlineVideo), @"recognizedAd": @NO,
-            @"autoComplete": @(o.interaction && o.automatic), @"preventRedirects": @(o.redirects),
+            @"autoComplete": @(o.interaction && o.automatic), @"autoDismiss": @(o.dismissal && o.automatic), @"preventRedirects": @(o.redirects),
             @"hideAppStore": @(o.hideStore),
             @"skipChannel": NSUUID.UUID.UUIDString
         };

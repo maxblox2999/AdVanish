@@ -106,7 +106,7 @@ static id objectGetter(id owner, NSString *name) {
 }
 
 static AVPlayer *ownedAppLovinPlayer(UIViewController *owner) {
-    if (!kindOfNamedClass(owner, @"ALBaseVideoViewController")) return nil;
+    if (!kindOfNamedClass(objectGetter(owner, @"currentAd"), @"ALAd")) return nil;
     // Resolve the owned player through videoPlayer -> videoView -> player.
     id videoView = objectGetter(objectGetter(owner, @"videoPlayer"), @"videoView");
     if (![videoView isKindOfClass:[UIView class]] ||
@@ -244,14 +244,15 @@ ASPAdSurface *ASPFindAdSurface(NSArray<UIWindow *> *windows, BOOL recognizedOnly
         surface.owner = owner ?: front;
         surface.recognized = owner != nil;
         surface.incomplete = incompleteOwners || remaining == 0 || webViews.count > 16;
-        surface.creative = kindOfNamedClass(owner, @"ALBaseVideoViewController") ? objectGetter(owner, @"currentAd") : nil;
+        id creative = objectGetter(owner, @"currentAd");
+        surface.creative = kindOfNamedClass(creative, @"ALAd") ? creative : nil;
         surface.webViews = webViews;
         surface.players = players.array;
         surface.items = [NSMapTable strongToStrongObjectsMapTable];
         for (AVPlayer *player in surface.players) {
             if (player.currentItem) [surface.items setObject:player.currentItem forKey:player];
         }
-        id value = kindOfNamedClass(owner, @"ALBaseVideoViewController") ? objectGetter(owner, @"avPlayer") : nil;
+        id value = surface.creative ? objectGetter(owner, @"avPlayer") : nil;
         if ([value isKindOfClass:[AVPlayer class]]) {
             AVPlayer *sdkPlayer = value;
             AVPlayerItem *item = sdkPlayer.currentItem;

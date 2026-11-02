@@ -1,43 +1,21 @@
-# AdVanish 0.8.8
+# AdVanish 0.8.9
 
 Choose your download:
 
 - rootless.deb - standard rootless jailbreaks.
-- jailed.zip - arm64 IPA injection; inject and re-sign before installing.
+- jailed.zip - arm64 IPA injection; inject and re-sign.
 - rootful.deb - traditional rootful jailbreaks.
 - roothide.deb - RootHide bootstraps only.
 
-Jailbreak DEBs include arm64 and arm64e. Choose by jailbreak, not chip.
+DEBs include arm64 and arm64e. Choose by jailbreak, not chip.
 
 Changes:
 
-- Recognize a much broader set of ad SDK full-screen controllers (Google, AppLovin/MAX, Unity, ironSource, Vungle, Chartboost, AdColony, Mintegral, InMobi, Amazon, Smaato, MoPub) using the original prefix/suffix heuristic, so renamed or newer SDK controllers are not missed.
-- Keep all prior fixes: Hide App Store prompts, manual-only button, categorized settings, CFPreferences, rootless prefs path.
+- Retain 0.8.8 SDK detection and Close getter support.
+- Keep verified completion active across video and interactive end-card stages.
+- Add nested native and accessible HTML Close controls.
+- Support standalone AppLovin playable owners with verified creative identity.
+- Bound scanning, pending web requests and repeated Close actions.
+- Preserve 80x acceleration, manual mode and App Store prompt hiding.
 
-Real game rewards and physical-device compatibility remain unverified.
-
-# AdVanish 0.8.4
-
-Choose your download:
-
-- rootless.deb - standard rootless jailbreaks.
-- jailed.zip - arm64 IPA injection; inject and re-sign before installing.
-- rootful.deb - traditional rootful jailbreaks.
-- roothide.deb - RootHide bootstraps only.
-
-Jailbreak DEBs include arm64 and arm64e for supported older and newer iPhones. Choose by jailbreak, not chip. A compatible jailbreak or IPA signing setup is still required.
-
-Changes:
-
-- Add per-app Hide App Store prompts for supported store sheets, overlays and links during ads.
-- Hide the manual button in automatic mode and keep at most one control per active app scene.
-- Exclude Apple system processes and app extensions from the runtime.
-- Preserve automatic mode when changing button visibility. Reopen the app after changing its settings.
-- Shared checks run first, then rootless - jailed - rootful - RootHide.
-- Settings changes use CFPreferences and the current rootless preferences path.
-- Hiding the fast-forward button keeps automatic mode active.
-- 80x playback target with lower-rate fallback; native countdowns accelerate during a visible ad.
-- Failed simulator recovery stops the checks.
-- Idle macOS queues retry once on Intel.
-
-Real game rewards and physical-device compatibility remain unverified.
+Rewarded dismissal still waits for a genuine SDK reward callback. Opaque cross-origin controls and creatives requiring trusted physical input can remain unsupported. Real-game rewards and physical devices remain unverified.

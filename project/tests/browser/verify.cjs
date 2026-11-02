@@ -14,6 +14,7 @@ const config = {
     rate: 16,
     recognizedAd: false,
     autoComplete: true,
+    autoDismiss: true,
     preventRedirects: true,
     speedVideo: true,
     compressTimers: true,
@@ -1035,6 +1036,51 @@ async function main() {
         assert.equal(result.closes, 0);
         assert.deepEqual(result.errors, []);
     }, true, true, false, 80));
+
+    cases.push(await runCase('authorized-two-stage-web-end-card-closing', `
+        __adspeed.setAdContext(true);
+        let closes = 0;
+        function closeButton(label) {
+            const button = document.createElement('button');
+            button.textContent = label;
+            button.style.cssText = 'position:fixed;top:20px;right:20px;width:120px;height:50px';
+            document.body.append(button);
+            return button;
+        }
+        const first = closeButton('Close ad');
+        first.onclick = () => { closes++; first.remove(); const last = closeButton('Dismiss ad');
+            last.onclick = () => { closes++; last.remove(); }; };
+        await sleep(80);
+        const before = closes;
+        const token = __adspeed.inspectClose();
+        const firstResult = __adspeed.closeCompletedAd(token);
+        const repeated = __adspeed.closeCompletedAd(token);
+        const lastResult = __adspeed.closeCompletedAd(__adspeed.inspectClose());
+        return {...state(),before,closes,firstResult,repeated,lastResult,remaining:__adspeed.inspectClose()};
+    `, result => {
+        assert.equal(result.before, 0);
+        assert.equal(result.closes, 2);
+        assert.equal(result.firstResult, true);
+        assert.equal(result.repeated, false);
+        assert.equal(result.lastResult, true);
+        assert.equal(result.remaining, null);
+        assert.deepEqual(result.errors, []);
+    }));
+    cases.push(await runCase('manual-web-end-card-never-auto-closes', `
+        __adspeed.setAdContext(true);
+        const close = document.createElement('button');
+        close.textContent = 'Close ad';
+        document.body.append(close);
+        let closes = 0;
+        close.onclick = () => closes++;
+        await sleep(300);
+        return {...state(),closes,token:__adspeed.inspectClose(),acted:__adspeed.closeCompletedAd('unissued')};
+    `, result => {
+        assert.equal(result.closes, 0);
+        assert.equal(result.token, null);
+        assert.equal(result.acted, false);
+        assert.deepEqual(result.errors, []);
+    }, true, false));
     const report = {
         sourceSha256,
         browser: version,

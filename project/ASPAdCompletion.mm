@@ -22,6 +22,11 @@
 @property (nonatomic) NSUInteger videoCount;
 @property (nonatomic) BOOL invalidated;
 @property (nonatomic) BOOL closeRequested;
+@property (nonatomic) NSUInteger closeCount;
+@property (nonatomic, strong) NSMapTable<UIView *, NSMutableSet<NSString *> *> *closeActions;
+@property (nonatomic) BOOL webClosePending;
+@property (nonatomic) NSUInteger webCloseGeneration;
+@property (nonatomic, weak) UIView *lastCloseView;
 @property (nonatomic) NSTimeInterval expires;
 @end
 @implementation ASPRewardSession
@@ -57,6 +62,20 @@ static id objectValue(id object, SEL selector) {
     }
 }
 
+static NSArray<NSString *> *closeGetterNames(void) {
+    static NSArray<NSString *> *names;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        names = @[@"closeButton", @"closeButtonView", @"close", @"skipButton",
+            @"dismissButton", @"dismissControl", @"xButton"];
+    });
+    return names;
+}
+
+static BOOL appLovinOwner(id owner) {
+    return namedKind(objectValue(owner, NSSelectorFromString(@"currentAd")), @"ALAd");
+}
+
 static id maxCreative(id ad) {
     if (namedKind(ad, @"ALAd")) return ad;
     if (!namedKind(ad, @"ALMediatedAd") || !namedKind(ad, @"MAAd")) return nil;
@@ -71,6 +90,9 @@ static id maxCreative(id ad) {
 
 static void retireSession(ASPRewardSession *session) {
     session.invalidated = YES;
+    session.closeActions = nil;
+    session.webClosePending = NO;
+    session.webCloseGeneration += 1;
     session.videoItems = nil;
     session.endedItems = nil;
     session.creative = nil;
@@ -86,7 +108,7 @@ static void pruneSessions(void) {
         BOOL changedCreative = !session.google && (!session.creative ||
             objectValue(owner, NSSelectorFromString(@"currentAd")) != session.creative ||
             maxCreative(session.ad) != session.creative);
-        return !session.ad || session.expires <= now || session.closeRequested || session.invalidated ||
+        return !session.ad || session.expires <= now || session.invalidated ||
             detached || changedCreative;
     }];
     [expired enumerateIndexesUsingBlock:^(NSUInteger index, BOOL *stop) {
@@ -126,6 +148,18 @@ static BOOL videoSurfaceMatches(ASPRewardSession *session, ASPAdSurface *surface
     return YES;
 }
 
+static BOOL completedVideoSurfaceMatches(ASPRewardSession *session, ASPAdSurface *surface) {
+    if (!session.videoCompleted || !session.videoCount || session.endedItems.count != session.videoCount) return NO;
+    for (AVPlayer *player in surface.players) {
+        AVPlayerItem *item = player.currentItem;
+        if (![session.endedItems containsObject:item] || player.rate != 0) return NO;
+        double duration = CMTimeGetSeconds(item.duration);
+        double current = CMTimeGetSeconds(player.currentTime);
+        if (!isfinite(duration) || !isfinite(current) || duration <= 0 || current < duration - 0.05) return NO;
+    }
+    return YES;
+}
+
 static BOOL noArgumentAction(id target, SEL action, IMP *implementation) {
     if (!target || !action) return NO;
     Method method = class_getInstanceMethod(object_getClass(target), action);
@@ -141,7 +175,7 @@ static ASPCloseTapRegistration *eligibleCloseTap(UIView *close, UIViewController
     ASPCloseTapRegistration *registration = objc_getAssociatedObject(close, &kCloseTapRegistration);
     UITapGestureRecognizer *gesture = registration.gesture;
     IMP implementation = NULL;
-    if (!registration || registration.invalidated || registration.target != owner || !namedKind(owner, @"ALBaseVideoViewController") ||
+    if (!registration || registration.invalidated || registration.target != owner || !appLovinOwner(owner) ||
         ![gesture isMemberOfClass:UITapGestureRecognizer.class] || !gesture.enabled || gesture.view != close ||
         gesture.numberOfTapsRequired != 1 || gesture.numberOfTouchesRequired != 1 ||
         !noArgumentAction(owner, registration.action, &implementation) || implementation != registration.implementation) return nil;
@@ -152,48 +186,167 @@ static ASPCloseTapRegistration *eligibleCloseTap(UIView *close, UIViewController
     return taps == 1 ? registration : nil;
 }
 
+static void closeIfEligible(ASPRewardSession *session);
+
+static void scheduleNextClose(ASPRewardSession *session) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{
+        closeIfEligible(session);
+    });
+}
+
+static BOOL sessionVisible(ASPRewardSession *session, WKWebView *page) {
+    if (!gAutoDismiss || session.invalidated || !session.ad ||
+        session.expires <= NSProcessInfo.processInfo.systemUptime) return NO;
+    for (ASPAdSurface *surface in ASPManualSkipAdSurfaces()) {
+        if (sameOwner(session, surface) && [surface.webViews containsObject:page] &&
+            ASPViewVisibleInSurface(page, surface.root)) return YES;
+    }
+    return NO;
+}
+
+static void closeWebEndCard(ASPRewardSession *session, ASPAdSurface *surface) {
+    if (session.webClosePending || surface.webViews.count != 1 || session.closeCount >= 8) return;
+    WKWebView *page = surface.webViews.firstObject;
+    if (!sessionVisible(session, page)) return;
+    session.webClosePending = YES;
+    NSUInteger generation = ++session.webCloseGeneration;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (session.webCloseGeneration == generation) {
+            session.webCloseGeneration += 1;
+            session.webClosePending = NO;
+        }
+    });
+    [page callAsyncJavaScript:@"return window.__adspeed && window.__adspeed.inspectClose ? window.__adspeed.inspectClose() : null"
+        arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:^(id value, NSError *error) {
+        if (session.webCloseGeneration != generation) return;
+        if (error || ![value isKindOfClass:NSString.class] || ![value length] ||
+            [value length] > 192 || !sessionVisible(session, page)) {
+            session.webClosePending = NO;
+            return;
+        }
+        [page callAsyncJavaScript:@"return window.__adspeed && window.__adspeed.closeCompletedAd ? window.__adspeed.closeCompletedAd(token) : false"
+            arguments:@{@"token": value} inFrame:nil inContentWorld:WKContentWorld.pageWorld
+            completionHandler:^(id handled, NSError *failure) {
+            if (session.webCloseGeneration != generation) return;
+            session.webClosePending = NO;
+            if (!failure && [handled isEqual:@YES]) {
+                session.closeCount += 1;
+                scheduleNextClose(session);
+            }
+        }];
+    }];
+}
+
+static BOOL exposedClose(UIView *close, ASPAdSurface *surface) {
+    if (!close || !close.userInteractionEnabled || !ASPViewVisibleInSurface(close, surface.root)) return NO;
+    CGPoint point = [close convertPoint:CGPointMake(CGRectGetMidX(close.bounds), CGRectGetMidY(close.bounds))
+                                 toView:close.window];
+    UIView *hit = [close.window hitTest:point withEvent:nil];
+    if (hit != close && ![hit isDescendantOfView:close]) return NO;
+    if ([close isKindOfClass:UIControl.class]) {
+        UIControl *control = (UIControl *)close;
+        return control.enabled && (control.allControlEvents & UIControlEventTouchUpInside) && control.allTargets.count;
+    }
+    return eligibleCloseTap(close, surface.owner) != nil;
+}
+
+static BOOL closeLabel(UIView *view) {
+    NSString *label = view.accessibilityLabel;
+    if (!label.length && [view isKindOfClass:UIButton.class]) label = [(UIButton *)view currentTitle];
+    label = [[label stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    if ([@[@"x", @"×", @"✕", @"✖"] containsObject:label ?: @""]) {
+        CGRect rect = [view convertRect:view.bounds toView:view.window];
+        CGRect bounds = view.window.bounds;
+        if (CGRectGetMidY(rect) > CGRectGetHeight(bounds) * 0.25 ||
+            (CGRectGetMidX(rect) > CGRectGetWidth(bounds) * 0.25 && CGRectGetMidX(rect) < CGRectGetWidth(bounds) * 0.75)) return NO;
+    }
+    return [@[@"close", @"close ad", @"dismiss", @"dismiss ad", @"x", @"×", @"✕", @"✖",
+        @"fermer", @"cerrar", @"schließen", @"fechar", @"chiudi", @"閉じる", @"닫기", @"关闭", @"關閉"] containsObject:label ?: @""];
+}
+
+static UIView *findCloseControl(ASPAdSurface *surface) {
+    for (NSString *name in closeGetterNames()) {
+        id value = objectValue(surface.owner, NSSelectorFromString(name));
+        if ([value isKindOfClass:UIView.class] && exposedClose(value, surface)) return value;
+    }
+    NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:surface.root];
+    UIView *selected = nil;
+    NSUInteger visited = 0;
+    while (pending.count && visited++ < 512) {
+        UIView *view = pending.lastObject;
+        [pending removeLastObject];
+        if ([view isKindOfClass:UIControl.class] && closeLabel(view) && exposedClose(view, surface)) {
+            if (selected && selected != view) return nil;
+            selected = view;
+        }
+        if (pending.count + view.subviews.count > 512) return nil;
+        [pending addObjectsFromArray:view.subviews];
+    }
+    return pending.count ? nil : selected;
+}
+
+static NSString *closeActionKey(UIView *close, ASPAdSurface *surface) {
+    NSMutableArray<NSString *> *parts = NSMutableArray.array;
+    [parts addObject:[NSString stringWithFormat:@"%p", close.superview]];
+    if ([close isKindOfClass:UIControl.class]) {
+        UIControl *control = (UIControl *)close;
+        for (id target in control.allTargets) {
+            for (NSString *action in [control actionsForTarget:target forControlEvent:UIControlEventTouchUpInside]) {
+                [parts addObject:[NSString stringWithFormat:@"%p:%@", target, action]];
+            }
+        }
+    } else {
+        [parts addObject:[NSString stringWithFormat:@"%p", objc_getAssociatedObject(close, &kCloseTapRegistration)]];
+    }
+    for (WKWebView *web in surface.webViews) [parts addObject:[NSString stringWithFormat:@"web:%p", web]];
+    return [[parts sortedArrayUsingSelector:@selector(compare:)] componentsJoinedByString:@"|"];
+}
+
 static void closeIfEligible(ASPRewardSession *session) {
     BOOL eligible = session.requiresReward ? session.rewarded : session.videoCompleted;
-    if (!gAutoDismiss || !eligible || session.closeRequested || session.invalidated ||
+    if (!gAutoDismiss || !eligible || session.closeRequested || session.invalidated || session.closeCount >= 8 ||
         session.expires <= NSProcessInfo.processInfo.systemUptime) return;
-    if (!session.requiresReward) {
-        if (!session.videoCount || session.videoItems.count != session.videoCount) return;
-        for (AVPlayer *player in session.videoItems.keyEnumerator) {
-            if (player.currentItem != [session.videoItems objectForKey:player]) return;
-        }
-    }
     for (ASPAdSurface *surface in ASPManualSkipAdSurfaces()) {
         if (!sameOwner(session, surface)) continue;
-        if (!session.requiresReward && !videoSurfaceMatches(session, surface)) {
+        if (!session.requiresReward && !completedVideoSurfaceMatches(session, surface)) {
             session.invalidated = YES;
             return;
         }
-        id value = nil;
-        for (NSString *propertyName in @[@"closeButton", @"close", @"skipButton", @"dismissButton", @"xButton"]) {
-            value = objectValue(surface.owner, NSSelectorFromString(propertyName));
-            if ([value isKindOfClass:UIView.class]) break;
-            value = nil;
+        if (session.lastCloseView && !exposedClose(session.lastCloseView, surface)) {
+            [session.closeActions removeObjectForKey:session.lastCloseView];
+            session.lastCloseView = nil;
         }
-        if (![value isKindOfClass:UIView.class]) return;
-        UIView *close = value;
-        if (!close.userInteractionEnabled ||
-            !ASPViewVisibleInSurface(close, surface.root)) return;
-        CGPoint point = [close convertPoint:CGPointMake(CGRectGetMidX(close.bounds), CGRectGetMidY(close.bounds))
-                                     toView:close.window];
-        UIView *hit = [close.window hitTest:point withEvent:nil];
-        if (hit != close && ![hit isDescendantOfView:close]) return;
-        if ([close isKindOfClass:UIControl.class]) {
-            UIControl *control = (UIControl *)close;
-            if (!(control.allControlEvents & UIControlEventTouchUpInside) || !control.allTargets.count || !control.enabled) return;
-            session.closeRequested = YES;
-            [control sendActionsForControlEvents:UIControlEventTouchUpInside];
-        } else {
-            ASPCloseTapRegistration *registration = eligibleCloseTap(close, surface.owner);
-            if (!registration) return;
-            // Replay only the SDK's observed X registration after genuine completion.
-            session.closeRequested = YES;
-            ((void (*)(id, SEL))objc_msgSend)(registration.target, registration.action);
+        UIView *close = findCloseControl(surface);
+        if (!close) {
+            closeWebEndCard(session, surface);
+            return;
         }
+        if (!session.closeActions) session.closeActions = [NSMapTable weakToStrongObjectsMapTable];
+        NSString *key = closeActionKey(close, surface);
+        NSMutableSet<NSString *> *actions = [session.closeActions objectForKey:close];
+        if ([actions containsObject:key]) {
+            closeWebEndCard(session, surface);
+            return;
+        }
+        if (!actions) {
+            actions = NSMutableSet.set;
+            [session.closeActions setObject:actions forKey:close];
+        }
+        [actions addObject:key];
+        session.closeCount += 1;
+        session.lastCloseView = close;
+        session.closeRequested = YES;
+        @try {
+            if ([close isKindOfClass:UIControl.class]) {
+                [(UIControl *)close sendActionsForControlEvents:UIControlEventTouchUpInside];
+            } else {
+                ASPCloseTapRegistration *registration = eligibleCloseTap(close, surface.owner);
+                if (registration) ((void (*)(id, SEL))objc_msgSend)(registration.target, registration.action);
+            }
+        } @finally {
+            session.closeRequested = NO;
+        }
+        scheduleNextClose(session);
         return;
     }
 }
@@ -240,7 +393,7 @@ static void observeMAXDisplay(id ad) {
     // A mediated ad without a concrete owned AppLovin surface is unsupported here.
     ASPAdSurface *owned = nil;
     for (ASPAdSurface *surface in surfaces) {
-        if (!namedKind(surface.owner, @"ALBaseVideoViewController") || surface.creative != creative) continue;
+        if (!appLovinOwner(surface.owner) || surface.creative != creative) continue;
         if (owned) return;
         owned = surface;
     }
@@ -270,7 +423,7 @@ static void observeMAXReward(id ad) {
 }
 
 static void captureVideoItems(ASPRewardSession *session) {
-    if (session.requiresReward || session.invalidated) return;
+    if (session.requiresReward || session.invalidated || session.videoCompleted) return;
     for (ASPAdSurface *surface in ASPManualSkipAdSurfaces()) {
         if (!sameOwner(session, surface)) continue;
         if (surface.webViews.count || (session.videoCount && !videoSurfaceMatches(session, surface))) {
@@ -360,9 +513,9 @@ static void installCloseTapRegistration(void) {
     IMP original = method_getImplementation(method);
     IMP wrapper = imp_implementationWithBlock(^(UIView *view, SEL action, id target) {
         BOOL track = NO;
-        if ([NSThread isMainThread] && gAutoDismiss && namedKind(target, @"ALBaseVideoViewController")) {
-            for (NSString *propertyName in @[@"closeButton", @"close", @"skipButton", @"dismissButton", @"xButton"]) {
-                if (objectValue(target, NSSelectorFromString(propertyName)) == view) { track = YES; break; }
+        if (NSThread.isMainThread && gAutoDismiss && appLovinOwner(target)) {
+            for (NSString *name in closeGetterNames()) {
+                if (objectValue(target, NSSelectorFromString(name)) == view) { track = YES; break; }
             }
         }
         NSArray<UIGestureRecognizer *> *before = track ? view.gestureRecognizers.copy : nil;

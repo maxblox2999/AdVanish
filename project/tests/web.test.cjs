@@ -2227,3 +2227,79 @@ test('App Store hiding prevents anchor navigation only in an ad', () => {
         assert.equal(prevented, recognizedAd);
     }
 });
+
+test('an eligible web Close still requires an explicit one-use request', () => {
+    const env = environment({autoDismiss: true});
+    const close = control(env, 'Close ad');
+    env.advance(1000);
+    assert.equal(close.events.length, 0);
+    const token = env.sandbox.__adspeed.inspectClose();
+    assert.equal(typeof token, 'string');
+    assert.equal(env.sandbox.__adspeed.closeCompletedAd(token), true);
+    assert.equal(env.sandbox.__adspeed.closeCompletedAd(token), false);
+    assert.equal(close.events.filter(event => event.type === 'click').length, 1);
+});
+
+test('web end cards accept new Close controls without repeating the previous stage', () => {
+    const env = environment({autoDismiss: true});
+    const first = control(env, 'Close');
+    assert.equal(env.sandbox.__adspeed.closeCompletedAd(env.sandbox.__adspeed.inspectClose()), true);
+    const second = control(env, 'Dismiss ad');
+    assert.equal(env.sandbox.__adspeed.closeCompletedAd(env.sandbox.__adspeed.inspectClose()), true);
+    assert.equal(env.sandbox.__adspeed.inspectClose(), null);
+    assert.equal(first.events.length, 1);
+    assert.equal(second.events.length, 1);
+});
+
+test('web closing preserves manual mode and disabled dismissal settings', () => {
+    for (const config of [{autoDismiss: false}, {autoDismiss: true, automatic: false},
+        {autoDismiss: true, recognizedAd: false}]) {
+        const env = environment(config);
+        control(env, 'Close');
+        assert.equal(env.sandbox.__adspeed.inspectClose(), null);
+    }
+});
+
+test('web Close authorization expires and is invalidated by context changes', () => {
+    const env = environment({autoDismiss: true});
+    const close = control(env, 'Close');
+    const old = env.sandbox.__adspeed.inspectClose();
+    env.sandbox.__adspeed.setAdContext(false);
+    env.sandbox.__adspeed.setAdContext(true);
+    assert.equal(env.sandbox.__adspeed.closeCompletedAd(old), false);
+    const expired = env.sandbox.__adspeed.inspectClose();
+    env.advance(2001);
+    assert.equal(env.sandbox.__adspeed.closeCompletedAd(expired), false);
+    assert.equal(close.events.length, 0);
+});
+
+test('hidden, disabled and ambiguous Close controls do not activate', () => {
+    const env = environment({autoDismiss: true});
+    const close = control(env, 'Close', {disabled: true});
+    assert.equal(env.sandbox.__adspeed.inspectClose(), null);
+    close.disabled = false;
+    const token = env.sandbox.__adspeed.inspectClose();
+    close.hidden = true;
+    assert.equal(env.sandbox.__adspeed.closeCompletedAd(token), false);
+    close.hidden = false;
+    control(env, 'Dismiss');
+    assert.equal(env.sandbox.__adspeed.inspectClose(), null);
+});
+
+test('web dismissal rejects install links and central game X controls', () => {
+    const env = environment({autoDismiss: true});
+    control(env, 'Install');
+    control(env, 'X');
+    control(env, 'Close', {parentElement: {tagName: 'A', parentElement: null}});
+    assert.equal(env.sandbox.__adspeed.inspectClose(), null);
+});
+
+test('web end-card action requests have a bounded per-document limit', () => {
+    const env = environment({autoDismiss: true});
+    for (let index = 0; index < 8; index++) {
+        control(env, 'Close');
+        assert.equal(env.sandbox.__adspeed.closeCompletedAd(env.sandbox.__adspeed.inspectClose()), true);
+    }
+    control(env, 'Close');
+    assert.equal(env.sandbox.__adspeed.inspectClose(), null);
+});

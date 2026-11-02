@@ -333,6 +333,54 @@ static BOOL testRegisteredTapClose(UIViewController *presenter) {
     return YES;
 }
 
+@interface ALPlayableViewController : UIViewController
+@property (nonatomic, strong) ALAd *currentAd;
+@property (nonatomic, strong) UIView *xButton;
+@property (nonatomic) NSUInteger closes;
+@property (nonatomic) NSUInteger rewards;
+- (void)closeAd;
+- (void)didDisplayAd:(id)ad;
+- (void)didRewardUserForAd:(id)ad withReward:(id)reward;
+@end
+@implementation ALPlayableViewController
+- (void)closeAd { self.closes += 1; }
+- (void)didDisplayAd:(id)ad {}
+- (void)didRewardUserForAd:(id)ad withReward:(id)reward { self.rewards += 1; }
+@end
+
+static BOOL testAppLovinPlayableOwner(UIViewController *presenter) {
+    ALPlayableViewController *owner = [ALPlayableViewController new];
+    owner.currentAd = [ALAd new];
+    [presenter addChildViewController:owner];
+    owner.view.frame = presenter.view.bounds;
+    [presenter.view addSubview:owner.view];
+    [owner didMoveToParentViewController:presenter];
+    ALExitButton *close = [[ALExitButton alloc] initWithFrame:CGRectMake(20, 50, 90, 44)];
+    owner.xButton = close;
+    [owner.view addSubview:close];
+    MARewardedAd *sdk = [MARewardedAd new];
+    sdk.delegate = owner;
+    [close al_addTapHandler:@selector(closeAd) toTarget:owner];
+    ALMediatedAd *ad = rewardDescriptor(owner.currentAd);
+    [owner didDisplayAd:ad];
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.closes == 0, @"A standalone AppLovin playable keeps its xButton untouched before reward")) return NO;
+    [owner didRewardUserForAd:ad withReward:[NSObject new]];
+    if (!check(owner.closes == 1 && owner.rewards == 1,
+               @"A standalone AppLovin playable binds its creative and observed xButton action after reward")) return NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.closes == 1, @"Standalone playable polling does not repeat the same X")) return NO;
+    close.hidden = YES;
+    ASPAdCompletionTrackController(owner);
+    close.hidden = NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.closes == 2 && owner.rewards == 1,
+               @"A reused X can close a later stage after the SDK hides and re-enables it")) return NO;
+    [owner.view removeFromSuperview];
+    [owner removeFromParentViewController];
+    return YES;
+}
+
 static void testGoogleRewarded(UIViewController *presenter) {
     __block NSUInteger nilRootRewards = 0;
     GADRewardedAd *nilRoot = [GADRewardedAd new];
@@ -366,6 +414,33 @@ static void testGoogleRewarded(UIViewController *presenter) {
                @"A matching Google SDK reward forwards the app handler and activates Close once")) return;
     ASPAdCompletionTrackController(second.controller);
     if (!check(second.controller.closes == 1, @"Google reward observation cannot duplicate dismissal")) return;
+    [second.controller.closeButton removeFromSuperview];
+    second.controller.closeButton = nil;
+    UIView *endCard = [[UIView alloc] initWithFrame:second.controller.view.bounds];
+    [second.controller.view addSubview:endCard];
+    UIButton *nextClose = [UIButton buttonWithType:UIButtonTypeSystem];
+    nextClose.frame = CGRectMake(20, 50, 90, 44);
+    [nextClose setTitle:@"Close ad" forState:UIControlStateNormal];
+    [nextClose addTarget:second.controller action:@selector(closeAd) forControlEvents:UIControlEventTouchUpInside];
+    [endCard addSubview:nextClose];
+    ASPAdCompletionTrackController(second.controller);
+    if (!check(second.controller.closes == 2 && secondRewards == 1,
+               @"A rewarded presentation keeps eligibility for a nested end-card Close without a closeButton getter")) return;
+    ASPAdCompletionTrackController(second.controller);
+    if (!check(second.controller.closes == 2, @"An unchanged end-card Close cannot repeat")) return;
+    [nextClose removeFromSuperview];
+    UIButton *finalClose = [UIButton buttonWithType:UIButtonTypeSystem];
+    finalClose.frame = CGRectMake(20, 50, 90, 44);
+    [finalClose setTitle:@"Dismiss ad" forState:UIControlStateNormal];
+    [finalClose addTarget:second.controller action:@selector(closeAd) forControlEvents:UIControlEventTouchUpInside];
+    [endCard addSubview:finalClose];
+    finalClose.enabled = NO;
+    ASPAdCompletionTrackController(second.controller);
+    if (!check(second.controller.closes == 2, @"A later end-card countdown keeps its disabled Close untouched")) return;
+    finalClose.enabled = YES;
+    ASPAdCompletionTrackController(second.controller);
+    if (!check(second.controller.closes == 3 && secondRewards == 1,
+               @"A newly enabled final end-card Close runs without synthesizing a reward")) return;
     [second.controller.view removeFromSuperview];
     [second.controller removeFromParentViewController];
     GADRewardedAd *withoutHandler = [GADRewardedAd new];
@@ -378,6 +453,7 @@ static void testGoogleRewarded(UIViewController *presenter) {
     [withoutHandler.controller.view removeFromSuperview];
     [withoutHandler.controller removeFromParentViewController];
     if (!testRegisteredTapClose(presenter)) return;
+    if (!testAppLovinPlayableOwner(presenter)) return;
     result(nil);
 }
 

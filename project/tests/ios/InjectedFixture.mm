@@ -281,6 +281,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 - (void)runManualNative:(ALBaseVideoViewController *)owner;
 - (void)runManualComposite;
 - (void)runRegisteredTapChecks;
+- (void)runEndCardCheck:(ALBaseVideoViewController *)owner;
 @end
 @implementation InjectedDelegate
 - (void)runRegisteredTapChecks {
@@ -356,9 +357,36 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
         if (!check(visibleSkipWindows() == 0 && !AVNBlocksURL([NSURL URLWithString:@"https://apps.apple.com/app/id1"]),
                    @"Hidden app content releases floating controls and Store suppression")) return;
         self.window.hidden = NO;
-        [owner.view removeFromSuperview];
-        [owner removeFromParentViewController];
-        result(nil);
+        [self runEndCardCheck:owner];
+    });
+}
+- (void)runEndCardCheck:(ALBaseVideoViewController *)owner {
+    [owner.closeButton removeFromSuperview];
+    owner.closeButton = nil;
+    WKWebView *endCard = [[WKWebView alloc] initWithFrame:owner.view.bounds];
+    [owner.view addSubview:endCard];
+    [endCard loadHTMLString:@"<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<script>window.endCardCloses=0;function makeClose(label){const b=document.createElement('button');"
+        "b.textContent=label;b.style.cssText='position:fixed;right:20px;top:20px;width:140px;height:50px';"
+        "b.onclick=()=>{window.endCardCloses++;b.remove();if(window.endCardCloses===1)makeClose('Dismiss ad')};document.body.append(b)};"
+        "addEventListener('DOMContentLoaded',()=>makeClose('Close ad'));</script><body></body>"
+        baseURL:[NSURL URLWithString:@"https://advanish-fixture.invalid/end-card"]];
+    ASPManualSkipTrackWebView(endCard);
+    AVNObserveController(owner);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [endCard evaluateJavaScript:@"({closes:window.endCardCloses,engine:!!window.__adspeed})"
+            completionHandler:^(id state, NSError *error) {
+            if (!check(!error && [state isKindOfClass:NSDictionary.class] && [state[@"engine"] boolValue],
+                       @"The production engine initializes in a replacement interactive end card")) return;
+            if (!check([state[@"closes"] unsignedIntegerValue] == (manualMode ? 0u : 2u),
+                       manualMode ? @"Manual mode never presses either web end-card Close" :
+                           @"A genuine SDK reward authorizes both web end-card Close stages")) return;
+            if (!check(owner.rewardEvents == 2,
+                       @"Web end-card dismissal never fabricates a second SDK reward")) return;
+            [owner.view removeFromSuperview];
+            [owner removeFromParentViewController];
+            result(nil);
+        }];
     });
 }
 - (UIButton *)manualButton {
