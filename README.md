@@ -2,7 +2,11 @@
 
 # AdVanish
 
-80x ad fast-forwarding for iOS.
+Hate having ads shoved in your face? Got a jailbroken device? **AdVanish has you covered!**
+
+Built for modern iOS versions, with support for different jailbreak types, plus a jailed build for devices without a jailbreak.
+
+**Less waiting. Fewer interruptions. Rights to have fun.**
 
 [![Build](https://github.com/maxblox2999/AdVanish/actions/workflows/build.yml/badge.svg)](https://github.com/maxblox2999/AdVanish/actions)
 [![Test release](https://img.shields.io/github/v/release/maxblox2999/AdVanish?include_prereleases&style=flat-square&color=8957e5)](https://github.com/maxblox2999/AdVanish/releases)
