@@ -243,6 +243,7 @@ function video(env, overrides = {}) {
             }
         },
         playbackRate: {
+            configurable: true,
             get() {
                 return playbackRate;
             },
