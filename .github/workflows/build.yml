@@ -3,7 +3,13 @@ name: Build
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.github/workflows/docs.yml'
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
     inputs:
       runner:
@@ -200,11 +206,27 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check published version
+        id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v$(awk '/^Version:/ {print $2}' project/control)"
+          tags=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name')
+          if printf '%s\n' "$tags" | grep -Fxq "$tag"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$tag is already published; its downloads are unchanged." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: steps.published.outputs.exists != 'true'
         with:
           pattern: advanish-*-${{ github.sha }}
           path: incoming
       - name: Require Main guard success for this commit
+        if: steps.published.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -212,8 +234,10 @@ jobs:
           guard=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/guard.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=10" --jq '.workflow_runs[0].conclusion')
           test "$guard" = success || { echo "Main guard has not passed for this commit: $guard"; exit 1; }
       - name: Validate release artifacts and full source
+        if: steps.published.outputs.exists != 'true'
         run: python3 project/scripts/prepare-release.py
       - name: Publish test build
+        if: steps.published.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -230,8 +254,10 @@ jobs:
           gh release create "$tag" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AdVanish $version" --notes-file release-notes.md --prerelease --draft
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
       - name: Verify public downloads
+        if: steps.published.outputs.exists != 'true'
         run: python3 project/scripts/verify-release.py
       - name: Remove superseded releases
+        if: steps.published.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

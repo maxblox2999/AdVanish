@@ -1,24 +1,32 @@
-# Ad types
+# Ad support
 
-Automatic mode applies 80x playback and web timing throughout each enabled app, including non-ad media. Ad detection still controls generated interaction and completion.
+Automatic mode accelerates video and web timing throughout enabled apps, including non-ad content. Detection controls interaction and closing. Recognition alone does not mean an ad can finish automatically.
 
-Detection, acceleration, completion and rewards are separate. Recognizing an ad does not mean its creative can be completed automatically. No supplied game has passed a physical-device reward test here.
-
-| Ad path | Acceleration | Automatic Close |
+| Ad type | Acceleration | Automatic closing |
 | --- | --- | --- |
-| AVPlayer video in an enabled app | 80x first; lower-rate fallback including 16x/8x/4x/2x after rejection, no seek | Supported Google ordinary-video completion or a matching genuine rewarded event |
-| HTML video, including nested frames | 80x automatic playback; manual requests retain surface selection | Requires a supported native SDK completion path |
-| MRAID playable using JS timers or elapsed time | Timer, clock and animation-frame acceleration | No universal playable-complete callback; native SDK eligibility is still required |
-| CSS and Web Animations in an enabled app | 80x running-animation rate relative to its base; pause and cleanup preserved | Animation end does not fabricate an SDK reward |
-| Playable with explicit gameplay controls | Bounded tap/swipe assistance in automatic mode; native-owned non-MRAID surfaces are included | Same SDK completion requirements |
-| Playable with decorative video | Manual timing can run while looped, ended or paused media remains unchanged | Same SDK completion requirements |
-| One SDK-owned native/web pair | One validated manual request can accelerate both parts | Same SDK completion requirements |
-| Canvas/WebGL logic advancing once per rendered frame | Time-based code may accelerate; fixed-step code may not | No generic solver or invented completion event |
-| Native static/end-card countdown | NSTimer countdowns accelerate while an ad surface is active | Server reward checks and Close eligibility are unchanged |
-| Worker, remote or trusted-touch-only creative | Not verified; worker timing is not hooked | May require actual interaction |
-| Banner, native-feed or live media | No generic fullscreen skip | No automatic removal adapter |
-| Native video followed by an end card | Video can accelerate; the end-card phase has its own requirements | Video end alone cannot close a mixed or rewarded session |
+| AVPlayer video | 80x, then 40x/20x/16x/8x/4x/2x if rejected; no seeking | Supported Google video completion or a matching SDK reward event |
+| HTML video and nested frames | Playback speed; manual mode selects an eligible surface | Requires native SDK eligibility |
+| MRAID, HTML5 and time-based playables | JS timers, clocks, animation frames and running CSS/Web Animations | Requires native SDK eligibility |
+| Playables with exposed controls | Limited tap/swipe assistance in automatic mode | Requires native SDK eligibility |
+| Playables with decorative video | Manual timing leaves paused, looped and ended video alone | Requires native SDK eligibility |
+| One SDK-owned native/web pair | One manual request can accelerate both parts | Requires native SDK eligibility |
+| Canvas/WebGL | Time-based logic may accelerate; fixed-step logic may not | No generic gameplay solver |
+| Native countdowns | 0.5-30s NSTimer intervals during a detected ad | SDK and server requirements still apply |
+| Video followed by an end card | Each phase keeps its own completion requirements | Video ending alone cannot close a mixed or rewarded session |
+| Google banner views | Optional Block ad banners, off by default | Blocks SDK loads and removes views; game-reserved space can remain |
+| Other banners and native feeds | No dedicated removal adapter | Unsupported |
+| Workers, remote gates and trusted-touch creatives | Worker clocks are not hooked | May require real interaction |
 
-The manual button selects an eligible video or a recognized playable timing surface. It does not solve arbitrary games, grant rewards or force controller dismissal. Ambiguous surfaces, inaccessible frames, stale sessions and rejected playback rates abstain rather than selecting unrelated media.
+## Completion paths
 
-Manual timing freezes its primary playable node. Replacing that node requires a new press; same-node countdown updates keep their speed. [Completion adapters](SUPPORT.md) · [Test scope](VALIDATION.md).
+- Google rewarded: the captured ad must receive its original SDK reward callback.
+- Google video interstitial/app-open: captured video items must finish, without a mixed web phase.
+- AppLovin MAX: reward and creative must belong to the validated AppLovin adapter.
+- AppLovin X view: the visible Close view must retain its enabled SDK tap registration.
+- Other mediation adapters: no reward-based closing without a supported ownership path.
+
+Unity containers and recognized MRAID, VPAID, HSADX, VSDK and Canvas/WebGL surfaces can use the existing acceleration. Other networks receive app-wide playback and web timing without a dedicated reward adapter.
+
+Manual mode waits for a button press and never closes automatically. It does not solve arbitrary games or grant rewards. Replacing a playable's selected node requires another press.
+
+Opaque frames, ambiguous surfaces, remote waits and inaccessible Close controls remain gaps. Real-game closing and rewards need physical-device tests. See [test scope](VALIDATION.md).

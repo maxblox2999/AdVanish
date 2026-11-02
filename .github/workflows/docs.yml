@@ -1,0 +1,121 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - '**/*.md'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check documentation links
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          from urllib.parse import unquote, urlsplit
+
+          root = Path.cwd()
+          failures = []
+          checked = 0
+          for source in root.rglob("*.md"):
+              if ".git" in source.parts:
+                  continue
+              for target in re.findall(r"\[[^\]]*\]\(([^\s)]+)\)", source.read_text()):
+                  parsed = urlsplit(target)
+                  if parsed.scheme or parsed.netloc:
+                      continue
+                  path = source.parent / unquote(parsed.path) if parsed.path else source
+                  if not path.exists():
+                      failures.append(f"{source.relative_to(root)}: {target}")
+                  checked += 1
+          if failures:
+              raise SystemExit("\n".join(failures))
+          print(f"{checked} local documentation links checked")
+          PY
+
+  release_notes:
+    needs: links
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Update release descriptions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import tempfile
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def api(path):
+              return json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/{path}"], text=True))
+
+          history = Path("project/docs/CHANGES.md").read_text()
+          sections = {
+              "v" + match[0]: match[1].strip()
+              for match in re.findall(r"^## ([^\n]+)\n(.*?)(?=^## |\Z)", history, re.M | re.S)
+          }
+          options = {
+              "rootless.deb": "rootless jailbreaks",
+              "rootful.deb": "rootful jailbreaks",
+              "roothide.deb": "RootHide",
+              "jailed.zip": "arm64 IPA injection; re-sign before installing",
+          }
+          releases = api("releases?per_page=100")
+          published = [release for release in releases if not release["draft"]]
+          missing = [release["tag_name"] for release in published if release["tag_name"] not in sections]
+          if missing:
+              raise SystemExit("Missing release entries: " + ", ".join(missing))
+          updated = 0
+          with tempfile.TemporaryDirectory() as temporary:
+              notes = Path(temporary) / "notes.md"
+              for release in published:
+                  tag = release["tag_name"]
+                  downloads = [
+                      f"- {suffix}: {description}."
+                      for suffix, description in options.items()
+                      if any(asset["name"].endswith("-" + suffix) for asset in release["assets"])
+                  ]
+                  body = sections[tag] + "\n\n"
+                  if downloads:
+                      body += "Downloads:\n\n" + "\n".join(downloads) + "\n\n"
+                  body += "Test build. Real-game closing and rewards remain unverified.\n"
+                  if release["body"] == body:
+                      continue
+                  head = api("git/ref/heads/main")["object"]["sha"]
+                  if head != os.environ["GITHUB_SHA"]:
+                      raise SystemExit("A newer commit supersedes these descriptions")
+                  notes.write_text(body)
+                  subprocess.run(["gh", "release", "edit", tag, "--repo", repo,
+                                  "--notes-file", str(notes)], check=True)
+                  if api(f"releases/{release['id']}")["body"] != body:
+                      raise SystemExit("Release description verification failed: " + tag)
+                  updated += 1
+          print(f"{updated} release descriptions updated and verified")
+          PY

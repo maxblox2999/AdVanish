@@ -1,20 +1,8 @@
 # AdVanish 0.8.11
 
-Choose your download:
+- Added Pangle, OpenWrap, Chartboost and HyprMX controller recognition and scoped Store suppression.
+- Reused Close controls can advance when an eligible label changes; countdown labels cannot rearm them.
 
-- rootless.deb - standard rootless jailbreaks.
-- jailed.zip - arm64 IPA injection; inject and re-sign.
-- rootful.deb - traditional rootful jailbreaks.
-- roothide.deb - RootHide bootstraps only.
+Downloads: rootless.deb for standard rootless jailbreaks; rootful.deb for rootful; roothide.deb for RootHide; jailed.zip for arm64 IPA injection and re-signing. DEBs include arm64 and arm64e.
 
-DEBs include arm64 and arm64e. Choose by jailbreak, not chip.
-
-Changes:
-
-- Recognize additional Pangle, OpenWrap, Chartboost and HyprMX ad controllers.
-- Apply existing Store redirect and overlay suppression to those recognized surfaces.
-- Allow an eligible reused Close button to advance after its Close label changes.
-- Keep unchanged controls deduplicated and countdown labels ineligible.
-- Preserve 80x speed, Google banner blocking, manual mode and genuine reward checks.
-
-Recognition does not guarantee automatic closing for every SDK. Real-game rewards and physical devices remain unverified.
+Automatic closing has limited coverage. Physical-device behavior and real-game rewards remain unverified.

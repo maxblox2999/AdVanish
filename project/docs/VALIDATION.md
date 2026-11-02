@@ -1,6 +1,6 @@
 # Tests
 
-Run from `project/`:
+Run from project/:
 
 ```sh
 node scripts/embed-web.cjs
@@ -9,9 +9,9 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 node tests/browser/verify.cjs
 ```
 
-The browser runner needs Node.js 22+ and Edge, or a Chromium executable in `BROWSER_PATH`.
+Browser tests need Node.js 22+ and Edge, or Chromium set through BROWSER_PATH.
 
-On macOS with Xcode and an iOS Simulator:
+On macOS, install Xcode and an iOS Simulator:
 
 ```sh
 python3 scripts/test-ios.py --video tests/ios/fixture.mp4
@@ -19,8 +19,8 @@ python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --output di
 python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --manual --output dist/ios-injected-manual.json
 ```
 
-Actions builds and inspects each package. Simulator fixtures run production hooks against real UIKit, AVPlayer and WebKit; SDK events and rejected-rate behavior are mocked. Browser fixtures cover video, playable timing, frames, controls, animations and cleanup. Package checks cover layout, architecture, loader dependencies and minimum iOS.
+Actions also runs the production Settings fixture. Simulator tests use real UIKit, AVPlayer and WebKit with mocked SDK events and rate rejection. Browser tests cover video, playable timing, frames, controls, animations and cleanup.
 
-Release validation records the exact source commit and test results.
+Package checks verify layout, architecture, dependencies and minimum iOS. Release reports record the tested source commit.
 
-Settings has its own simulator fixture that opens the production root and app pages against Apple's real Preferences.framework. It covers reentrant title construction, navigation, mutable row caching and rejected private getters.
+These checks do not establish real-game ad closing, reward payouts or physical-device compatibility.

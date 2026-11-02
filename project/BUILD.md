@@ -1,14 +1,12 @@
 # Build
 
-Fork the repository, enable Actions and run Build on `main`. Artifacts contain rootless, rootful, RootHide, jailed and full-source builds.
+Fork the repository, enable Actions, then run Build on main. Checks run once before packaging: rootless, jailed, rootful, then RootHide. Each package is uploaded as it finishes.
 
-All shared tests run in one checks job before packaging: rootless - jailed - rootful - RootHide. Each package is uploaded when its build finishes; publishing waits for all four builds and every required check.
-
-Push builds retry once on `macos-15-intel` after five minutes with queued macOS jobs and none running. Running jobs and failed tests are left alone. You can also select the runner under Run workflow.
+Publishing requires all checks and packages to pass. An existing release is kept; bump the package version to publish another. Select the macOS runner under Run workflow. An idle push build can retry once on Intel before any macOS job has finished.
 
 ## macOS
 
-Requires Xcode, Node.js 18+ and Python 3.9+. Run from `project/`:
+Requires Xcode, Node.js 22+ and Python 3.9+. Run from project/:
 
 ```sh
 brew install make ldid dpkg node python
@@ -20,7 +18,7 @@ bash scripts/build.sh rootful
 bash scripts/build.sh jailed
 ```
 
-RootHide uses its own pinned Theos checkout:
+RootHide needs its separate toolchain:
 
 ```sh
 bash scripts/setup-theos.sh .theos-tools-roothide roothide
@@ -28,19 +26,19 @@ export THEOS="$PWD/.theos-tools-roothide/theos"
 bash scripts/build.sh roothide
 ```
 
-Outputs: `dist/<variant>/`. Verify its `SHA256SUMS`. [Dependency pins](build/dependencies.env) - [Tests](docs/VALIDATION.md).
+Packages and SHA256SUMS are in dist/<variant>/. Builds use the [pinned dependencies](build/dependencies.env).
 
 ## IPA injection
 
-Extract the jailed ZIP and run:
+Extract the jailed ZIP:
 
 ```sh
 python3 inject-ipa.py Game.ipa --framework AdVanish.framework --output Game-AdVanish-unsigned.ipa
 python3 sign-ipa.py Game-AdVanish-unsigned.ipa --output Game-AdVanish-signed.ipa --identity "Apple Development: Your Name (TEAMID)" --profile Game.mobileprovision
 ```
 
-The injector keeps the original IPA and accepts authorized decrypted, thin arm64 executables with enough header padding. Encrypted, fat, arm64e, duplicate and unsafe archives are rejected. The optional macOS signer handles one app with a matching profile; extensions need another signing tool.
+The injector preserves the input IPA. It requires an authorized decrypted, thin arm64 executable with header padding. Encrypted, fat, arm64e and unsafe archives are rejected. The macOS signer handles one app with a matching profile; extensions need a separate signing tool.
 
-Optional `--config AdVanish.plist` accepts boolean keys: `Enabled`, `AutomaticAds`, `ManualSkip`, `SpeedUpVideo`, `CompressTimers`, `AccelerateClock`, `ForceInline`, `AutoInteract`, `AutoDismiss`, `BlockRedirects`, `HideAppStore`. The app's `NSUserDefaults` dictionary `AdVanish` overrides them. `AutomaticAds=false` requires the button and disables automatic input and Close.
+Optional --config AdVanish.plist accepts booleans: Enabled, AutomaticAds, ManualSkip, SpeedUpVideo, CompressTimers, AccelerateClock, ForceInline, AutoInteract, AutoDismiss, BlockRedirects, HideAppStore and BlockBanners. The app's AdVanish NSUserDefaults dictionary overrides them. AutomaticAds=false enables button-only acceleration and disables automatic input and closing.
 
-Hooks use Logos. Every build needs the pinned Theos checkout. Jailbreak packages use the MobileSubstrate generator; jailed builds use the internal generator and need no Substrate.
+Hooks use Logos. Jailbreak builds use the MobileSubstrate generator; injected frameworks use the internal generator and do not require Substrate.

@@ -4,36 +4,33 @@
 
 80x ad fast-forwarding for iOS.
 
-[![Build](https://github.com/maxblox2999/AdVanish/actions/workflows/build.yml/badge.svg)](https://github.com/maxblox2999/AdVanish/actions)
+[![Build](https://github.com/maxblox2999/AdVanish/actions/workflows/build.yml/badge.svg)](https://github.com/maxblox2999/AdVanish/actions/workflows/build.yml)
 [![Test release](https://img.shields.io/github/v/release/maxblox2999/AdVanish?include_prereleases&style=flat-square&color=8957e5)](https://github.com/maxblox2999/AdVanish/releases)
 ![iOS target](https://img.shields.io/badge/iOS-15--18_target-333333?style=flat-square&logo=apple)
 
-[Download](https://github.com/maxblox2999/AdVanish/releases) | [Build your own](project/BUILD.md)
+[Download](https://github.com/maxblox2999/AdVanish/releases) | [Build](project/BUILD.md)
 
 </div>
 
+## Install
+
+| Setup | Download |
+| --- | --- |
+| Rootless jailbreak | rootless.deb |
+| Rootful jailbreak | rootful.deb |
+| RootHide bootstrap | roothide.deb |
+| IPA injection | jailed.zip, then inject and re-sign |
+
+DEBs include arm64 and arm64e. Targets iOS 15-18; iOS 26 is experimental and has a low chance of working.
+
 ## Use
 
-Jailbreak: install the matching rootless, rootful or RootHide package. Apps are enabled by default; open Settings -> AdVanish to disable one.
+Open Settings -> AdVanish. Apps are enabled by default. Turn off Automatic ads for button-only acceleration. Reopen the game after changing settings.
 
-Jailed: inject the framework into an authorized decrypted IPA, then re-sign it. [Instructions](project/BUILD.md#ipa-injection).
+Video and web timing target 80x, with lower-rate fallback. Automatic mode also speeds non-ad media in enabled apps. Google banner blocking is optional.
 
-Automatic ads enables acceleration and completion. Turn it off for button-only acceleration. Targets 80x, falling back to a lower rate when a player rejects it.
+Automatic closing has limited coverage and is still unreliable in real games. Rewards require normal SDK completion and server validation. Simulator checks do not verify real-game rewards.
 
-Rewards and server validation stay with the app.
+[Ad support](project/docs/AD_TYPES.md) | [Tests](project/docs/VALIDATION.md) | [Changes](project/docs/CHANGES.md)
 
-## Support
-
-Compatibility: rootless, rootful, RootHide and jailed injection.
-iOS versions: 15-18. iOS 26 is experimental.
-Ad types: supports reward-based ads, including server-sided ones. Designed to be universal, but may not detect every ad type.
-
-Known issue: long sessions can cause performance issues and slower ad completions. Reopen the app if that happens and report via an issue. The ad detection rate is high; if an ad is not skipped it is likely detected but not yet supported. Auto-completion is still a work in progress with limited coverage.
-
-See [Ad types](project/docs/AD_TYPES.md) and [Tests](project/docs/VALIDATION.md).
-
-Source, tests and build tools are in [project/](project/).
-
----
-
-[maxblox2999](https://github.com/maxblox2999) | [Changes](project/docs/AUDIT.md) | [License](LICENSE)
+[maxblox2999](https://github.com/maxblox2999) | [License](LICENSE)
