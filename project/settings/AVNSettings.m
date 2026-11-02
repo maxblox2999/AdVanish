@@ -3,7 +3,10 @@
 #import <Preferences/PSListController.h>
 #import <Preferences/PSSpecifier.h>
 #import <objc/message.h>
+#import <CoreFoundation/CFPreferences.h>
 #import "../ASPPaths.h"
+
+static NSString *const kAVNPreferencesDomain = @"com.34306-sr.adspeed";
 
 
 static id AVNSettingsObject(id receiver, NSString *name) {
@@ -23,7 +26,7 @@ static id AVNSettingsObject(id receiver, NSString *name) {
 
 @implementation AVNSettingsController
 - (NSArray<NSString *> *)preferencePaths {
-    return ASPPrefsPaths(@"com.34306-sr.adspeed");
+    return ASPPrefsPaths(kAVNPreferencesDomain);
 }
 - (NSMutableDictionary *)database {
     if (!self.cachedValues) {
@@ -56,7 +59,22 @@ static id AVNSettingsObject(id receiver, NSString *name) {
         if (!database[automatic]) database[automatic] = @(![value boolValue]);
     }
     database[key] = value;
-    if (!ASPWritePreferencesAtPaths(database, self.preferencePaths)) {
+    CFStringRef domain = (__bridge CFStringRef)kAVNPreferencesDomain;
+    for (NSString *name in database) {
+        id stored = database[name];
+        if ([stored isKindOfClass:NSNumber.class] || [stored isKindOfClass:NSString.class] ||
+            [stored isKindOfClass:NSArray.class] || [stored isKindOfClass:NSDictionary.class]) {
+            CFPreferencesSetAppValue((__bridge CFStringRef)name, (__bridge CFPropertyListRef)stored, domain);
+        }
+    }
+    CFPreferencesAppSynchronize(domain);
+    BOOL saved = ASPWritePreferencesAtPaths(database, self.preferencePaths);
+    if (!saved) {
+        CFPropertyListRef roundTrip = CFPreferencesCopyAppValue((__bridge CFStringRef)key, domain);
+        saved = roundTrip != NULL;
+        if (roundTrip) CFRelease(roundTrip);
+    }
+    if (!saved) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"AdVanish" message:@"Could not save settings." preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];

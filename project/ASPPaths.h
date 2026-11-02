@@ -10,20 +10,22 @@ static inline NSArray<NSString *> *ASPPrefsPaths(NSString *domain) {
 #ifdef ADSPEED_ROOTHIDE
     return @[jbroot(path)];
 #elif defined(ADSPEED_ROOTLESS)
-    return @[[@"/var/jb" stringByAppendingString:path], path];
+    return @[path, [@"/var/jb" stringByAppendingString:path]];
 #else
     return @[path];
 #endif
 }
 
 static inline BOOL ASPWritePreferencesAtPaths(NSDictionary *values, NSArray<NSString *> *paths) {
-    BOOL wrote = NO;
+    for (NSString *path in paths) {
+        if ([values writeToFile:path atomically:YES]) return YES;
+    }
     for (NSString *path in paths) {
         [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent
             withIntermediateDirectories:YES attributes:nil error:nil];
-        if ([values writeToFile:path atomically:YES]) wrote = YES;
+        if ([values writeToFile:path atomically:YES]) return YES;
     }
-    return wrote;
+    return NO;
 }
 
 static inline NSDictionary *ASPReadPreferencesAtPaths(NSArray<NSString *> *paths) {

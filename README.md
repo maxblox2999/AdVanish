@@ -14,7 +14,7 @@
 
 ## Use
 
-**Jailbreak:** install the matching rootless, rootful or RootHide package. Enable the app in **Settings → AdVanish** and reopen it.
+**Jailbreak:** install the matching rootless, rootful or RootHide package. Apps are enabled by default; open **Settings → AdVanish** to disable one.
 
 **Jailed:** inject the framework into an authorized decrypted IPA, then re-sign it. [Instructions](project/BUILD.md#ipa-injection).
 

@@ -1,11 +1,9 @@
-# Game-ad coverage
+# Coverage
 
-Integration coverage includes AppLovin, Google Mobile Ads, Unity Ads, ironSource and Vungle callback paths, plus recognized web surfaces using MRAID, VPAID, HSADX, VSDK and Canvas/WebGL. Detection markers and mediation adapters do not establish compatibility with every provider or creative.
+Completion hooks exist for Google full-screen ads (rewarded, interstitial, app open) and AppLovin MAX rewarded ads. Unity Ads full-screen containers and recognized web surfaces (MRAID, VPAID, HSADX, VSDK, Canvas/WebGL) get video speed, timer speed and the manual button. Every other network gets app-wide video speed and web timing, not a provider-specific completion path.
 
-The 0.5.1 audit found:
-- Explicitly native-authorized non-MRAID playables were excluded from the existing semantic tap/swipe assistance.
-- A manual timing request did not freeze the playable node, allowing a replacement to inherit its speed.
+Detection markers and mediation adapters do not guarantee every provider or creative.
 
-Regression tests cover those contracts. Browser and simulator fixtures use controlled creatives and mocked SDK events. They do not demonstrate compatibility with 100 providers or confirm real-game rewards.
+Known gaps: fixed-step render loops, worker clocks, trusted-touch requirements and remote reward gates. Native `NSTimer` countdowns compress only while an ad surface is active in automatic mode.
 
-Unsupported cases still include fixed-step render loops, worker clocks, trusted-touch requirements and remote reward gates. Native NSTimer countdowns are compressed only while an ad surface is active in automatic mode. A real provider result needs a specific SDK version, actual creative and physical-device run.
+Browser and simulator fixtures use controlled creatives and mocked SDK events. A provider result needs a specific SDK version, an actual creative and a physical-device run.
