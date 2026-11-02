@@ -2,6 +2,8 @@
 
 | Issue | Change |
 | --- | --- |
+| Turning off the fast-forward button disabled automatic mode | Derive the automatic default from the new manual value |
+| Settings could not be saved on rootless | Write every configured preferences path |
 | Manual button did not disable automatic actions | Separate automatic mode; manual mode requires a press |
 | Nested MRAID frames lost ad context | Propagate visible parent authorization and revoke it when covered |
 | Decorative videos blocked playable requests | Recognized playables can request timing without changing paused, looped or ended videos |

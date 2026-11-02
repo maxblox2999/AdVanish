@@ -53,13 +53,10 @@ static id AVNSettingsObject(id receiver, NSString *name) {
     NSMutableDictionary *database = self.database.mutableCopy;
     if ([key isEqualToString:[self storageKey:@"ManualSkip"]]) {
         NSString *automatic = [self storageKey:@"AutomaticAds"];
-        if (!database[automatic]) database[automatic] = @(![database[key] boolValue]);
+        if (!database[automatic]) database[automatic] = @(![value boolValue]);
     }
     database[key] = value;
-    NSString *file = self.preferencePaths.firstObject;
-    [NSFileManager.defaultManager createDirectoryAtPath:file.stringByDeletingLastPathComponent
-        withIntermediateDirectories:YES attributes:nil error:nil];
-    if (![database writeToFile:file atomically:YES]) {
+    if (!ASPWritePreferencesAtPaths(database, self.preferencePaths)) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"AdVanish" message:@"Could not save settings." preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];

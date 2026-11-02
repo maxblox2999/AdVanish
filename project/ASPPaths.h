@@ -16,8 +16,14 @@ static inline NSArray<NSString *> *ASPPrefsPaths(NSString *domain) {
 #endif
 }
 
-static inline NSString *ASPPrefsWritePath(NSString *domain) {
-    return ASPPrefsPaths(domain).firstObject;
+static inline BOOL ASPWritePreferencesAtPaths(NSDictionary *values, NSArray<NSString *> *paths) {
+    BOOL wrote = NO;
+    for (NSString *path in paths) {
+        [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent
+            withIntermediateDirectories:YES attributes:nil error:nil];
+        if ([values writeToFile:path atomically:YES]) wrote = YES;
+    }
+    return wrote;
 }
 
 static inline NSDictionary *ASPReadPreferencesAtPaths(NSArray<NSString *> *paths) {
