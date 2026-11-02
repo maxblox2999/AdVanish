@@ -1,3 +1,21 @@
+# AdVanish 0.8.5
+
+Choose your download:
+
+- **rootless.deb** - standard rootless jailbreaks.
+- **jailed.zip** - arm64 IPA injection; inject and re-sign before installing.
+- **rootful.deb** - traditional rootful jailbreaks.
+- **roothide.deb** - RootHide bootstraps only.
+
+Jailbreak DEBs include **arm64 and arm64e**. Choose by jailbreak, not chip.
+
+Changes:
+
+- Recognize a much broader set of ad SDK full-screen controllers (Google, AppLovin/MAX, Unity, ironSource, Vungle, Chartboost, AdColony, Mintegral, InMobi, Amazon, Smaato, MoPub) using the original prefix/suffix heuristic, so renamed or newer SDK controllers are not missed.
+- Keep all prior fixes: Hide App Store prompts, manual-only button, categorized settings, CFPreferences, rootless prefs path.
+
+Real game rewards and physical-device compatibility remain unverified.
+
 # AdVanish 0.8.4
 
 Choose your download:
