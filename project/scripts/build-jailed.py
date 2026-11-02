@@ -16,7 +16,7 @@ from ipa_tools import framework_report
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = ROOT.parent
 NATIVE = ["Runtime.mm", "ASPTimers.mm", "ASPUniversalSkip.mm", "ASPManualSkip.mm", "ASPAdSurface.mm", "ASPAdCompletion.mm"]
-FRAMEWORKS = ["Foundation", "UIKit", "QuartzCore", "CoreGraphics", "AVFoundation", "CoreMedia", "WebKit"]
+FRAMEWORKS = ["Foundation", "UIKit", "QuartzCore", "CoreGraphics", "AVFoundation", "CoreMedia", "WebKit", "StoreKit"]
 
 
 def build(output, simulator=False):

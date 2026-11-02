@@ -56,7 +56,11 @@ static id AVNSettingsObject(id receiver, NSString *name) {
     NSMutableDictionary *database = self.database.mutableCopy;
     if ([key isEqualToString:[self storageKey:@"ManualSkip"]]) {
         NSString *automatic = [self storageKey:@"AutomaticAds"];
-        if (!database[automatic]) database[automatic] = @(![value boolValue]);
+        if (!database[automatic]) {
+            NSDictionary *current = self.avnApplicationIdentifier.length ?
+                ASPApplicationPreferences(database, self.avnApplicationIdentifier) : database;
+            database[automatic] = @(ASPAutomaticAdsEnabled(current));
+        }
     }
     database[key] = value;
     CFStringRef domain = (__bridge CFStringRef)kAVNPreferencesDomain;
@@ -160,9 +164,9 @@ static id AVNSettingsObject(id receiver, NSString *name) {
         BOOL defaultAutomatic = ![self.database[[self storageKey:@"ManualSkip"]] boolValue];
         [rows addObject:[self section:@"This app" note:@"Reopen the app after changing settings."]];
         [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:YES]];
-        [rows addObject:[self section:@"Ad playback" note:@"Automatic ads runs without a press. When off, use the fast-forward button."]];
+        [rows addObject:[self section:@"Ad playback" note:@"Automatic ads hides the button. Turn it off to use manual fast-forward."]];
         [rows addObject:[self toggle:@"Automatic ads" feature:@"AutomaticAds" initial:defaultAutomatic]];
-        [rows addObject:[self toggle:@"Show fast-forward button" feature:@"ManualSkip" initial:YES]];
+        [rows addObject:[self toggle:@"Show button in manual mode" feature:@"ManualSkip" initial:YES]];
         [rows addObject:[self section:@"Video" note:@"Speeds AVPlayer playback throughout this enabled app, including non-ad video."]];
         [rows addObject:[self toggle:@"Video speed" feature:@"SpeedUpVideo" initial:YES]];
         [rows addObject:[self toggle:@"Force inline video" feature:@"ForceInline" initial:NO]];
@@ -173,6 +177,7 @@ static id AVNSettingsObject(id receiver, NSString *name) {
         [rows addObject:[self toggle:@"Playable assistance" feature:@"AutoInteract" initial:YES]];
         [rows addObject:[self toggle:@"Close completed ads" feature:@"AutoDismiss" initial:YES]];
         [rows addObject:[self toggle:@"Block ad redirects" feature:@"BlockRedirects" initial:YES]];
+        [rows addObject:[self toggle:@"Hide App Store prompts" feature:@"HideAppStore" initial:YES]];
     }
     _specifiers = rows;
     return _specifiers;

@@ -272,7 +272,7 @@ def main(video, output, injected=False, manual=False, settings=False, device=Non
                             "-Wl,-rpath,@executable_path/Frameworks"]
             else:
                 command += [str(ROOT / name) for name in ["tests/ios/Fixture.mm", "ASPManualSkip.mm", "ASPAdSurface.mm", "ASPUniversalSkip.mm", "ASPAdCompletion.mm"]]
-            for framework_name in ["Foundation", "UIKit", "AVFoundation", "CoreMedia", "QuartzCore", "CoreGraphics", "WebKit"]:
+            for framework_name in ["Foundation", "UIKit", "AVFoundation", "CoreMedia", "QuartzCore", "CoreGraphics", "WebKit", "StoreKit"]:
                 command += ["-framework", framework_name]
             command += ["-o", str(app / "AdVanishFixture")]
             subprocess.run(command, check=True, timeout=180)

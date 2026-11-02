@@ -18,7 +18,7 @@ static NSUInteger gWindowSequence;
 static void refreshWindows(void);
 
 static void rememberWindow(UIWindow *window) {
-    if (!window) return;
+    if (!window || [window isKindOfClass:NSClassFromString(@"ASPSkipWindow")]) return;
     if (!gKnownWindows) gKnownWindows = [NSHashTable weakObjectsHashTable];
     if (![gKnownWindows containsObject:window] && gKnownWindows.count >= 64) {
         UIWindow *oldest = nil;
@@ -405,39 +405,53 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
 static void refreshWindows(void) {
     if (gRefreshing) return;
     gRefreshing = YES;
-    UIApplication *application = [UIApplication sharedApplication];
-    for (UIWindow *window in gWindows.objectEnumerator) window.hidden = YES;
-    gLegacyWindow.hidden = YES;
+    UIApplication *application = UIApplication.sharedApplication;
+    NSMutableSet<UIWindow *> *shown = NSMutableSet.set;
     if (gEnabled && application.applicationState == UIApplicationStateActive) {
         for (UIScene *scene in application.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]] ||
+            if (![scene isKindOfClass:UIWindowScene.class] ||
                 scene.activationState != UISceneActivationStateForegroundActive) continue;
             UIWindowScene *windowScene = (UIWindowScene *)scene;
+            ASPAdSurface *surface = currentSurface(windowScene);
+            if (!surface || surface.incomplete) continue;
             UIWindow *window = [gWindows objectForKey:windowScene];
             if (!window) {
                 window = [[ASPSkipWindow alloc] initWithWindowScene:windowScene];
                 window.opaque = NO;
-                window.backgroundColor = [UIColor clearColor];
+                window.backgroundColor = UIColor.clearColor;
                 window.windowLevel = UIWindowLevelAlert + 1;
                 window.rootViewController = [ASPSkipButtonController new];
                 [gWindows setObject:window forKey:windowScene];
             }
             window.frame = windowScene.coordinateSpace.bounds;
-            window.hidden = NO;
+            [shown addObject:window];
+            if (window.hidden) window.hidden = NO;
         }
         if (application.connectedScenes.count == 0) {
-            if (!gLegacyWindow) {
-                gLegacyWindow = [[ASPSkipWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-                gLegacyWindow.opaque = NO;
-                gLegacyWindow.backgroundColor = [UIColor clearColor];
-                gLegacyWindow.windowLevel = UIWindowLevelAlert + 1;
-                gLegacyWindow.rootViewController = [ASPSkipButtonController new];
+            ASPAdSurface *surface = currentSurface(nil);
+            if (surface && !surface.incomplete) {
+                if (!gLegacyWindow) {
+                    gLegacyWindow = [[ASPSkipWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+                    gLegacyWindow.opaque = NO;
+                    gLegacyWindow.backgroundColor = UIColor.clearColor;
+                    gLegacyWindow.windowLevel = UIWindowLevelAlert + 1;
+                    gLegacyWindow.rootViewController = [ASPSkipButtonController new];
+                }
+                gLegacyWindow.frame = UIScreen.mainScreen.bounds;
+                [shown addObject:gLegacyWindow];
+                if (gLegacyWindow.hidden) gLegacyWindow.hidden = NO;
             }
-            gLegacyWindow.frame = [UIScreen mainScreen].bounds;
-            gLegacyWindow.hidden = NO;
         }
     }
+    for (UIWindow *window in gWindows.objectEnumerator) {
+        if (![shown containsObject:window] && !window.hidden) window.hidden = YES;
+    }
+    if (gLegacyWindow && ![shown containsObject:gLegacyWindow]) gLegacyWindow.hidden = YES;
     gRefreshing = NO;
+}
+
+void ASPManualSkipRefresh(void) {
+    if (NSThread.isMainThread) refreshWindows();
 }
 
 void ASPManualSkipConfigure(BOOL enabled) {
@@ -448,14 +462,23 @@ void ASPManualSkipConfigure(BOOL enabled) {
             gWindows = [NSMapTable weakToStrongObjectsMapTable];
             NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
             NSArray<NSNotificationName> *events = @[
-                UIApplicationDidBecomeActiveNotification, UIApplicationDidEnterBackgroundNotification,
+                UIApplicationDidBecomeActiveNotification, UIApplicationWillResignActiveNotification, UIApplicationDidEnterBackgroundNotification,
                 UISceneDidActivateNotification, UISceneWillDeactivateNotification,
-                UIWindowDidBecomeVisibleNotification,
+                UIWindowDidBecomeVisibleNotification, UIWindowDidBecomeHiddenNotification,
             ];
             for (NSNotificationName event in events) {
                 [center addObserverForName:event object:nil queue:[NSOperationQueue mainQueue]
                                 usingBlock:^(NSNotification *notification) {
                     if ([notification.object isKindOfClass:[ASPSkipWindow class]]) return;
+                    if ([notification.name isEqualToString:UIApplicationWillResignActiveNotification]) {
+                        for (UIWindow *window in gWindows.objectEnumerator) window.hidden = YES;
+                        gLegacyWindow.hidden = YES;
+                        return;
+                    }
+                    if ([notification.name isEqualToString:UISceneWillDeactivateNotification]) {
+                        [gWindows objectForKey:notification.object].hidden = YES;
+                        return;
+                    }
                     if ([notification.object isKindOfClass:[UIWindow class]]) rememberWindow(notification.object);
                     refreshWindows();
                 }];

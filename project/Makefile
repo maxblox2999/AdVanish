@@ -12,7 +12,7 @@ advanish_FILES = Hooks.xm Runtime.mm ASPTimers.mm ASPUniversalSkip.mm ASPManualS
 advanish_LOGOS_DEFAULT_GENERATOR = MobileSubstrate
 advanish_CFLAGS = -fobjc-arc -fblocks
 advanish_CCFLAGS = -std=c++11 -fno-rtti -fno-exceptions
-advanish_FRAMEWORKS = Foundation UIKit QuartzCore CoreGraphics AVFoundation CoreMedia WebKit
+advanish_FRAMEWORKS = Foundation UIKit QuartzCore CoreGraphics AVFoundation CoreMedia WebKit StoreKit
 ifeq ($(THEOS_PACKAGE_SCHEME),rootless)
 advanish_CFLAGS += -DADSPEED_ROOTLESS=1
 endif

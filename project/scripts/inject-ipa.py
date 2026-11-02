@@ -10,7 +10,7 @@ from pathlib import Path
 from ipa_tools import application_executable, extract_ipa, file_hash, framework_report, original_entitlements, patch_executable, write_ipa
 
 CONFIG_KEYS = {"Enabled", "AutomaticAds", "ManualSkip", "SpeedUpVideo", "CompressTimers", "AccelerateClock", "ForceInline",
-               "SpeedNativeVideo", "AutoInteract", "AutoDismiss", "BlockRedirects"}
+               "SpeedNativeVideo", "AutoInteract", "AutoDismiss", "BlockRedirects", "HideAppStore"}
 
 
 def load_config(path):

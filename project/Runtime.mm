@@ -7,6 +7,8 @@
 #import <mach-o/dyld.h>
 #include <cmath>
 #import "ASPPaths.h"
+#import "ASPStorePolicy.h"
+#import <StoreKit/StoreKit.h>
 #import "ASPManualSkip.h"
 #import "ASPSpeed.h"
 #import "ASPAdCompletion.h"
@@ -24,6 +26,7 @@
 @property (nonatomic) BOOL interaction;
 @property (nonatomic) BOOL dismissal;
 @property (nonatomic) BOOL redirects;
+@property (nonatomic) BOOL hideStore;
 @property (nonatomic) BOOL inlineVideo;
 + (instancetype)readConfiguration;
 @end
@@ -58,8 +61,9 @@
     options.interaction = flag(@"AutoInteract", YES);
     options.dismissal = flag(@"AutoDismiss", YES);
     options.redirects = flag(@"BlockRedirects", YES);
+    options.hideStore = flag(@"HideAppStore", YES);
     options.inlineVideo = flag(@"ForceInline", NO);
-    if ([NSBundle.mainBundle.bundlePath.pathExtension isEqualToString:@"appex"]) options.enabled = NO;
+    if (!ASPApplicationHost(bundle, NSBundle.mainBundle.bundlePath)) options.enabled = NO;
     return options;
 }
 @end
@@ -97,6 +101,7 @@
             @"compressTimers": @(o.timers), @"accelerateClock": @(o.clocks),
             @"forceInline": @(o.inlineVideo), @"recognizedAd": @NO,
             @"autoComplete": @(o.interaction && o.automatic), @"preventRedirects": @(o.redirects),
+            @"hideAppStore": @(o.hideStore),
             @"skipChannel": NSUUID.UUID.UUIDString
         };
         NSData *json = [NSJSONSerialization dataWithJSONObject:configuration options:0 error:nil];
@@ -108,7 +113,9 @@
     return runtime;
 }
 - (BOOL)blocks:(NSURL *)url {
-    if (!self.options.enabled || !self.options.redirects || !ASPManualSkipAdSurfaces().count) return NO;
+    if (!self.options.enabled || !NSThread.isMainThread || !ASPManualSkipAdSurfaces().count) return NO;
+    if (ASPAppStoreURL(url)) return self.options.hideStore;
+    if (!self.options.redirects) return NO;
     NSString *scheme = url.scheme.lowercaseString;
     return [scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"] ||
         [scheme hasPrefix:@"itms-"];
@@ -165,6 +172,7 @@
 }
 - (void)observe:(UIViewController *)controller {
     if (!self.options.enabled) return;
+    if ([controller.viewIfLoaded.window isKindOfClass:NSClassFromString(@"ASPSkipWindow")]) return;
     ASPManualSkipTrackController(controller);
     ASPAdCompletionTrackController(controller);
     [self refresh];
@@ -172,6 +180,7 @@
 - (void)refresh {
     if (!NSThread.isMainThread) return;
     if (!self.options.enabled) { ASPTimerSetAdActive(NO); return; }
+    ASPManualSkipRefresh();
     BOOL active = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
     ASPAdCompletionTrackController(nil);
     NSArray<ASPAdSurface *> *surfaces = ASPManualSkipAdSurfaces();
@@ -203,13 +212,15 @@
     dispatch_async(dispatch_get_main_queue(), ^{
         @synchronized (self) { self.refreshQueued = NO; }
         ASPAdCompletionInstallHooks();
+        AVNInstallStoreHooks();
         [self refresh];
     });
 }
 - (void)begin {
-    ASPManualSkipConfigure(self.options.button);
+    ASPManualSkipConfigure(self.options.enabled && self.options.button && !self.options.automatic);
     ASPAdCompletionConfigure(self.options.automatic && self.options.dismissal);
     ASPAdCompletionInstallHooks();
+    AVNInstallStoreHooks();
     ASPTimerConfigure(self.options.enabled && self.options.timers && self.options.automatic);
     for (NSNotificationName event in @[UIApplicationDidBecomeActiveNotification, UIApplicationDidEnterBackgroundNotification]) {
         [NSNotificationCenter.defaultCenter addObserverForName:event object:nil queue:NSOperationQueue.mainQueue
@@ -238,7 +249,7 @@ void AVNObserveController(UIViewController *controller) {
 
 void AVNPrepareWebConfiguration(WKWebViewConfiguration *configuration) {
     AVNRuntime *runtime = AVNRuntime.shared;
-    if (runtime.options.inlineVideo && runtime.options.video) {
+    if (runtime.options.enabled && runtime.options.inlineVideo && runtime.options.video) {
         configuration.allowsInlineMediaPlayback = YES;
         configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
     }
@@ -266,6 +277,47 @@ void AVNResumePlayer(AVPlayer *player) {
 
 BOOL AVNBlocksURL(NSURL *url) {
     return [AVNRuntime.shared blocks:url];
+}
+
+BOOL AVNBlocksStoreOverlay(UIWindowScene *scene) {
+    AVNOptions *options = AVNRuntime.shared.options;
+    if (!options.enabled || !options.hideStore || !NSThread.isMainThread) return NO;
+    for (ASPAdSurface *surface in ASPManualSkipAdSurfaces()) {
+        if (surface.window.windowScene == scene) return YES;
+    }
+    return NO;
+}
+
+static SKStoreProductViewController *AVNStoreController(UIViewController *controller, NSUInteger *remaining) {
+    if (!controller || !*remaining) return nil;
+    *remaining -= 1;
+    Class store = NSClassFromString(@"SKStoreProductViewController");
+    if (store && [controller isKindOfClass:store]) return (SKStoreProductViewController *)controller;
+    for (UIViewController *child in controller.childViewControllers) {
+        SKStoreProductViewController *found = AVNStoreController(child, remaining);
+        if (found) return found;
+    }
+    return nil;
+}
+
+BOOL AVNBlockStorePresentation(UIViewController *presenter, UIViewController *controller, void (^completion)(void)) {
+    UIWindow *window = presenter.viewIfLoaded.window;
+    if (!window || !AVNBlocksStoreOverlay(window.windowScene)) return NO;
+    NSUInteger remaining = 16;
+    SKStoreProductViewController *store = AVNStoreController(controller, &remaining);
+    if (!store) return NO;
+    static char notifiedKey;
+    BOOL notify = ![objc_getAssociatedObject(store, &notifiedKey) boolValue];
+    objc_setAssociatedObject(store, &notifiedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    id<SKStoreProductViewControllerDelegate> delegate = store.delegate;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (completion) completion();
+        // Cancel only the product sheet; ad completion and reward callbacks are untouched.
+        if (notify && [delegate respondsToSelector:@selector(productViewControllerDidFinish:)]) {
+            [delegate productViewControllerDidFinish:store];
+        }
+    });
+    return YES;
 }
 
 void AVNFinishPlaybackRate(AVPlayer *player, float requested, float applied) {

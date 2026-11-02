@@ -5,6 +5,8 @@
 #import "ASPTimers.h"
 #import "ASPSpeed.h"
 #import "AVNRuntime.h"
+#import "ASPManualSkip.h"
+#import <StoreKit/StoreKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <WebKit/WebKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -12,6 +14,28 @@
 #include <math.h>
 #import "ASPAdSurface.h"
 #import "ASPAdCompletion.h"
+
+
+@interface FixtureStoreDelegate : NSObject <SKStoreProductViewControllerDelegate>
+@property (nonatomic) NSUInteger cancellations;
+@end
+@implementation FixtureStoreDelegate
+- (void)productViewControllerDidFinish:(SKStoreProductViewController *)controller {
+    self.cancellations += 1;
+}
+@end
+
+static NSUInteger visibleSkipWindows(void) {
+    NSMutableSet<UIWindow *> *windows = [NSMutableSet setWithArray:UIApplication.sharedApplication.windows];
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if ([scene isKindOfClass:UIWindowScene.class]) [windows addObjectsFromArray:((UIWindowScene *)scene).windows];
+    }
+    NSUInteger count = 0;
+    for (UIWindow *window in windows) {
+        if (!window.hidden && [window isKindOfClass:NSClassFromString(@"ASPSkipWindow")]) count += 1;
+    }
+    return count;
+}
 
 @interface InjectedFallbackPlayer : AVPlayer
 @property (nonatomic) float storedRate;
@@ -296,9 +320,46 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
                    @"The injected SDK registration hook reuses the original UIView X action once after genuine reward")) return;
     ASPAdCompletionTrackController(owner);
     if (!check(owner.closes == expected, @"The injected completion poll never repeats a UIView X action")) return;
-    [owner.view removeFromSuperview];
-    [owner removeFromParentViewController];
-    result(nil);
+    for (NSUInteger index = 0; index < 12; index++) AVNObserveController(owner);
+    ASPManualSkipRefresh();
+    if (!check(visibleSkipWindows() == (manualMode ? 1u : 0u),
+               @"Repeated presentation keeps one manual control and automatic mode has none")) return;
+    id runtime = ((id (*)(id, SEL))objc_msgSend)(NSClassFromString(@"AVNRuntime"), NSSelectorFromString(@"shared"));
+    id options = [runtime valueForKey:@"options"];
+    BOOL redirects = [[options valueForKey:@"redirects"] boolValue];
+    [options setValue:@NO forKey:@"redirects"];
+    if (!check(AVNBlocksURL([NSURL URLWithString:@"https://apps.apple.com/app/id1"]) &&
+               !AVNBlocksURL([NSURL URLWithString:@"https://example.com"]) &&
+               !AVNBlocksURL([NSURL URLWithString:@"https://apps.apple.com.evil.test/app/id1"]),
+               @"Store hiding blocks only Store URLs when broad redirect blocking is off")) return;
+    if (!check(AVNBlocksStoreOverlay(owner.view.window.windowScene),
+               @"Store overlay suppression is scoped to the active ad scene")) return;
+    [options setValue:@NO forKey:@"hideStore"];
+    if (!check(!AVNBlocksURL([NSURL URLWithString:@"https://apps.apple.com/app/id1"]) &&
+               !AVNBlocksStoreOverlay(owner.view.window.windowScene),
+               @"Disabling Store hiding restores Store destinations without changing playback mode")) return;
+    [options setValue:@YES forKey:@"hideStore"];
+    SKStoreProductViewController *store = [SKStoreProductViewController new];
+    FixtureStoreDelegate *delegate = [FixtureStoreDelegate new];
+    store.delegate = delegate;
+    __block NSUInteger presentationCompletions = 0;
+    [owner presentViewController:store animated:NO completion:^{ presentationCompletions += 1; }];
+    [owner presentViewController:store animated:NO completion:^{ presentationCompletions += 1; }];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!check(owner.presentedViewController != store && presentationCompletions == 2 && delegate.cancellations == 1,
+                   @"The production presentation hook suppresses a Store sheet and cancels its delegate once")) return;
+        if (!check(owner.closes == expected && owner.rewardEvents == 2,
+                   @"Suppressing a Store sheet never synthesizes ad closing or rewards")) return;
+        [options setValue:@(redirects) forKey:@"redirects"];
+        self.window.hidden = YES;
+        ASPManualSkipRefresh();
+        if (!check(visibleSkipWindows() == 0 && !AVNBlocksURL([NSURL URLWithString:@"https://apps.apple.com/app/id1"]),
+                   @"Hidden app content releases floating controls and Store suppression")) return;
+        self.window.hidden = NO;
+        [owner.view removeFromSuperview];
+        [owner removeFromParentViewController];
+        result(nil);
+    });
 }
 - (UIButton *)manualButton {
     if (fixtureOverlay.hidden) return nil;

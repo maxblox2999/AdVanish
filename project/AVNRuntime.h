@@ -13,3 +13,7 @@ float AVNPlaybackRate(float requested);
 void AVNResumePlayer(AVPlayer *player);
 void AVNFinishPlaybackRate(AVPlayer *player, float requested, float applied);
 BOOL AVNBlocksURL(NSURL *url);
+
+void AVNInstallStoreHooks(void);
+BOOL AVNBlocksStoreOverlay(UIWindowScene *scene);
+BOOL AVNBlockStorePresentation(UIViewController *presenter, UIViewController *controller, void (^completion)(void));

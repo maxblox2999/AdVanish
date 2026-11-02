@@ -1,6 +1,7 @@
 // Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 #import <UIKit/UIKit.h>
 #import "../../settings/AVNSettings.m"
+#import "ASPStorePolicy.h"
 
 static NSMutableArray *checks;
 static BOOL finished;
@@ -55,6 +56,17 @@ static void require(BOOL value, NSString *name) {
         NSString *framework = [NSBundle bundleForClass:PSListController.class].bundlePath;
         require([framework containsString:@"/System/Library/PrivateFrameworks/Preferences.framework"],
             @"The controller uses Apple's real simulator Preferences framework");
+        require(ASPApplicationHost(@"com.example.game", @"/private/var/containers/Bundle/Game.app"),
+            @"User applications can host the runtime");
+        require(!ASPApplicationHost(@"com.apple.springboard", @"/System/Library/CoreServices/SpringBoard.app") &&
+            !ASPApplicationHost(@"com.apple.Preferences", @"/Applications/Preferences.app") &&
+            !ASPApplicationHost(@"com.example.extension", @"/Game.app/PlugIns/Widget.appex"),
+            @"System processes and extensions cannot host floating controls");
+        require(ASPAppStoreURL([NSURL URLWithString:@"itms-apps://itunes.apple.com/app/id1"]) &&
+            ASPAppStoreURL([NSURL URLWithString:@"https://apps.apple.com/app/id1"]) &&
+            !ASPAppStoreURL([NSURL URLWithString:@"https://apps.apple.com.evil.test/app/id1"]) &&
+            !ASPAppStoreURL([NSURL URLWithString:@"https://example.com"]),
+            @"Store URL matching excludes ordinary and lookalike hosts");
         ThrowingProxy *proxy = [ThrowingProxy new];
         require(AVNSettingsObject(proxy, @"value") == nil, @"An unavailable registry getter is contained");
         require(AVNSettingsObject(proxy, @"primitive") == nil, @"Primitive private getters are never treated as object pointers");
@@ -92,7 +104,7 @@ static void require(BOOL value, NSString *name) {
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                 @try {
                 [child.view layoutIfNeeded];
-                require(child.specifiers.count == 15, [NSString stringWithFormat:@"The app Settings page has every control (rows=%lu, app=%@)", (unsigned long)child.specifiers.count, child.avnApplicationIdentifier]);
+                require(child.specifiers.count == 16, [NSString stringWithFormat:@"The app Settings page has every control (rows=%lu, app=%@)", (unsigned long)child.specifiers.count, child.avnApplicationIdentifier]);
                 require(child.view.window == self.window, @"The app Settings page is attached to the window");
                 NSMutableArray *groups = NSMutableArray.array;
                 for (PSSpecifier *row in child.specifiers) {
@@ -105,6 +117,15 @@ static void require(BOOL value, NSString *name) {
                 [child changeValue:@YES forControl:enabled];
                 PSSpecifier *automatic = child.specifiers[3];
                 PSSpecifier *button = child.specifiers[4];
+                [child changeValue:@YES forControl:button];
+                require([child.database[@"com.maxblox2999.fixture-AutomaticAds"] isEqual:@YES],
+                    @"Showing the button never changes the current automatic policy");
+                PSSpecifier *store = child.specifiers.lastObject;
+                require([[store propertyForKey:@"AVNKey"] isEqual:@"com.maxblox2999.fixture-HideAppStore"] &&
+                    [[child valueForControl:store] boolValue], @"App Store hiding defaults on and uses an app-specific key");
+                [child changeValue:@NO forControl:store];
+                require(![child.database[@"com.maxblox2999.fixture-HideAppStore"] boolValue],
+                    @"App Store hiding can be disabled separately");
                 [child changeValue:@NO forControl:automatic];
                 [child changeValue:@YES forControl:button];
                 NSDictionary *saved = [NSDictionary dictionaryWithContentsOfFile:child.preferencePaths.firstObject];
@@ -130,7 +151,7 @@ static void require(BOOL value, NSString *name) {
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
                 @try {
                 [child.view layoutIfNeeded];
-                require(child.specifiers.count == 15 && child.view.window == self.window, @"Saved switches reload without invalidating Settings rows");
+                require(child.specifiers.count == 16 && child.view.window == self.window, @"Saved switches reload without invalidating Settings rows");
                 [navigation popViewControllerAnimated:NO];
                 [root.view layoutIfNeeded];
                 require(root.specifiers.count == 5, @"Returning to the root rebuilds a usable row cache");

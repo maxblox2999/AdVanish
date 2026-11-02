@@ -2182,3 +2182,48 @@ test('80x manual countdown timing preserves callback and replacement authorizati
     env.advance(100);
     assert.equal(env.sandbox.performance.now(), 8100);
 });
+
+test('App Store hiding blocks store destinations without blocking ordinary links', () => {
+    const env = environment({hideAppStore: true, preventRedirects: false});
+    for (const url of ['itms-apps://itunes.apple.com/app/id1', 'https://apps.apple.com/app/id1',
+        'https://itunes.apple.com/app/id1', 'https://apps.apple.com.:443/app/id1']) {
+        assert.equal(env.sandbox.open(url), null);
+    }
+    for (const url of ['https://example.com', 'https://apps.apple.com.evil.test/app/id1',
+        'https://apps.apple.com@evil.test/app/id1']) {
+        assert.equal(env.sandbox.open(url), 'opened');
+    }
+});
+
+test('App Store hiding can be disabled independently of playback', () => {
+    const env = environment({hideAppStore: false, preventRedirects: false});
+    assert.equal(env.sandbox.open('https://apps.apple.com/app/id1'), 'opened');
+});
+
+test('App Store hiding leaves unrelated pages untouched', () => {
+    const env = environment({hideAppStore: true, preventRedirects: false, recognizedAd: false});
+    assert.equal(env.sandbox.open('itms-apps://itunes.apple.com/app/id1'), 'opened');
+});
+
+test('App Store hiding handles MRAID store opens while allowing other destinations', () => {
+    const env = environment({hideAppStore: true, preventRedirects: false, autoComplete: true});
+    const opened = [];
+    env.sandbox.mraid = {getState: () => 'default', isViewable: () => true,
+        getPlacementType: () => 'interstitial', open: url => opened.push(url)};
+    env.sandbox.__adspeed.setAdContext(true);
+    env.sandbox.mraid.open('https://apps.apple.com/app/id1');
+    env.sandbox.mraid.open('https://example.com');
+    assert.deepEqual(opened, ['https://example.com']);
+});
+
+test('App Store hiding prevents anchor navigation only in an ad', () => {
+    for (const recognizedAd of [true, false]) {
+        const env = environment({hideAppStore: true, preventRedirects: false, recognizedAd});
+        let prevented = false;
+        const anchor = {tagName: 'A', getAttribute: () => 'https://apps.apple.com/app/id1'};
+        for (const callback of env.listeners.get('click') || []) {
+            callback({target: anchor, preventDefault() { prevented = true; }});
+        }
+        assert.equal(prevented, recognizedAd);
+    }
+});

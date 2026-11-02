@@ -1,9 +1,14 @@
 // Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 #import "AVNRuntime.h"
 #import "ASPTimers.h"
+#import <StoreKit/StoreKit.h>
 
 %group AVNPlaybackHooks
 %hook UIViewController
+- (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated completion:(void (^)(void))completion {
+    if (AVNBlockStorePresentation(self, controller, completion)) return;
+    %orig;
+}
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     AVNObserveController(self);
@@ -47,6 +52,16 @@
 }
 %end
 
+%hook UIScene
+- (void)openURL:(NSURL *)url options:(UISceneOpenExternalURLOptions *)options completionHandler:(void (^)(BOOL))completion {
+    if (AVNBlocksURL(url)) {
+        if (completion) completion(NO);
+        return;
+    }
+    %orig;
+}
+%end
+
 %hook UIApplication
 - (void)openURL:(NSURL *)url options:(NSDictionary *)options completionHandler:(void (^)(BOOL))completion {
     if (AVNBlocksURL(url)) {
@@ -60,6 +75,21 @@
 }
 %end
 %end
+
+%group AVNStoreHooks
+%hook SKOverlay
+- (void)presentInScene:(UIWindowScene *)scene {
+    if (!AVNBlocksStoreOverlay(scene)) %orig;
+}
+%end
+%end
+
+void AVNInstallStoreHooks(void) {
+    static BOOL installed;
+    if (!NSThread.isMainThread || installed || !NSClassFromString(@"SKOverlay")) return;
+    installed = YES;
+    %init(AVNStoreHooks);
+}
 
 %group AVNTimerHooks
 %hook NSTimer

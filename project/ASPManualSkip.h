@@ -9,6 +9,7 @@
 extern "C" {
 #endif
 void ASPManualSkipConfigure(BOOL enabled);
+void ASPManualSkipRefresh(void);
 void ASPManualSkipTrackWebView(WKWebView *view);
 void ASPManualSkipTrackController(UIViewController *controller);
 BOOL ASPManualSkipIsAdPlayer(AVPlayer *player);

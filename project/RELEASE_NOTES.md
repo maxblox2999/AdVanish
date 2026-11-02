@@ -1,4 +1,4 @@
-# AdVanish 0.8.3
+# AdVanish 0.8.4
 
 Choose your download:
 
@@ -11,6 +11,10 @@ Jailbreak DEBs include **arm64 and arm64e** for supported older and newer iPhone
 
 Changes:
 
+- Add per-app **Hide App Store prompts** for supported store sheets, overlays and links during ads.
+- Hide the manual button in automatic mode and keep at most one control per active app scene.
+- Exclude Apple system processes and app extensions from the runtime.
+- Preserve automatic mode when changing button visibility. Reopen the app after changing its settings.
 - Shared checks run first, then rootless → jailed → rootful → RootHide.
 - Settings changes use CFPreferences and the current rootless preferences path.
 - Hiding the fast-forward button keeps automatic mode active.

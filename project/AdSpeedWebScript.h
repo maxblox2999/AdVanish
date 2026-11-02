@@ -32,6 +32,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
     var timerHooks = 0;
     var clockHooks = 0;
     var preventRedirects = !!(configuration && configuration.preventRedirects);
+    var hideAppStore = !!(configuration && configuration.hideAppStore);
     var skipChannel = configuration && configuration.skipChannel;
     var nativeTimeout = window.setTimeout;
     var nativeInterval = window.setInterval;
@@ -647,17 +648,38 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
         return true;
     }
 
-    function blockRedirect() {
-        if (!recognizedAd || !preventRedirects) return false;
+    function appStoreURL(value) {
+        if (typeof value !== 'string') return false;
+        var url = value.trim();
+        return /^(?:itms|itmss|itms-apps|itms-appss|itms-services):/i.test(url)
+            || /^https?:\/\/(?:apps|itunes)\.apple\.com\.?(?::[0-9]+)?(?:[\/?#]|$)/i.test(url);
+    }
+
+    function blockRedirect(url) {
+        if (!recognizedAd || (!preventRedirects && !(hideAppStore && appStoreURL(url)))) return false;
         stats.redirectsBlocked += 1;
         return true;
+    }
+
+    if (typeof document.addEventListener === 'function') {
+        document.addEventListener('click', function (event) {
+            var node = event.target;
+            for (var depth = 0; node && depth < 16; depth += 1, node = node.parentElement) {
+                if (String(node.tagName).toLowerCase() !== 'a') continue;
+                var url = typeof node.getAttribute === 'function' ? node.getAttribute('href') : null;
+                if (hideAppStore && appStoreURL(url) && blockRedirect(url) && typeof event.preventDefault === 'function') {
+                    event.preventDefault();
+                }
+                return;
+            }
+        }, true);
     }
 
     if (typeof window.open === 'function') {
         var nativeOpen = window.open;
         try {
             window.open = function () {
-                if (blockRedirect()) return null;
+                if (blockRedirect(arguments[0])) return null;
                 return nativeOpen.apply(this, arguments);
             };
         } catch (error) {
@@ -669,10 +691,10 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
         var mraid = window.mraid;
         if (!mraid || typeof mraid.getState !== 'function' || typeof mraid.isViewable !== 'function') return false;
         try {
-            if (recognizedAd && preventRedirects && !wrappedMraid.has(mraid) && typeof mraid.open === 'function') {
+            if (recognizedAd && (preventRedirects || hideAppStore) && !wrappedMraid.has(mraid) && typeof mraid.open === 'function') {
                 var originalOpen = mraid.open;
                 var guardedOpen = function () {
-                    if (blockRedirect()) return;
+                    if (blockRedirect(arguments[0])) return;
                     return originalOpen.apply(this, arguments);
                 };
                 try {
