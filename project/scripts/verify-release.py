@@ -13,7 +13,7 @@ headers = {"User-Agent": "AdVanish-release-verification"}
 def read(url):
     with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as response:
         return response.read(32 * 1024 * 1024)
-release = json.loads(read(base + "/releases/tags/v0.6.0"))
+release = json.loads(read(base + "/releases/tags/v0.7.0"))
 assert not release["draft"] and release["prerelease"]
 assert release["target_commitish"] == sha
 assert len(release["assets"]) == 8

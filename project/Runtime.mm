@@ -11,6 +11,7 @@
 #import "ASPSpeed.h"
 #import "ASPAdCompletion.h"
 #include "AdSpeedWebScript.h"
+#import "ASPTimers.h"
 #import "AVNRuntime.h"
 
 @interface AVNOptions : NSObject
@@ -176,6 +177,7 @@
             ASPAdCompletionTrackController(surface.owner);
         }
     }
+    ASPTimerSetAdActive(active && surfaces.count > 0);
     BOOL needed = active && (surfaces.count || self.pages.count);
     if (!needed && self.timer) {
         dispatch_source_cancel(self.timer);
@@ -204,6 +206,7 @@
     ASPManualSkipConfigure(self.options.button);
     ASPAdCompletionConfigure(self.options.automatic && self.options.dismissal);
     ASPAdCompletionInstallHooks();
+    ASPTimerConfigure(self.options.enabled && self.options.timers && self.options.automatic);
     for (NSNotificationName event in @[UIApplicationDidBecomeActiveNotification, UIApplicationDidEnterBackgroundNotification]) {
         [NSNotificationCenter.defaultCenter addObserverForName:event object:nil queue:NSOperationQueue.mainQueue
             usingBlock:^(NSNotification *notification) { [self refresh]; }];

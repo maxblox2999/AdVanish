@@ -8,7 +8,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = advanish
 advanish_INSTALL_PATH = /Library/MobileSubstrate/DynamicLibraries
-advanish_FILES = Hooks.xm Runtime.mm ASPUniversalSkip.mm ASPManualSkip.mm ASPAdSurface.mm ASPAdCompletion.mm
+advanish_FILES = Hooks.xm Runtime.mm ASPTimers.mm ASPUniversalSkip.mm ASPManualSkip.mm ASPAdSurface.mm ASPAdCompletion.mm
 advanish_LOGOS_DEFAULT_GENERATOR = MobileSubstrate
 advanish_CFLAGS = -fobjc-arc -fblocks
 advanish_CCFLAGS = -std=c++11 -fno-rtti -fno-exceptions

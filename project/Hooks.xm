@@ -1,5 +1,6 @@
 // Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 #import "AVNRuntime.h"
+#import "ASPTimers.h"
 
 %group AVNPlaybackHooks
 %hook UIViewController
@@ -60,9 +61,30 @@
 %end
 %end
 
+%group AVNTimerHooks
+%hook NSTimer
++ (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)interval target:(id)target selector:(SEL)selector userInfo:(id)userInfo repeats:(BOOL)repeats {
+    return %orig(ASPTimerCompress(interval), target, selector, userInfo, repeats);
+}
++ (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)interval repeats:(BOOL)repeats block:(void (^)(NSTimer *timer))block {
+    return %orig(ASPTimerCompress(interval), repeats, block);
+}
++ (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)interval invocation:(NSInvocation *)invocation repeats:(BOOL)repeats {
+    return %orig(ASPTimerCompress(interval), invocation, repeats);
+}
++ (NSTimer *)timerWithTimeInterval:(NSTimeInterval)interval target:(id)target selector:(SEL)selector userInfo:(id)userInfo repeats:(BOOL)repeats {
+    return %orig(ASPTimerCompress(interval), target, selector, userInfo, repeats);
+}
++ (NSTimer *)timerWithTimeInterval:(NSTimeInterval)interval repeats:(BOOL)repeats block:(void (^)(NSTimer *timer))block {
+    return %orig(ASPTimerCompress(interval), repeats, block);
+}
+%end
+%end
+
 %ctor {
     @autoreleasepool {
         %init(AVNPlaybackHooks);
+        %init(AVNTimerHooks);
         AVNStartRuntime();
     }
 }

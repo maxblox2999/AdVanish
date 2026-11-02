@@ -8,4 +8,4 @@ The 0.5.1 audit found:
 
 Regression tests cover those contracts. Browser and simulator fixtures use controlled creatives and mocked SDK events. They do not demonstrate compatibility with 100 providers or confirm real-game rewards.
 
-Unsupported cases still include native-only countdowns, fixed-step render loops, worker clocks, trusted-touch requirements and remote reward gates. A real provider result needs a specific SDK version, actual creative and physical-device run.
+Unsupported cases still include fixed-step render loops, worker clocks, trusted-touch requirements and remote reward gates. Native NSTimer countdowns are compressed only while an ad surface is active in automatic mode. A real provider result needs a specific SDK version, actual creative and physical-device run.

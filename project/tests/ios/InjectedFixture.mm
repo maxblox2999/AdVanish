@@ -371,7 +371,10 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 - (void)runManualNative:(ALBaseVideoViewController *)owner {
     owner.avPlayer.rate = 1;
     NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
+    __block BOOL manualCountdownFired = NO;
+    [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:NO block:^(NSTimer *timer) { manualCountdownFired = YES; }];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (!check(!manualCountdownFired, @"Manual mode leaves native SDK countdowns at real speed")) return;
         if (!check(owner.avPlayer.rate == 1 && CMTimeGetSeconds(owner.avPlayer.currentTime) <=
                    (NSProcessInfo.processInfo.systemUptime - started) * 2 + 1,
                    @"The production manual-mode AVPlayer hook never accelerates before a press")) return;
@@ -542,6 +545,11 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
         owner.avPlayer.rate = 1;
         waitUntil(^BOOL { return owner.avPlayer.rate == 16 || owner.ended; }, deadline, ^{
             if (!check(owner.avPlayer.rate == 16, @"Recognized SDK playback reaches 16x through the production hook")) return;
+            NSTimeInterval countdownStart = NSProcessInfo.processInfo.systemUptime;
+            __block NSTimeInterval countdownElapsed = -1;
+            [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:NO block:^(NSTimer *timer) {
+                countdownElapsed = NSProcessInfo.processInfo.systemUptime - countdownStart;
+            }];
             owner.avPlayer.rate = 0.5;
             owner.videoPlayer.videoView.hidden = YES;
             waitUntil(^BOOL { return owner.avPlayer.rate == 8; }, deadline, ^{
@@ -553,6 +561,8 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
                     waitUntil(^BOOL { return owner.ended; }, deadline, ^{
                         if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) >= 95.95,
                                    @"Accelerated playback reaches a real end event without seeking")) return;
+                        if (!check(countdownElapsed >= 0 && countdownElapsed < 1.0,
+                                   [NSString stringWithFormat:@"Native SDK countdowns accelerate inside an active ad (elapsed=%.2fs)", countdownElapsed])) return;
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                             if (!check(owner.closes == 0, @"Video end alone never dismisses an unverified rewarded ad")) return;
                             nativeFinished = YES;

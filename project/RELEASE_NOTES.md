@@ -1,8 +1,7 @@
-# AdVanish 0.6.0
+# AdVanish 0.7.0
 
-- Replace custom playback hooks with fresh Logos hooks.
-- Restore broad 16x AVPlayer and web acceleration inside enabled apps.
-- Preserve manual mode, categorized Settings and SDK completion handling.
-- Build jailbreak packages with the loader-compatible generator and jailed frameworks with the internal generator.
+- Accelerate native SDK countdowns. NSTimer countdowns are compressed inside an active ad in automatic mode.
+- Compress only 0.5s to 30s intervals, so animation, input and network timers keep their real speed.
+- Keep web timer and clock acceleration, 16x AVPlayer playback and manual mode unchanged.
 
-Automatic mode also speeds non-ad video and web content in enabled apps. Native SDK and server waits remain unchanged. Physical-device behavior and real game rewards remain unverified.
+Automatic mode also speeds non-ad video and web content in enabled apps. Server reward checks and remote eligibility remain unchanged. Physical-device behavior and real game rewards remain unverified.
