@@ -288,6 +288,13 @@ static UIView *findCloseControl(ASPAdSurface *surface) {
 static NSString *closeActionKey(UIView *close, ASPAdSurface *surface) {
     NSMutableArray<NSString *> *parts = NSMutableArray.array;
     [parts addObject:[NSString stringWithFormat:@"%p", close.superview]];
+    if (closeLabel(close)) {
+        NSString *label = close.accessibilityLabel;
+        if (!label.length && [close isKindOfClass:UIButton.class]) label = [(UIButton *)close currentTitle];
+        label = [[label stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+        [parts addObject:[@"role:" stringByAppendingString:label ?: @""]];
+    }
+
     if ([close isKindOfClass:UIControl.class]) {
         UIControl *control = (UIControl *)close;
         for (id target in control.allTargets) {

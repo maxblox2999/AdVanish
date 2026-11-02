@@ -2,6 +2,7 @@
 
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
+#import <objc/runtime.h>
 #import "ASPTimers.h"
 #import "ASPSpeed.h"
 #import "AVNRuntime.h"
@@ -361,6 +362,26 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     id options = [runtime valueForKey:@"options"];
     BOOL redirects = [[options valueForKey:@"redirects"] boolValue];
     [options setValue:@NO forKey:@"redirects"];
+    for (NSString *name in @[@"PAGRewardedVideoDisplayViewController", @"PAGRewardedVideoWebViewController", @"PAGNativeExpressRewardedVideoAdDisplayViewController", @"PAGRewardedInterstitialRootViewController", @"PAGAppOpenAdViewController", @"PAGPlayableLandingPageViewController", @"POBModalViewController", @"POBPlayerViewController", @"CHBAdContainerViewController", @"CHBAdWebViewController", @"HYPROfferFullscreenAdViewController"]) {
+        Class sdkClass = NSClassFromString(name);
+        if (!sdkClass) {
+            sdkClass = objc_allocateClassPair(UIViewController.class, name.UTF8String, 0);
+            objc_registerClassPair(sdkClass);
+        }
+        UIViewController *sdkOwner = [sdkClass new];
+        [owner addChildViewController:sdkOwner];
+        sdkOwner.view.frame = owner.view.bounds;
+        [owner.view addSubview:sdkOwner.view];
+        [sdkOwner didMoveToParentViewController:owner];
+        BOOL blocked = ASPManualSkipAdSurfaces().firstObject.owner == sdkOwner &&
+            AVNBlocksURL([NSURL URLWithString:@"https://apps.apple.com/app/id1"]) &&
+            AVNBlocksStoreOverlay(owner.view.window.windowScene);
+        [sdkOwner willMoveToParentViewController:nil];
+        [sdkOwner.view removeFromSuperview];
+        [sdkOwner removeFromParentViewController];
+        if (!check(blocked, [NSString stringWithFormat:@"%@ keeps Store redirects and overlays suppressed", name])) return;
+    }
+
     if (!check(AVNBlocksURL([NSURL URLWithString:@"https://apps.apple.com/app/id1"]) &&
                !AVNBlocksURL([NSURL URLWithString:@"https://example.com"]) &&
                !AVNBlocksURL([NSURL URLWithString:@"https://apps.apple.com.evil.test/app/id1"]),

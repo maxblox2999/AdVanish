@@ -1,6 +1,7 @@
 // Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
 #import "ASPAdSurface.h"
@@ -441,6 +442,18 @@ static void testGoogleRewarded(UIViewController *presenter) {
     ASPAdCompletionTrackController(second.controller);
     if (!check(second.controller.closes == 3 && secondRewards == 1,
                @"A newly enabled final end-card Close runs without synthesizing a reward")) return;
+
+    [finalClose setTitle:@"Close ad" forState:UIControlStateNormal];
+    ASPAdCompletionTrackController(second.controller);
+    if (!check(second.controller.closes == 4 && secondRewards == 1,
+               @"A reused SDK control can close a later stage after its eligible label changes")) return;
+    ASPAdCompletionTrackController(second.controller);
+    if (!check(second.controller.closes == 4 && secondRewards == 1,
+               @"The reused stage control cannot repeat or fabricate another reward")) return;
+    [finalClose setTitle:@"5" forState:UIControlStateNormal];
+    ASPAdCompletionTrackController(second.controller);
+    if (!check(second.controller.closes == 4,
+               @"A changing countdown is not a new eligible Close action")) return;
     [second.controller.view removeFromSuperview];
     [second.controller removeFromParentViewController];
     GADRewardedAd *withoutHandler = [GADRewardedAd new];
@@ -775,6 +788,25 @@ static void runFixture(ALBaseVideoViewController *owner) {
         [legacyOwner.view removeFromSuperview];
         [legacyOwner removeFromParentViewController];
         if (!check(originalOwnerRecognized, @"The original MA fullscreen owner remains recognized alongside newer SDK owners")) return;
+
+        for (NSString *name in @[@"PAGRewardedVideoDisplayViewController", @"PAGRewardedVideoWebViewController", @"PAGNativeExpressRewardedVideoAdDisplayViewController", @"PAGRewardedInterstitialRootViewController", @"PAGAppOpenAdViewController", @"PAGPlayableLandingPageViewController", @"POBModalViewController", @"POBPlayerViewController", @"CHBAdContainerViewController", @"CHBAdWebViewController", @"HYPROfferFullscreenAdViewController"]) {
+            Class sdkClass = NSClassFromString(name);
+            if (!sdkClass) {
+                sdkClass = objc_allocateClassPair(UIViewController.class, name.UTF8String, 0);
+                objc_registerClassPair(sdkClass);
+            }
+            UIViewController *sdkOwner = [sdkClass new];
+            [owner addChildViewController:sdkOwner];
+            sdkOwner.view.frame = owner.view.bounds;
+            [owner.view addSubview:sdkOwner.view];
+            [sdkOwner didMoveToParentViewController:owner];
+            ASPAdSurface *sdkSurface = ASPFindAdSurface(@[owner.view.window], YES);
+            BOOL recognized = sdkSurface.owner == sdkOwner && sdkSurface.recognized;
+            [sdkOwner willMoveToParentViewController:nil];
+            [sdkOwner.view removeFromSuperview];
+            [sdkOwner removeFromParentViewController];
+            if (!check(recognized, [NSString stringWithFormat:@"%@ remains recognized without media or a Google owner", name])) return;
+        }
         if (!testCreativeOwnership(owner)) return;
         if (!testMediatedOwnership(owner)) return;
         if (!testWebWindowExposure(owner)) return;

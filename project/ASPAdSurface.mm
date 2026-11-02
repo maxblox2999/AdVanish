@@ -30,7 +30,18 @@ static BOOL adController(UIViewController *controller) {
                             @"MTGInterstitialViewController", @"MTGRewardAdViewController",
                             @"IMInterstitialViewController", @"AmazonAdInterstitialViewController",
                             @"SMAInterstitialViewController", @"MPInterstitialViewController",
-                            @"MPRewardedVideoViewController"]) {
+                            @"MPRewardedVideoViewController",
+                            @"PAGRewardedVideoDisplayViewController",
+                            @"PAGRewardedVideoWebViewController",
+                            @"PAGNativeExpressRewardedVideoAdDisplayViewController",
+                            @"PAGRewardedInterstitialRootViewController",
+                            @"PAGAppOpenAdViewController",
+                            @"PAGPlayableLandingPageViewController",
+                            @"POBModalViewController",
+                            @"POBPlayerViewController",
+                            @"CHBAdContainerViewController",
+                            @"CHBAdWebViewController",
+                            @"HYPROfferFullscreenAdViewController"]) {
         if (kindOfNamedClass(controller, name)) return YES;
     }
     NSString *name = NSStringFromClass(controller.class) ?: @"";

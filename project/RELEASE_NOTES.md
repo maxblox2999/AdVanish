@@ -1,4 +1,4 @@
-# AdVanish 0.8.10
+# AdVanish 0.8.11
 
 Choose your download:
 
@@ -11,11 +11,10 @@ DEBs include arm64 and arm64e. Choose by jailbreak, not chip.
 
 Changes:
 
-- Add per-app Banners → Block ad banners, off by default.
-- Block Google AdMob and Ad Manager banner load requests and remove their SDK views.
-- Preserve ordinary game UI, 80x speed, manual mode and completed-ad closing.
-- Jailed configurations accept BlockBanners.
+- Recognize additional Pangle, OpenWrap, Chartboost and HyprMX ad controllers.
+- Apply existing Store redirect and overlay suppression to those recognized surfaces.
+- Allow an eligible reused Close button to advance after its Close label changes.
+- Keep unchanged controls deduplicated and countdown labels ineligible.
+- Preserve 80x speed, Google banner blocking, manual mode and genuine reward checks.
 
-Reopen the app after changing banner settings. Custom game-reserved space can remain. This does not block native feeds, full-screen ads or unknown banner SDKs.
-
-Simulator tests use mock SDK classes. Real games, rewards and physical devices remain unverified.
+Recognition does not guarantee automatic closing for every SDK. Real-game rewards and physical devices remain unverified.
