@@ -82,18 +82,17 @@ jobs:
         env:
           BROWSER_PATH: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
         run: node tests/browser/verify.cjs
-      - name: Prepare shared simulator and fixture tools
+      - name: Build simulator framework before booting the device
         run: |
           set -euo pipefail
-          python3 scripts/test-ios.py --prepare "AdVanish-checks-${{ github.run_id }}" > "$RUNNER_TEMP/advanish-udid" &
-          prepare=$!
-          trap 'kill "$prepare" 2>/dev/null || true' EXIT
           bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" jailed
           export THEOS="$RUNNER_TEMP/advanish-tools/theos"
           echo "THEOS=$THEOS" >> "$GITHUB_ENV"
           python3 scripts/build-jailed.py --simulator --output "$RUNNER_TEMP/advanish-framework"
-          wait "$prepare"
-          trap - EXIT
+      - name: Prepare shared simulator
+        run: |
+          set -euo pipefail
+          python3 scripts/test-ios.py --prepare "AdVanish-checks-${{ github.run_id }}" > "$RUNNER_TEMP/advanish-udid"
           echo "SIM_UDID=$(cat "$RUNNER_TEMP/advanish-udid")" >> "$GITHUB_ENV"
       - name: Check production Settings
         run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --device "$SIM_UDID" --settings --output dist/ios/ios-settings.json
@@ -117,7 +116,7 @@ jobs:
           if-no-files-found: error
           overwrite: true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+        if: ${{ always() && (hashFiles('project/dist/ios/ios-settings.json') != '' || hashFiles('project/dist/ios/ios-settings-diagnostics.json') != '') }}
         with:
           name: advanish-ios-settings-${{ github.sha }}
           path: |
@@ -126,7 +125,7 @@ jobs:
           if-no-files-found: error
           overwrite: true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+        if: ${{ always() && (hashFiles('project/dist/ios/ios-simulator.json') != '' || hashFiles('project/dist/ios/ios-simulator-diagnostics.json') != '') }}
         with:
           name: advanish-ios-native-${{ github.sha }}
           path: |
@@ -135,7 +134,7 @@ jobs:
           if-no-files-found: error
           overwrite: true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+        if: ${{ always() && (hashFiles('project/dist/ios/ios-injected.json') != '' || hashFiles('project/dist/ios/ios-injected-diagnostics.json') != '') }}
         with:
           name: advanish-ios-injected-${{ github.sha }}
           path: |
@@ -144,7 +143,7 @@ jobs:
           if-no-files-found: error
           overwrite: true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+        if: ${{ always() && (hashFiles('project/dist/ios/ios-injected-manual.json') != '' || hashFiles('project/dist/ios/ios-injected-manual-diagnostics.json') != '') }}
         with:
           name: advanish-ios-manual-${{ github.sha }}
           path: |
