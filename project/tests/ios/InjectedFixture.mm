@@ -3,6 +3,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
 #import "ASPTimers.h"
+#import "AVNRuntime.h"
 #import <AVFoundation/AVFoundation.h>
 #import <WebKit/WebKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -487,15 +488,12 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     WKWebView *disabledWeb = [[WKWebView alloc] initWithFrame:CGRectZero configuration:[WKWebViewConfiguration new]];
     if (!check(disabledWeb.configuration.userContentController.userScripts.count == 0,
                @"Disabled apps receive no injected web acceleration scripts")) return YES;
-    AVPlayer *disabledPlayer = [AVPlayer new];
-    disabledPlayer.rate = 1;
-    if (!check(disabledPlayer.rate == 1, @"Disabled apps preserve native playback rates")) return YES;
-    [disabledPlayer pause];
+    if (!check(AVNPlaybackRate(1) == 1, @"Disabled apps preserve native playback rate requests")) return YES;
     [options setValue:@(wasEnabled) forKey:@"enabled"];
     ASPTimerSetAdActive(YES);
-    NSTimeInterval outer = ASPTimerEnter(2);
+    NSTimeInterval outer = ASPTimerEnter(16);
     NSTimeInterval inner = ASPTimerEnter(outer);
-    if (!check(outer == (manualMode ? 2 : 0.125) && inner == outer,
+    if (!check(outer == (manualMode ? 16 : 1) && inner == outer,
                @"Nested native timer constructors compress once and preserve manual mode")) return YES;
     ASPTimerExit();
     ASPTimerExit();
