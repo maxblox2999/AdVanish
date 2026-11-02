@@ -43,8 +43,8 @@ for variant in ["rootless", "rootful", "roothide", "jailed"]:
             assert info["commit"] == SHA and info["hook_engine"] == "Logos internal"
         shutil.copyfile(payload, OUTPUT / ("AdVanish-" + VERSION + "-jailed.zip"))
         for key, name, count in [
-            ("injected", "ios-injected.json", 21),
-            ("manual", "ios-injected-manual.json", 26),
+            ("injected", "ios-injected.json", 26),
+            ("manual", "ios-injected-manual.json", 31),
         ]:
             report = json.loads((folder / name).read_text())
             assert report["passed"] and report["source_commit"] == SHA
@@ -92,7 +92,7 @@ browser = json.loads((source_folder / "browser.json").read_text())
 assert browser["passed"] >= 39
 assert browser["sourceSha256"] == hashlib.sha256((PROJECT / "web/adspeed.js").read_bytes()).hexdigest()
 validation = {
-    "node_tests": 135, "ipa_tool_tests": 40, "browser": browser,
+    "node_tests": 135, "ipa_tool_tests": 46, "browser": browser,
     "version": VERSION, "commit": SHA,
     "workflow": "https://github.com/maxblox2999/AdVanish/actions/runs/" + RUN,
     "packages": reports, "ios_simulator": native,

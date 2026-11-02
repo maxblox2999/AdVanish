@@ -1,7 +1,8 @@
 # AdVanish 0.7.0
 
-- Accelerate native SDK countdowns. NSTimer countdowns are compressed inside an active ad in automatic mode.
-- Compress only 0.5s to 30s intervals, so animation, input and network timers keep their real speed.
-- Keep web timer and clock acceleration, 16x AVPlayer playback and manual mode unchanged.
+- Add native NSTimer acceleration in automatic mode.
+- Prevent nested timer constructors from applying acceleration twice.
+- Respect the global and per-app disable switches for web injection and native playback.
+- Keep Logos hooks, broad video/web acceleration and manual mode.
 
-Automatic mode also speeds non-ad video and web content in enabled apps. Server reward checks and remote eligibility remain unchanged. Physical-device behavior and real game rewards remain unverified.
+Eligible 0.5–30 second native timers are accelerated while an ad surface is active; this can include unrelated timers. Server waits and rewards remain controlled by the app. Physical-device behavior remains unverified.

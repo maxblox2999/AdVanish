@@ -64,19 +64,44 @@
 %group AVNTimerHooks
 %hook NSTimer
 + (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)interval target:(id)target selector:(SEL)selector userInfo:(id)userInfo repeats:(BOOL)repeats {
-    return %orig(ASPTimerCompress(interval), target, selector, userInfo, repeats);
+    NSTimeInterval compressed = ASPTimerEnter(interval);
+    @try {
+        return %orig(compressed, target, selector, userInfo, repeats);
+    } @finally {
+        ASPTimerExit();
+    }
 }
 + (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)interval repeats:(BOOL)repeats block:(void (^)(NSTimer *timer))block {
-    return %orig(ASPTimerCompress(interval), repeats, block);
+    NSTimeInterval compressed = ASPTimerEnter(interval);
+    @try {
+        return %orig(compressed, repeats, block);
+    } @finally {
+        ASPTimerExit();
+    }
 }
 + (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)interval invocation:(NSInvocation *)invocation repeats:(BOOL)repeats {
-    return %orig(ASPTimerCompress(interval), invocation, repeats);
+    NSTimeInterval compressed = ASPTimerEnter(interval);
+    @try {
+        return %orig(compressed, invocation, repeats);
+    } @finally {
+        ASPTimerExit();
+    }
 }
 + (NSTimer *)timerWithTimeInterval:(NSTimeInterval)interval target:(id)target selector:(SEL)selector userInfo:(id)userInfo repeats:(BOOL)repeats {
-    return %orig(ASPTimerCompress(interval), target, selector, userInfo, repeats);
+    NSTimeInterval compressed = ASPTimerEnter(interval);
+    @try {
+        return %orig(compressed, target, selector, userInfo, repeats);
+    } @finally {
+        ASPTimerExit();
+    }
 }
 + (NSTimer *)timerWithTimeInterval:(NSTimeInterval)interval repeats:(BOOL)repeats block:(void (^)(NSTimer *timer))block {
-    return %orig(ASPTimerCompress(interval), repeats, block);
+    NSTimeInterval compressed = ASPTimerEnter(interval);
+    @try {
+        return %orig(compressed, repeats, block);
+    } @finally {
+        ASPTimerExit();
+    }
 }
 %end
 %end

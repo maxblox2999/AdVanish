@@ -108,12 +108,13 @@
     return runtime;
 }
 - (BOOL)blocks:(NSURL *)url {
-    if (!self.options.redirects || !ASPManualSkipAdSurfaces().count) return NO;
+    if (!self.options.enabled || !self.options.redirects || !ASPManualSkipAdSurfaces().count) return NO;
     NSString *scheme = url.scheme.lowercaseString;
     return [scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"] ||
         [scheme hasPrefix:@"itms-"];
 }
 - (void)prepare:(WKWebViewConfiguration *)configuration {
+    if (!self.options.enabled) return;
     WKUserContentController *content = configuration.userContentController;
     if (!content) return;
     for (WKUserScript *script in content.userScripts) {
@@ -149,6 +150,7 @@
     if (message.frameInfo.mainFrame && message.webView) [self authorize:message.webView];
 }
 - (void)mount:(WKWebView *)page {
+    if (!self.options.enabled) return;
     if (!NSThread.isMainThread) return;
     if (page.window) {
         ASPManualSkipTrackWebView(page);
@@ -162,12 +164,14 @@
     [self refresh];
 }
 - (void)observe:(UIViewController *)controller {
+    if (!self.options.enabled) return;
     ASPManualSkipTrackController(controller);
     ASPAdCompletionTrackController(controller);
     [self refresh];
 }
 - (void)refresh {
     if (!NSThread.isMainThread) return;
+    if (!self.options.enabled) { ASPTimerSetAdActive(NO); return; }
     BOOL active = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
     ASPAdCompletionTrackController(nil);
     NSArray<ASPAdSurface *> *surfaces = ASPManualSkipAdSurfaces();

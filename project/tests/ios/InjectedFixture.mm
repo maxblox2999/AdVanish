@@ -1,6 +1,8 @@
 // Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
 
 #import <UIKit/UIKit.h>
+#import <objc/message.h>
+#import "ASPTimers.h"
 #import <AVFoundation/AVFoundation.h>
 #import <WebKit/WebKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -478,6 +480,28 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     }];
     float (*rate)(void) = (float (*)(void))dlsym(RTLD_DEFAULT, "ASPSpeedRate");
     if (!check(rate && rate() == 16, @"The jailed framework loads and exposes the shared 16x policy")) return YES;
+    id runtime = ((id (*)(id, SEL))objc_msgSend)(NSClassFromString(@"AVNRuntime"), NSSelectorFromString(@"shared"));
+    id options = [runtime valueForKey:@"options"];
+    BOOL wasEnabled = [[options valueForKey:@"enabled"] boolValue];
+    [options setValue:@NO forKey:@"enabled"];
+    WKWebView *disabledWeb = [[WKWebView alloc] initWithFrame:CGRectZero configuration:[WKWebViewConfiguration new]];
+    if (!check(disabledWeb.configuration.userContentController.userScripts.count == 0,
+               @"Disabled apps receive no injected web acceleration scripts")) return YES;
+    AVPlayer *disabledPlayer = [AVPlayer new];
+    disabledPlayer.rate = 1;
+    if (!check(disabledPlayer.rate == 1, @"Disabled apps preserve native playback rates")) return YES;
+    [disabledPlayer pause];
+    [options setValue:@(wasEnabled) forKey:@"enabled"];
+    ASPTimerSetAdActive(YES);
+    NSTimeInterval outer = ASPTimerEnter(2);
+    NSTimeInterval inner = ASPTimerEnter(outer);
+    if (!check(outer == (manualMode ? 2 : 0.125) && inner == outer,
+               @"Nested native timer constructors compress once and preserve manual mode")) return YES;
+    ASPTimerExit();
+    ASPTimerExit();
+    if (!check(ASPTimerCompress(0.1) == 0.1 && ASPTimerCompress(31) == 31,
+               @"Native timer compression preserves out-of-range intervals")) return YES;
+    ASPTimerSetAdActive(NO);
     WKWebViewConfiguration *config = [WKWebViewConfiguration new];
     WKUserScript *fixtureClock = [[WKUserScript alloc] initWithSource:
         @"window.fixtureNativeNow=performance.now.bind(performance);window.fixtureNativeTimeout=setTimeout.bind(window);"

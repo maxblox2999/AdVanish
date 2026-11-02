@@ -3,6 +3,7 @@
 #import "ASPTimers.h"
 #import "ASPSpeed.h"
 #include <cmath>
+#include <atomic>
 
 // A countdown tick and a one-shot ad wait both live in this window. Shorter
 // intervals belong to animation and input handling, longer ones to network
@@ -10,8 +11,9 @@
 static const NSTimeInterval kASPTimerMinimum = 0.5;
 static const NSTimeInterval kASPTimerMaximum = 30.0;
 
-static BOOL timerEnabled;
-static BOOL adActive;
+static std::atomic<bool> timerEnabled{false};
+static std::atomic<bool> adActive{false};
+static thread_local NSUInteger constructionDepth;
 
 void ASPTimerConfigure(BOOL enabled) { timerEnabled = enabled; }
 void ASPTimerSetAdActive(BOOL active) { adActive = active; }
@@ -23,4 +25,11 @@ NSTimeInterval ASPTimerCompress(NSTimeInterval interval) {
     if (interval < kASPTimerMinimum || interval > kASPTimerMaximum) return interval;
     float rate = ASPSpeedRate();
     return rate > 1 ? interval / rate : interval;
+}
+
+NSTimeInterval ASPTimerEnter(NSTimeInterval interval) {
+    return constructionDepth++ == 0 ? ASPTimerCompress(interval) : interval;
+}
+void ASPTimerExit(void) {
+    if (constructionDepth) --constructionDepth;
 }
