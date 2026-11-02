@@ -482,14 +482,14 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     float (*rate)(void) = (float (*)(void))dlsym(RTLD_DEFAULT, "ASPSpeedRate");
     if (!check(rate && rate() == 16, @"The jailed framework loads and exposes the shared 16x policy")) return YES;
     id runtime = ((id (*)(id, SEL))objc_msgSend)(NSClassFromString(@"AVNRuntime"), NSSelectorFromString(@"shared"));
-    id options = [runtime valueForKey:@"options"];
-    BOOL wasEnabled = [[options valueForKey:@"enabled"] boolValue];
-    [options setValue:@NO forKey:@"enabled"];
+    id runtimeOptions = [runtime valueForKey:@"options"];
+    BOOL wasEnabled = [[runtimeOptions valueForKey:@"enabled"] boolValue];
+    [runtimeOptions setValue:@NO forKey:@"enabled"];
     WKWebView *disabledWeb = [[WKWebView alloc] initWithFrame:CGRectZero configuration:[WKWebViewConfiguration new]];
     if (!check(disabledWeb.configuration.userContentController.userScripts.count == 0,
                @"Disabled apps receive no injected web acceleration scripts")) return YES;
     if (!check(AVNPlaybackRate(1) == 1, @"Disabled apps preserve native playback rate requests")) return YES;
-    [options setValue:@(wasEnabled) forKey:@"enabled"];
+    [runtimeOptions setValue:@(wasEnabled) forKey:@"enabled"];
     ASPTimerSetAdActive(YES);
     NSTimeInterval outer = ASPTimerEnter(16);
     NSTimeInterval inner = ASPTimerEnter(outer);
