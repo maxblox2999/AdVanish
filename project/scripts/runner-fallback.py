@@ -1,5 +1,5 @@
 # Copyright (C) 2026 maxblox2999. See LICENSE and NOTICE.md.
-"""Retry a main build on Intel when the Arm runner queue stops making progress."""
+"""Retry an unstarted main build on Intel without discarding completed checks."""
 import json
 import os
 import subprocess
@@ -20,7 +20,9 @@ def decision(jobs, waited):
     mac = mac_jobs(jobs)
     if not mac:
         return "wait"
-    if any(job["status"] == "completed" and job.get("conclusion") != "success" for job in mac):
+    # Dispatching a replacement cancels this run, including all successful artifacts.
+    # Once any macOS job has finished, preserve that work and its remaining queue.
+    if any(job["status"] == "completed" for job in mac):
         return "done"
     variants = ("rootless", "jailed", "rootful", "roothide")
     if all(any(job["name"].startswith("package (" + variant + ")") and job["status"] == "completed"

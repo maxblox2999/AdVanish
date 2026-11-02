@@ -26,8 +26,8 @@ class RunnerFallbackTests(unittest.TestCase):
     def test_running_job_is_never_interrupted(self):
         self.assertEqual(runner.decision([job("queued"), job("in_progress")], 900), "wait")
 
-    def test_successful_jobs_allow_remaining_queue_retry(self):
-        self.assertEqual(runner.decision([job("completed", "success"), job("queued")], 900), "fallback")
+    def test_successful_jobs_prevent_destructive_whole_run_retry(self):
+        self.assertEqual(runner.decision([job("completed", "success"), job("queued")], 900), "done")
 
     def test_test_failure_is_not_hidden_by_runner_retry(self):
         self.assertEqual(runner.decision([job("completed", "failure"), job("queued")], 900), "done")
@@ -61,11 +61,11 @@ class RunnerFallbackTests(unittest.TestCase):
     def test_queued_shared_checks_can_use_runner_fallback(self):
         self.assertEqual(runner.decision([job("queued", name="checks")], 300), "fallback")
 
-    def test_shared_checks_completion_does_not_end_watch_early(self):
-        self.assertEqual(runner.decision([job("completed", "success", name="checks")], 900), "wait")
+    def test_shared_checks_completion_preserves_artifacts(self):
+        self.assertEqual(runner.decision([job("completed", "success", name="checks")], 900), "done")
 
-    def test_first_package_completion_keeps_watching_later_packages(self):
-        self.assertEqual(runner.decision([job("completed", "success")], 900), "wait")
+    def test_first_package_completion_preserves_build(self):
+        self.assertEqual(runner.decision([job("completed", "success")], 900), "done")
 
 
 if __name__ == "__main__":
