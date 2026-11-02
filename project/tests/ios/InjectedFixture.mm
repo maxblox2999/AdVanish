@@ -533,7 +533,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     ASPTimerSetAdActive(YES);
     NSTimeInterval outer = ASPTimerEnter(16);
     NSTimeInterval inner = ASPTimerEnter(outer);
-    if (!check(fabs(outer - (manualMode ? 16 : 16 / ASPSpeedRate())) < 1e-9 && inner == outer,
+    if (!check(fabs(outer - (manualMode ? 16.0 : 16.0 / ASPSpeedRate())) < 1e-9 && inner == outer,
                @"Nested native timer constructors compress once and preserve manual mode")) return YES;
     ASPTimerExit();
     ASPTimerExit();
