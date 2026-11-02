@@ -15,10 +15,10 @@
 | MAX callback and creative were different objects | Validate the actual AppLovin adapter ownership chain |
 | AppLovin X was not a UIControl | Record its SDK tap registration; activate only after a matching genuine completion |
 | Stale media retained manual speed | Revoke authorization on source, item, creative or ownership changes |
-| Native countdowns ran at real speed | Compress 0.5–30s NSTimer intervals while an ad surface is active |
+| Native countdowns ran at real speed | Compress 0.5-30s NSTimer intervals while an ad surface is active |
 | Nested timer constructors compressed twice | Track construction depth per thread and compress once |
 | Disabled apps still received hooks | Gate injection, playback and timers on the master and per-app switches |
 | Failed builds retained stale reports | Clear reports before startup; allow artifact replacement on reruns |
 | RootHide uses a randomized root | Separate toolchain and package; resolve preference paths through jbroot |
 
-[Tests](VALIDATION.md) · [Ad types and limits](AD_TYPES.md).
+[Tests](VALIDATION.md) - [Ad types and limits](AD_TYPES.md).
