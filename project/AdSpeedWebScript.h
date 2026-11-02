@@ -113,7 +113,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
     }
 
     function accelerationActive() {
-        return broadPlaybackActive() || (recognizedAd && (automatic || manualContext) && !pageHidden());
+        return broadPlaybackActive() || ((automatic || manualContext) && !pageHidden());
     }
 
     function timingAvailable() {
@@ -122,7 +122,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
     }
 
     function authorizeTiming(timingOnly, snapshot) {
-        if (!recognizedAd || pageHidden() || !timingAvailable()) return false;
+        if (pageHidden() || !timingAvailable()) return false;
         manualContext = true;
         manualTimingOnly = timingOnly === true;
         manualTimingSnapshot = manualTimingOnly ? snapshot : null;
@@ -452,7 +452,7 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
 
     function schedulePoll() {
         if (pollHandle !== null || pageHidden() || typeof nativeTimeout !== 'function'
-            || !((recognizedAd || contextPolicy === null || broadPlaybackActive()) && (speedVideo || compressTimers || accelerateClock || autoComplete))) {
+            || !((recognizedAd || manualContext || contextPolicy === null || broadPlaybackActive()) && (speedVideo || compressTimers || accelerateClock || autoComplete))) {
             return;
         }
         pollHandle = nativeTimeout.call(window, function () {

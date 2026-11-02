@@ -111,7 +111,7 @@
     }
 
     function accelerationActive() {
-        return broadPlaybackActive() || (recognizedAd && (automatic || manualContext) && !pageHidden());
+        return broadPlaybackActive() || ((automatic || manualContext) && !pageHidden());
     }
 
     function timingAvailable() {
@@ -120,7 +120,7 @@
     }
 
     function authorizeTiming(timingOnly, snapshot) {
-        if (!recognizedAd || pageHidden() || !timingAvailable()) return false;
+        if (pageHidden() || !timingAvailable()) return false;
         manualContext = true;
         manualTimingOnly = timingOnly === true;
         manualTimingSnapshot = manualTimingOnly ? snapshot : null;
@@ -450,7 +450,7 @@
 
     function schedulePoll() {
         if (pollHandle !== null || pageHidden() || typeof nativeTimeout !== 'function'
-            || !((recognizedAd || contextPolicy === null || broadPlaybackActive()) && (speedVideo || compressTimers || accelerateClock || autoComplete))) {
+            || !((recognizedAd || manualContext || contextPolicy === null || broadPlaybackActive()) && (speedVideo || compressTimers || accelerateClock || autoComplete))) {
             return;
         }
         pollHandle = nativeTimeout.call(window, function () {
