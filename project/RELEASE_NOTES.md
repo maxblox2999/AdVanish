@@ -1,4 +1,4 @@
-# AdVanish 0.8.9
+# AdVanish 0.8.10
 
 Choose your download:
 
@@ -11,11 +11,11 @@ DEBs include arm64 and arm64e. Choose by jailbreak, not chip.
 
 Changes:
 
-- Retain 0.8.8 SDK detection and Close getter support.
-- Keep verified completion active across video and interactive end-card stages.
-- Add nested native and accessible HTML Close controls.
-- Support standalone AppLovin playable owners with verified creative identity.
-- Bound scanning, pending web requests and repeated Close actions.
-- Preserve 80x acceleration, manual mode and App Store prompt hiding.
+- Add per-app Banners → Block ad banners, off by default.
+- Block Google AdMob and Ad Manager banner load requests and remove their SDK views.
+- Preserve ordinary game UI, 80x speed, manual mode and completed-ad closing.
+- Jailed configurations accept BlockBanners.
 
-Rewarded dismissal still waits for a genuine SDK reward callback. Opaque cross-origin controls and creatives requiring trusted physical input can remain unsupported. Real-game rewards and physical devices remain unverified.
+Reopen the app after changing banner settings. Custom game-reserved space can remain. This does not block native feeds, full-screen ads or unknown banner SDKs.
+
+Simulator tests use mock SDK classes. Real games, rewards and physical devices remain unverified.

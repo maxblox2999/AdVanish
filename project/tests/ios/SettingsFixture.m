@@ -104,13 +104,21 @@ static void require(BOOL value, NSString *name) {
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                 @try {
                 [child.view layoutIfNeeded];
-                require(child.specifiers.count == 16, [NSString stringWithFormat:@"The app Settings page has every control (rows=%lu, app=%@)", (unsigned long)child.specifiers.count, child.avnApplicationIdentifier]);
+                require(child.specifiers.count == 18, [NSString stringWithFormat:@"The app Settings page has every control (rows=%lu, app=%@)", (unsigned long)child.specifiers.count, child.avnApplicationIdentifier]);
                 require(child.view.window == self.window, @"The app Settings page is attached to the window");
                 NSMutableArray *groups = NSMutableArray.array;
                 for (PSSpecifier *row in child.specifiers) {
                     if (![row propertyForKey:@"AVNKey"]) [groups addObject:row.name ?: @""];
                 }
-                require([groups isEqual:@[@"This app", @"Ad playback", @"Video", @"Ad countdowns", @"Completion"]], @"Per-app controls retain the categorized layout");
+                require([groups isEqual:@[@"This app", @"Ad playback", @"Banners", @"Video", @"Ad countdowns", @"Completion"]], @"Per-app controls retain the categorized layout");
+
+                PSSpecifier *banners = child.specifiers[6];
+                require([[banners propertyForKey:@"AVNKey"] isEqual:@"com.maxblox2999.fixture-BlockBanners"] &&
+                    ![[child valueForControl:banners] boolValue], @"Banner blocking is off by default and scoped to this app");
+                [child changeValue:@YES forControl:banners];
+                require([ASPApplicationPreferences(child.database, @"com.maxblox2999.fixture")[@"BlockBanners"] boolValue] &&
+                    ![ASPApplicationPreferences(child.database, @"com.maxblox2999.other")[@"BlockBanners"] boolValue],
+                    @"The banner switch enables only its selected app");
                 PSSpecifier *enabled = child.specifiers[1];
                 require([[enabled propertyForKey:@"AVNKey"] isEqual:@"enabled-com.maxblox2999.fixture"], @"Existing app-enabled preference keys are preserved");
                 require([[child valueForControl:enabled] respondsToSelector:@selector(boolValue)], @"Switch values load without invalid dictionary access");
@@ -151,7 +159,7 @@ static void require(BOOL value, NSString *name) {
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
                 @try {
                 [child.view layoutIfNeeded];
-                require(child.specifiers.count == 16 && child.view.window == self.window, @"Saved switches reload without invalidating Settings rows");
+                require(child.specifiers.count == 18 && child.view.window == self.window, @"Saved switches reload without invalidating Settings rows");
                 [navigation popViewControllerAnimated:NO];
                 [root.view layoutIfNeeded];
                 require(root.specifiers.count == 5, @"Returning to the root rebuilds a usable row cache");

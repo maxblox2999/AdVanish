@@ -4,6 +4,8 @@
 #import <WebKit/WebKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
+#include <cstring>
 #import <mach-o/dyld.h>
 #include <cmath>
 #import "ASPPaths.h"
@@ -27,6 +29,7 @@
 @property (nonatomic) BOOL dismissal;
 @property (nonatomic) BOOL redirects;
 @property (nonatomic) BOOL hideStore;
+@property (nonatomic) BOOL blockBanners;
 @property (nonatomic) BOOL inlineVideo;
 + (instancetype)readConfiguration;
 @end
@@ -62,6 +65,7 @@
     options.dismissal = flag(@"AutoDismiss", YES);
     options.redirects = flag(@"BlockRedirects", YES);
     options.hideStore = flag(@"HideAppStore", YES);
+    options.blockBanners = flag(@"BlockBanners", NO);
     options.inlineVideo = flag(@"ForceInline", NO);
     if (!ASPApplicationHost(bundle, NSBundle.mainBundle.bundlePath)) options.enabled = NO;
     return options;
@@ -213,6 +217,7 @@
         @synchronized (self) { self.refreshQueued = NO; }
         ASPAdCompletionInstallHooks();
         AVNInstallStoreHooks();
+        AVNInstallBannerHooks();
         [self refresh];
     });
 }
@@ -221,6 +226,7 @@
     ASPAdCompletionConfigure(self.options.automatic && self.options.dismissal);
     ASPAdCompletionInstallHooks();
     AVNInstallStoreHooks();
+    AVNInstallBannerHooks();
     ASPTimerConfigure(self.options.enabled && self.options.timers && self.options.automatic);
     for (NSNotificationName event in @[UIApplicationDidBecomeActiveNotification, UIApplicationDidEnterBackgroundNotification]) {
         [NSNotificationCenter.defaultCenter addObserverForName:event object:nil queue:NSOperationQueue.mainQueue
@@ -330,4 +336,75 @@ void AVNFinishPlaybackRate(AVPlayer *player, float requested, float applied) {
         if (player.rate >= candidate * 0.9f) return;
     }
     @try { ASPSpeedSetRate(player, requested); } @catch (NSException *exception) {}
+}
+
+static BOOL AVNBannerBlocking(void) {
+    AVNOptions *options = AVNRuntime.shared.options;
+    return options.enabled && options.blockBanners;
+}
+
+static void AVNRemoveBanner(UIView *banner) {
+    if (!NSThread.isMainThread || !AVNBannerBlocking() || !banner.superview) return;
+    UIView *parent = banner.superview;
+    if ([parent isKindOfClass:UIStackView.class]) [(UIStackView *)parent removeArrangedSubview:banner];
+    [banner removeFromSuperview];
+}
+
+static void AVNBannerRejected(UIView *banner) {
+    AVNRemoveBanner(banner);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SEL getter = NSSelectorFromString(@"delegate");
+        NSMethodSignature *signature = [banner methodSignatureForSelector:getter];
+        if (!signature || signature.numberOfArguments != 2 || signature.methodReturnType[0] != '@') return;
+        id delegate = ((id (*)(id, SEL))objc_msgSend)(banner, getter);
+        SEL callback = NSSelectorFromString(@"bannerView:didFailToReceiveAdWithError:");
+        signature = [delegate methodSignatureForSelector:callback];
+        if (!signature || signature.numberOfArguments != 4 || signature.methodReturnType[0] != 'v' ||
+            [signature getArgumentTypeAtIndex:2][0] != '@' || [signature getArgumentTypeAtIndex:3][0] != '@') return;
+        NSError *error = [NSError errorWithDomain:@"com.maxblox2999.advanish" code:1
+            userInfo:@{NSLocalizedDescriptionKey: @"Banner blocked by AdVanish."}];
+        ((void (*)(id, SEL, id, id))objc_msgSend)(delegate, callback, banner, error);
+    });
+}
+
+void AVNInstallBannerHooks(void) {
+    if (!NSThread.isMainThread) return;
+    static NSMutableSet<NSString *> *installed;
+    if (!installed) installed = NSMutableSet.set;
+    for (NSString *name in @[@"GADBannerView", @"GAMBannerView", @"DFPBannerView"]) {
+        Class cls = NSClassFromString(name);
+        if (!cls || ![cls isSubclassOfClass:UIView.class]) continue;
+        for (NSString *methodName in @[@"loadRequest:", @"didMoveToSuperview"]) {
+            NSString *key = [name stringByAppendingString:methodName];
+            if ([installed containsObject:key]) continue;
+            SEL selector = NSSelectorFromString(methodName);
+            Method method = class_getInstanceMethod(cls, selector);
+            BOOL load = [methodName isEqualToString:@"loadRequest:"];
+            if (!method || method_getNumberOfArguments(method) != (load ? 3 : 2)) continue;
+            char type[16] = {};
+            method_getReturnType(method, type, sizeof(type));
+            if (strcmp(type, @encode(void))) continue;
+            if (load) {
+                method_getArgumentType(method, 2, type, sizeof(type));
+                if (type[0] != '@') continue;
+            }
+            IMP original = method_getImplementation(method);
+            IMP replacement;
+            if (load) {
+                replacement = imp_implementationWithBlock(^(UIView *banner, id request) {
+                    if (AVNBannerBlocking()) { AVNBannerRejected(banner); return; }
+                    ((void (*)(id, SEL, id))original)(banner, selector, request);
+                });
+            } else {
+                replacement = imp_implementationWithBlock(^(UIView *banner) {
+                    ((void (*)(id, SEL))original)(banner, selector);
+                    AVNRemoveBanner(banner);
+                });
+            }
+            if (!class_addMethod(cls, selector, replacement, method_getTypeEncoding(method))) {
+                class_replaceMethod(cls, selector, replacement, method_getTypeEncoding(method));
+            }
+            [installed addObject:key];
+        }
+    }
 }

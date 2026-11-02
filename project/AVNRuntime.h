@@ -17,3 +17,5 @@ BOOL AVNBlocksURL(NSURL *url);
 void AVNInstallStoreHooks(void);
 BOOL AVNBlocksStoreOverlay(UIWindowScene *scene);
 BOOL AVNBlockStorePresentation(UIViewController *presenter, UIViewController *controller, void (^completion)(void));
+
+void AVNInstallBannerHooks(void);

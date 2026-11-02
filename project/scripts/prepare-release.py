@@ -44,8 +44,8 @@ for variant in ["rootless", "rootful", "roothide", "jailed"]:
             assert info["commit"] == SHA and info["hook_engine"] == "Logos internal"
         shutil.copyfile(payload, OUTPUT / ("AdVanish-" + VERSION + "-jailed.zip"))
         for key, name, count in [
-            ("injected", "ios-injected.json", 43),
-            ("manual", "ios-injected-manual.json", 48),
+            ("injected", "ios-injected.json", 53),
+            ("manual", "ios-injected-manual.json", 58),
         ]:
             report = json.loads((INCOMING / ("advanish-ios-" + key + "-" + SHA) / name).read_text())
             assert report["passed"] and report["source_commit"] == SHA
@@ -71,7 +71,7 @@ for variant in ["rootless", "rootful", "roothide", "jailed"]:
             native["helpers"] = report
             settings_report = json.loads((INCOMING / ("advanish-ios-settings-" + SHA) / "ios-settings.json").read_text())
             assert settings_report["passed"] and settings_report["source_commit"] == SHA
-            assert settings_report["settings_controller"] and len(settings_report["checks"]) >= 31
+            assert settings_report["settings_controller"] and len(settings_report["checks"]) >= 35
             native["settings"] = settings_report
 
 source_folder = INCOMING / ("advanish-source-" + SHA)

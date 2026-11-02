@@ -37,6 +37,36 @@ static NSUInteger visibleSkipWindows(void) {
     return count;
 }
 
+
+@interface GADBannerView : UIView
+@property (nonatomic, weak) id delegate;
+@property (nonatomic) NSUInteger requests;
+- (void)loadRequest:(id)request;
+@end
+@implementation GADBannerView
+- (void)loadRequest:(id)request { self.requests += 1; }
+@end
+@interface GAMBannerView : GADBannerView
+@end
+@implementation GAMBannerView
+- (void)loadRequest:(id)request { self.requests += 1; }
+@end
+@interface DFPBannerView : GADBannerView
+@end
+@implementation DFPBannerView
+@end
+@interface FixtureBannerDelegate : NSObject
+@property (nonatomic) NSUInteger failures;
+@property (nonatomic, strong) NSError *error;
+@end
+@implementation FixtureBannerDelegate
+- (void)bannerView:(UIView *)banner didFailToReceiveAdWithError:(NSError *)error {
+    self.failures += 1;
+    self.error = error;
+}
+@end
+static FixtureBannerDelegate *bannerDelegate;
+
 @interface InjectedFallbackPlayer : AVPlayer
 @property (nonatomic) float storedRate;
 @property (nonatomic) float maximumRate;
@@ -285,6 +315,8 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 @end
 @implementation InjectedDelegate
 - (void)runRegisteredTapChecks {
+    if (!check(bannerDelegate.failures == 1 && [bannerDelegate.error.domain isEqualToString:@"com.maxblox2999.advanish"],
+               @"A blocked banner reports one explicit load failure without a success or reward callback")) return;
     UIViewController *presenter = self.window.rootViewController;
     ALBaseVideoViewController *owner = [ALBaseVideoViewController new];
     [presenter addChildViewController:owner];
@@ -620,6 +652,51 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
                @"Disabled apps receive no injected web acceleration scripts")) return YES;
     if (!check(AVNPlaybackRate(1) == 1, @"Disabled apps preserve native playback rate requests")) return YES;
     [runtimeOptions setValue:@(wasEnabled) forKey:@"enabled"];
+
+    if (!check(![[runtimeOptions valueForKey:@"blockBanners"] boolValue],
+               @"Banner blocking defaults off")) return YES;
+    bannerDelegate = [FixtureBannerDelegate new];
+    GADBannerView *banner = [[GADBannerView alloc] initWithFrame:CGRectMake(0, 0, 320, 50)];
+    banner.delegate = bannerDelegate;
+    UIStackView *bannerHost = [UIStackView new];
+    UIView *gameContent = [UIView new];
+    [bannerHost addArrangedSubview:gameContent];
+    [bannerHost addArrangedSubview:banner];
+    [banner loadRequest:nil];
+    if (!check(banner.requests == 1 && banner.superview == bannerHost,
+               @"An off banner toggle preserves Google load and attachment")) return YES;
+    [runtimeOptions setValue:@YES forKey:@"blockBanners"];
+    [banner loadRequest:nil];
+    if (!check(banner.requests == 1 && !banner.superview &&
+               ![bannerHost.arrangedSubviews containsObject:banner] && gameContent.superview == bannerHost,
+               @"Google banner blocking prevents loads and removes only the banner stack slot")) return YES;
+    [bannerHost addArrangedSubview:banner];
+    if (!check(!banner.superview && ![bannerHost.arrangedSubviews containsObject:banner],
+               @"A reinserted Google banner cannot remain visible")) return YES;
+    for (Class type in @[GAMBannerView.class, DFPBannerView.class]) {
+        GADBannerView *variant = [[type alloc] initWithFrame:CGRectMake(0, 0, 320, 100)];
+        [bannerHost addSubview:variant];
+        [variant loadRequest:nil];
+        if (!check(variant.requests == 0 && !variant.superview,
+                   [NSString stringWithFormat:@"%@ blocks inherited and overridden banner paths", NSStringFromClass(type)])) return YES;
+    }
+    UIView *announcement = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 50)];
+    announcement.accessibilityLabel = @"Banner advertisement";
+    [bannerHost addSubview:announcement];
+    if (!check(announcement.superview == bannerHost && !announcement.hidden,
+               @"Banner-like labels and game announcements never trigger banner removal")) return YES;
+    [runtimeOptions setValue:@NO forKey:@"enabled"];
+    GADBannerView *disabledBanner = [GADBannerView new];
+    [bannerHost addSubview:disabledBanner];
+    [disabledBanner loadRequest:nil];
+    if (!check(disabledBanner.requests == 1 && disabledBanner.superview == bannerHost,
+               @"Disabling the app restores banner loading and display")) return YES;
+    [runtimeOptions setValue:@(wasEnabled) forKey:@"enabled"];
+    [runtimeOptions setValue:@NO forKey:@"blockBanners"];
+    [bannerHost addArrangedSubview:banner];
+    [banner loadRequest:nil];
+    if (!check(banner.requests == 2 && banner.superview == bannerHost,
+               @"Disabling banner blocking restores the original Google banner path")) return YES;
     ASPTimerSetAdActive(YES);
     NSTimeInterval outer = ASPTimerEnter(16);
     NSTimeInterval inner = ASPTimerEnter(outer);

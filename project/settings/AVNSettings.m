@@ -167,6 +167,8 @@ static id AVNSettingsObject(id receiver, NSString *name) {
         [rows addObject:[self section:@"Ad playback" note:@"Automatic ads hides the button. Turn it off to use manual fast-forward."]];
         [rows addObject:[self toggle:@"Automatic ads" feature:@"AutomaticAds" initial:defaultAutomatic]];
         [rows addObject:[self toggle:@"Show button in manual mode" feature:@"ManualSkip" initial:YES]];
+        [rows addObject:[self section:@"Banners" note:@"Blocks Google ad banners. Reopen the app after changing this setting."]];
+        [rows addObject:[self toggle:@"Block ad banners" feature:@"BlockBanners" initial:NO]];
         [rows addObject:[self section:@"Video" note:@"Speeds AVPlayer playback throughout this enabled app, including non-ad video."]];
         [rows addObject:[self toggle:@"Video speed" feature:@"SpeedUpVideo" initial:YES]];
         [rows addObject:[self toggle:@"Force inline video" feature:@"ForceInline" initial:NO]];

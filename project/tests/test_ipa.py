@@ -204,7 +204,7 @@ class ArchiveTests(unittest.TestCase):
     def test_embeds_validated_jailed_configuration(self):
         ipa(self.source)
         config = self.root / "settings.plist"
-        values = {"AutomaticAds": False, "ManualSkip": True, "AutoInteract": True, "SpeedUpVideo": True, "HideAppStore": True}
+        values = {"AutomaticAds": False, "ManualSkip": True, "AutoInteract": True, "SpeedUpVideo": True, "HideAppStore": True, "BlockBanners": True}
         config.write_bytes(plistlib.dumps(values))
         inject_module.inject(self.source, self.framework, self.output, config)
         with zipfile.ZipFile(self.output) as result:
