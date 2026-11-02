@@ -1,8 +1,9 @@
-# AdVanish 0.7.0
+# AdVanish 0.8.0
 
-- Add native NSTimer acceleration in automatic mode.
-- Prevent nested timer constructors from applying acceleration twice.
-- Respect the global and per-app disable switches for web injection and native playback.
-- Keep Logos hooks, broad video/web acceleration and manual mode.
+- Raise native and web acceleration targets from 16x to 80x.
+- Keep lower playback rates when a player rejects faster speeds.
+- Prevent nested native timer constructors from compressing twice.
+- Respect disabled apps and preserve manual mode.
+- Check Settings/package versions and require Main guard success before publishing.
 
-Eligible 0.5–30 second native timers are accelerated while an ad surface is active; this can include unrelated timers. Server waits and rewards remain controlled by the app. Physical-device behavior remains unverified.
+80x is a target, not a guaranteed speed for every creative. Native timers in the supported range may include other app tasks. Server waits and rewards remain controlled by the app. Physical-device behavior remains unverified.

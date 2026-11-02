@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import io
 import json
+import plistlib
 import struct
 import tarfile
 from pathlib import Path, PurePosixPath
@@ -125,6 +126,12 @@ def verify(path, variant, package_id, library):
         raise ValueError("Rootless package has files outside /var/jb")
     if variant in ("rootful", "roothide") and any(name.startswith("var/jb/") for name in files):
         raise ValueError("Package contains a fixed rootless installation path")
+    info_path = prefix + "Library/PreferenceBundles/adspeedprefs.bundle/Info.plist"
+    if info_path not in files:
+        raise ValueError("Missing Settings bundle metadata")
+    settings_info = plistlib.loads(files[info_path])
+    if settings_info.get("CFBundleVersion") != fields.get("Version"):
+        raise ValueError("Settings bundle version does not match package")
     binaries = {}
     for name in [prefix + "Library/MobileSubstrate/DynamicLibraries/" + library + ".dylib",
                  prefix + "Library/PreferenceBundles/adspeedprefs.bundle/adspeedprefs"]:
@@ -148,7 +155,7 @@ def verify(path, variant, package_id, library):
                 if any(name.startswith("/var/jb/") for name in image["dylibs"]):
                     raise ValueError("RootHide links to a fixed rootless path")
     return {"package": path.name, "sha256": hashlib.sha256(data).hexdigest(),
-            "variant": variant, "control": fields, "file_count": len(files), "binaries": binaries,
+            "variant": variant, "control": fields, "settings_version": settings_info["CFBundleVersion"], "file_count": len(files), "binaries": binaries,
             "limits": "Static package checks only; signature command presence is not cryptographic or device validation."}
 
 

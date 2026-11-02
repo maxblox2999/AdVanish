@@ -123,12 +123,12 @@ static id AVNSettingsObject(id receiver, NSString *name) {
     if (_specifiers) return _specifiers;
     NSMutableArray *rows = NSMutableArray.array;
     if (!self.avnApplicationIdentifier.length) {
-        [rows addObject:[self section:@"AdVanish" note:@"16x speed applies inside every app unless you disable it below."]];
+        [rows addObject:[self section:@"AdVanish" note:@"80x speed applies inside every app unless you disable it below."]];
         [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:YES]];
         NSArray *applications = self.avnInstalledApplications;
         for (NSNumber *enabled in @[@YES, @NO]) {
             [rows addObject:[self section:enabled.boolValue ? @"Enabled apps" : @"Not enabled"
-                note:enabled.boolValue ? @"16x speed applies inside enabled apps." : nil]];
+                note:enabled.boolValue ? @"80x speed applies inside enabled apps." : nil]];
             for (NSDictionary *app in applications) {
                 NSString *key = [@"enabled-" stringByAppendingString:app[@"identifier"]];
                 id stored = self.database[key];

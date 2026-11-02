@@ -16,7 +16,7 @@ SHA = os.environ["GITHUB_SHA"]
 RUN = os.environ["GITHUB_RUN_ID"]
 INCOMING = ROOT / "incoming"
 OUTPUT = ROOT / "release"
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 OUTPUT.mkdir(exist_ok=True)
 reports = {}
 native = {}
@@ -43,8 +43,8 @@ for variant in ["rootless", "rootful", "roothide", "jailed"]:
             assert info["commit"] == SHA and info["hook_engine"] == "Logos internal"
         shutil.copyfile(payload, OUTPUT / ("AdVanish-" + VERSION + "-jailed.zip"))
         for key, name, count in [
-            ("injected", "ios-injected.json", 26),
-            ("manual", "ios-injected-manual.json", 31),
+            ("injected", "ios-injected.json", 33),
+            ("manual", "ios-injected-manual.json", 38),
         ]:
             report = json.loads((folder / name).read_text())
             assert report["passed"] and report["source_commit"] == SHA
@@ -66,7 +66,7 @@ for variant in ["rootless", "rootful", "roothide", "jailed"]:
         if variant == "rootless":
             report = json.loads((folder / "ios-simulator.json").read_text())
             assert report["passed"] and report["source_commit"] == SHA
-            assert len(report["checks"]) >= 72
+            assert len(report["checks"]) >= 78
             native["helpers"] = report
             settings_report = json.loads((folder / "ios-settings.json").read_text())
             assert settings_report["passed"] and settings_report["source_commit"] == SHA
@@ -89,10 +89,10 @@ with zipfile.ZipFile(OUTPUT / ("AdVanish-" + VERSION + "-source.zip"), "w", zipf
         archive.writestr(name, data)
 
 browser = json.loads((source_folder / "browser.json").read_text())
-assert browser["passed"] >= 39
+assert browser["passed"] >= 43
 assert browser["sourceSha256"] == hashlib.sha256((PROJECT / "web/adspeed.js").read_bytes()).hexdigest()
 validation = {
-    "node_tests": 135, "ipa_tool_tests": 46, "browser": browser,
+    "node_tests": 143, "ipa_tool_tests": 48, "browser": browser,
     "version": VERSION, "commit": SHA,
     "workflow": "https://github.com/maxblox2999/AdVanish/actions/runs/" + RUN,
     "packages": reports, "ios_simulator": native,

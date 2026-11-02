@@ -15,8 +15,8 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
     var configuration = __ADSPEED_CONFIG__;
     var requestedRate = configuration && configuration.rate;
     var rate = typeof requestedRate === 'number' && isFinite(requestedRate)
-        ? Math.max(1, Math.min(16, requestedRate))
-        : 16;
+        ? Math.max(1, Math.min(80, requestedRate))
+        : 80;
     var speedVideo = !!(configuration && configuration.speedVideo);
     var compressTimers = !!(configuration && configuration.compressTimers);
     var accelerateClock = !!(configuration && configuration.accelerateClock);
@@ -222,37 +222,53 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
         return state;
     }
 
+    function writeSupportedRate(video, state) {
+        if (state.writingRate) return false;
+        var original = video.playbackRate;
+        var requested = state.acceptedRate || rate;
+        var tiers = rate > 16 ? [requested, 16, 8, 4, 2] : [requested];
+        state.writingRate = true;
+        try {
+            for (var index = 0, previous = Infinity; index < tiers.length; index += 1) {
+                var candidate = tiers[index];
+                if (candidate >= previous || candidate > requested || candidate <= 0) continue;
+                previous = candidate;
+                try {
+                    video.playbackRate = candidate;
+                    var accepted = video.playbackRate;
+                    if (!isFinite(accepted) || Math.abs(accepted - candidate) > 0.001) continue;
+                    if (!manuallyAccelerated.has(video) || original !== state.manualRate) state.originalRate = original;
+                    state.manualRate = accepted;
+                    state.acceptedRate = accepted;
+                    manuallyAccelerated.add(video);
+                    stats.rateChanges += 1;
+                    return true;
+                } catch (error) {
+                    // Continue to a supported tier without seeking or ending media.
+                }
+            }
+            try {
+                if (video.playbackRate !== original) video.playbackRate = original;
+            } catch (restoreError) {
+                stats.mediaFailures += 1;
+            }
+            stats.rateFailures += 1;
+            return false;
+        } finally {
+            state.writingRate = false;
+        }
+    }
+
     function applyRate(video, state) {
-        if (!speedVideo || state.rateFailed || state.rateAttempts >= maximumRateAttempts) {
-            return;
-        }
-        if (typeof video.duration !== 'number' || !isFinite(video.duration) || video.duration <= 0) {
-            return;
-        }
-        if (Math.abs(video.playbackRate - rate) < 0.001) {
-            return;
-        }
+        if (!speedVideo || state.writingRate || state.rateFailed || state.rateAttempts >= maximumRateAttempts) return;
+        if (typeof video.duration !== 'number' || !isFinite(video.duration) || video.duration <= 0) return;
+        if (Math.abs(video.playbackRate - (state.acceptedRate || rate)) < 0.001) return;
         manuallyAccelerated.forEach(function (existing) {
             if (existing.isConnected === false) restoreManualRate(existing);
         });
         if (!manuallyAccelerated.has(video) && manuallyAccelerated.size >= maximumVideos) return;
         state.rateAttempts += 1;
-        var original = video.playbackRate;
-        try {
-            video.playbackRate = rate;
-            if (Math.abs(video.playbackRate - rate) < 0.001) {
-                if (!manuallyAccelerated.has(video) || original !== state.manualRate) state.originalRate = original;
-                state.manualRate = rate;
-                manuallyAccelerated.add(video);
-                stats.rateChanges += 1;
-            } else {
-                state.rateFailed = true;
-                stats.rateFailures += 1;
-            }
-        } catch (error) {
-            state.rateFailed = true;
-            stats.rateFailures += 1;
-        }
+        if (!writeSupportedRate(video, state)) state.rateFailed = true;
     }
 
     function restoreManualRate(video) {
@@ -357,29 +373,11 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
             if (existing.isConnected === false) restoreManualRate(existing);
         });
         if (!manuallyAccelerated.has(video) && manuallyAccelerated.size >= maximumVideos) return false;
-        var original = video.playbackRate;
         state.manualAttempts += 1;
         stats.manualRequests += 1;
-        try {
-            video.playbackRate = rate;
-            if (Math.abs(video.playbackRate - rate) > 0.001 || !isFinite(video.playbackRate)) {
-                throw new Error('Playback rate was not accepted');
-            }
-            if (!manuallyAccelerated.has(video) || original !== state.manualRate) state.originalRate = original;
-            state.manualRate = rate;
-            manuallyAccelerated.add(video);
-            stats.rateChanges += 1;
-            authorizeTiming();
-            return true;
-        } catch (error) {
-            try {
-                if (video.playbackRate !== original) video.playbackRate = original;
-            } catch (restoreError) {
-                stats.mediaFailures += 1;
-            }
-            stats.rateFailures += 1;
-            return false;
-        }
+        if (!writeSupportedRate(video, state)) return false;
+        authorizeTiming();
+        return true;
     }
 
     function queueManualCleanup() {

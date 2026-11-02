@@ -177,7 +177,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     for (AVAssetTrack *track in [source tracksWithMediaType:AVMediaTypeVideo]) {
         AVMutableCompositionTrack *target = [composition addMutableTrackWithMediaType:AVMediaTypeVideo
             preferredTrackID:kCMPersistentTrackID_Invalid];
-        for (NSUInteger repeat = 0; repeat < 8; repeat++) {
+        for (NSUInteger repeat = 0; repeat < (NSUInteger)(ASPSpeedRate() / 2); repeat++) {
             [target insertTimeRange:CMTimeRangeMake(kCMTimeZero, source.duration) ofTrack:track
                 atTime:CMTimeMultiply(source.duration, (int32_t)repeat) error:nil];
         }
@@ -484,7 +484,7 @@ static void testReplacement(ALBaseVideoViewController *owner, UIButton *button, 
     [owner didDisplayAd:owner.rewardAd];
     [owner.avPlayer replaceCurrentItemWithPlayerItem:replacement];
     NSTimeInterval replacementStarted = NSProcessInfo.processInfo.systemUptime;
-    [owner.avPlayer playImmediatelyAtRate:16];
+    [owner.avPlayer playImmediatelyAtRate:ASPSpeedRate()];
     waitUntil(^BOOL {
         return owner.avPlayer.rate == 1 && [button.currentTitle isEqualToString:@"Fast-forward ad"];
     }, deadline, ^{
@@ -492,7 +492,7 @@ static void testReplacement(ALBaseVideoViewController *owner, UIButton *button, 
         if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) <= elapsed * ASPSpeedRate() + 0.5,
                    @"Replacing a creative releases its owned rate without seeking")) return;
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-        if (!check(owner.avPlayer.rate == 16, @"A new creative accepts a separate manual request")) return;
+        if (!check(owner.avPlayer.rate == ASPSpeedRate(), @"A new creative accepts a separate manual request")) return;
         testCompletion(owner, button, deadline);
     });
 }
@@ -573,6 +573,19 @@ static void testAdaptiveRates(ALBaseVideoViewController *owner, void (^next)(voi
     AVPlayer *original = owner.avPlayer;
     ALAd *originalCreative = owner.currentAd;
     [original pause];
+    for (NSNumber *tier in @[@40, @20, @16, @4, @2]) {
+        FixtureRatePlayer *probe = [FixtureRatePlayer new];
+        probe.fixtureItem = original.currentItem;
+        probe.storedRate = 1;
+        probe.acceptedRateLimit = tier.floatValue;
+        probe.rateRequests = NSMutableArray.array;
+        owner.videoPlayer.videoView.player = probe;
+        BOOL applied = ASPSpeedRequestRate(probe, owner.view, 1, ASPSpeedRate());
+        NSArray *ladder = @[@80, @40, @20, @16, @8, @4, @2];
+        NSArray *expected = [ladder subarrayWithRange:NSMakeRange(0, [ladder indexOfObject:tier] + 1)];
+        if (!check(applied && probe.rate == tier.floatValue && [probe.rateRequests isEqual:expected],
+                   [NSString stringWithFormat:@"Native speed falls back to %@x without skipping a supported tier", tier])) return;
+    }
     FixtureRatePlayer *limited = [FixtureRatePlayer new];
     limited.fixtureItem = original.currentItem;
     limited.storedRate = 1;
@@ -586,12 +599,12 @@ static void testAdaptiveRates(ALBaseVideoViewController *owner, void (^next)(voi
         message = value;
     });
     if (!check(limited.rate == 8 && [message isEqualToString:@"Playing at 8x"] &&
-               [limited.rateRequests isEqualToArray:@[@16, @8]],
-               @"A player that rejects 16x accepts an owned 8x fallback with accurate feedback")) return;
+               [limited.rateRequests isEqualToArray:@[@80, @40, @20, @16, @8]],
+               @"A player that rejects 80x accepts an owned 8x fallback with accurate feedback")) return;
     NSUInteger acceptedWrites = limited.rateRequests.count;
     ASPSpeedAcceleratePlayer(limited, owner.view);
     if (!check(limited.rateRequests.count == acceptedWrites,
-               @"Polling keeps the accepted native tier without retrying 16x")) return;
+               @"Polling keeps the accepted native tier without retrying 80x")) return;
     limited.rate = 0.5;
     ASPSpeedAcceleratePlayer(limited, owner.view);
     if (!check(limited.rate == 8, @"A newer SDK base rate can regain the accepted native tier")) return;
@@ -603,18 +616,18 @@ static void testAdaptiveRates(ALBaseVideoViewController *owner, void (^next)(voi
                    @"Changing the SDK creative releases a weakly owned native lease even with the same item")) return;
         owner.currentAd = originalCreative;
         limited.rate = 1;
-        ASPSpeedRequestRate(limited, owner.view, 1, 16);
+        ASPSpeedRequestRate(limited, owner.view, 1, ASPSpeedRate());
         if (!check(limited.rate == 8, @"A fresh manual request can accelerate the restored creative")) return;
         limited.rate = 0;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC / 5), dispatch_get_main_queue(), ^{
             if (!check(limited.rate == 0, @"Fallback cleanup never resumes SDK-paused playback")) return;
             limited.fixtureItem = [AVPlayerItem playerItemWithAsset:original.currentItem.asset];
-            limited.acceptedRateLimit = 16;
+            limited.acceptedRateLimit = ASPSpeedRate();
             limited.storedRate = 1;
             [limited.rateRequests removeAllObjects];
-            BOOL reset = ASPSpeedRequestRate(limited, owner.view, 1, 16);
-            if (!check(reset && limited.rate == 16 && [limited.rateRequests isEqualToArray:@[@16]],
-                       @"Replacing the native item retries the full 16x target")) return;
+            BOOL reset = ASPSpeedRequestRate(limited, owner.view, 1, ASPSpeedRate());
+            if (!check(reset && limited.rate == ASPSpeedRate() && [limited.rateRequests isEqualToArray:@[@80]],
+                       @"Replacing the native item retries the full 80x target")) return;
             limited.fixtureItem = original.currentItem;
             limited.acceptedRateLimit = 1;
             limited.throwOnRejectedRate = YES;
@@ -624,14 +637,14 @@ static void testAdaptiveRates(ALBaseVideoViewController *owner, void (^next)(voi
             ASPUniversalSkipNow(@[limited], owner.view, items, NO, ^BOOL { return owner.avPlayer == limited; }, ^(NSString *value) {
                 message = value;
             });
-            NSArray<NSNumber *> *rejected = @[@16, @8, @4, @2, @1];
+            NSArray<NSNumber *> *rejected = @[@80, @40, @20, @16, @8, @4, @2, @1];
             if (!check(limited.rate == 1 && [message isEqualToString:@"Player rejected speed"] &&
                        [limited.rateRequests isEqualToArray:rejected],
                        @"Rate exceptions try bounded lower tiers and preserve base playback without false success")) return;
-            for (NSUInteger index = 0; index < 12; index++) ASPSpeedRequestRate(limited, owner.view, 1, 16);
+            for (NSUInteger index = 0; index < 12; index++) ASPSpeedRequestRate(limited, owner.view, 1, ASPSpeedRate());
             NSUInteger boundedWrites = limited.rateRequests.count;
-            ASPSpeedRequestRate(limited, owner.view, 1, 16);
-            if (!check(limited.rate == 1 && limited.rateRequests.count == boundedWrites && boundedWrites == 40,
+            ASPSpeedRequestRate(limited, owner.view, 1, ASPSpeedRate());
+            if (!check(limited.rate == 1 && limited.rateRequests.count == boundedWrites && boundedWrites == 64,
                        @"Rejected native rate corrections stop after eight rounds per item")) return;
             owner.videoPlayer.videoView.player = original;
             [original play];
@@ -643,6 +656,7 @@ static void testAdaptiveRates(ALBaseVideoViewController *owner, void (^next)(voi
 }
 
 static void runFixture(ALBaseVideoViewController *owner) {
+    if (!check(ASPSpeedRate() == 80, @"The shared native acceleration target is 80x")) return;
     ASPManualSkipTrackController(owner);
     ASPManualSkipConfigure(YES);
     ASPAdCompletionConfigure(YES);
@@ -691,8 +705,8 @@ static void runFixture(ALBaseVideoViewController *owner) {
         testAdaptiveRates(owner, ^{
             double before = CMTimeGetSeconds(owner.avPlayer.currentTime);
             [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-            if (!check(owner.avPlayer.rate == 16 && CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 0.5,
-                       @"Manual action requests 16x playback without a time jump")) return;
+            if (!check(owner.avPlayer.rate == ASPSpeedRate() && CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 0.5,
+                       @"Manual action requests 80x playback without a time jump")) return;
             owner.videoPlayer.videoView.hidden = YES;
             waitUntil(^BOOL {
                 return owner.avPlayer.rate == 1 && [button.currentTitle isEqualToString:@"Fast-forward ad"];
@@ -700,7 +714,7 @@ static void runFixture(ALBaseVideoViewController *owner) {
                 if (!check(owner.avPlayer.rate == 1, @"Hiding the video releases its manual rate")) return;
                 owner.videoPlayer.videoView.hidden = NO;
                 [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-                if (!check(owner.avPlayer.rate == 16, @"Visible playback accepts a new manual request")) return;
+                if (!check(owner.avPlayer.rate == ASPSpeedRate(), @"Visible playback accepts a new manual request")) return;
                 testReplacement(owner, button, deadline);
             });
         });

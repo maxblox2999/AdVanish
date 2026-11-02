@@ -1,15 +1,15 @@
 # Ad types
 
-Automatic mode applies 16x playback and web timing throughout each enabled app, including non-ad media. Ad detection still controls generated interaction and completion.
+Automatic mode applies 80x playback and web timing throughout each enabled app, including non-ad media. Ad detection still controls generated interaction and completion.
 
 Detection, acceleration, completion and rewards are separate. Recognizing an ad does not mean its creative can be completed automatically. No supplied game has passed a physical-device reward test here.
 
 | Ad path | Acceleration | Automatic Close |
 | --- | --- | --- |
-| AVPlayer video in an enabled app | 16x first; 8x/4x/2x fallback after rejection, no seek | Supported Google ordinary-video completion or a matching genuine rewarded event |
-| HTML video, including nested frames | 16x automatic playback; manual requests retain surface selection | Requires a supported native SDK completion path |
+| AVPlayer video in an enabled app | 80x first; lower-rate fallback including 16x/8x/4x/2x after rejection, no seek | Supported Google ordinary-video completion or a matching genuine rewarded event |
+| HTML video, including nested frames | 80x automatic playback; manual requests retain surface selection | Requires a supported native SDK completion path |
 | MRAID playable using JS timers or elapsed time | Timer, clock and animation-frame acceleration | No universal playable-complete callback; native SDK eligibility is still required |
-| CSS and Web Animations in an enabled app | 16x running-animation rate relative to its base; pause and cleanup preserved | Animation end does not fabricate an SDK reward |
+| CSS and Web Animations in an enabled app | 80x running-animation rate relative to its base; pause and cleanup preserved | Animation end does not fabricate an SDK reward |
 | Playable with explicit gameplay controls | Bounded tap/swipe assistance in automatic mode; native-owned non-MRAID surfaces are included | Same SDK completion requirements |
 | Playable with decorative video | Manual timing can run while looped, ended or paused media remains unchanged | Same SDK completion requirements |
 | One SDK-owned native/web pair | One validated manual request can accelerate both parts | Same SDK completion requirements |

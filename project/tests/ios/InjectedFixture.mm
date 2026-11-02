@@ -3,13 +3,33 @@
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
 #import "ASPTimers.h"
+#import "ASPSpeed.h"
 #import "AVNRuntime.h"
 #import <AVFoundation/AVFoundation.h>
 #import <WebKit/WebKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <dlfcn.h>
+#include <math.h>
 #import "ASPAdSurface.h"
 #import "ASPAdCompletion.h"
+
+@interface InjectedFallbackPlayer : AVPlayer
+@property (nonatomic) float storedRate;
+@property (nonatomic) float maximumRate;
+@property (nonatomic) BOOL throwsOnRejection;
+@property (nonatomic, strong) NSMutableArray<NSNumber *> *requests;
+@end
+@implementation InjectedFallbackPlayer
+- (float)rate { return self.storedRate; }
+- (void)setRate:(float)value {
+    [self.requests addObject:@(value)];
+    if (value > self.maximumRate) {
+        if (self.throwsOnRejection) [NSException raise:NSInvalidArgumentException format:@"Unsupported fixture rate"];
+        return;
+    }
+    self.storedRate = value;
+}
+@end
 
 static NSMutableArray<NSString *> *checks;
 static BOOL finished;
@@ -202,7 +222,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     video.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSBundle.mainBundle URLForResource:@"fixture" withExtension:@"mp4"] options:nil];
     AVMutableComposition *composition = [AVMutableComposition composition];
-    for (NSUInteger index = 0; index < 8; index++) {
+    for (NSUInteger index = 0; index < (NSUInteger)(ASPSpeedRate() / 2); index++) {
         [composition insertTimeRange:CMTimeRangeMake(kCMTimeZero, CMTimeMakeWithSeconds(12, 600))
                             ofAsset:asset atTime:CMTimeMakeWithSeconds(index * 12, 600) error:nil];
     }
@@ -351,7 +371,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
                            @"The mixed ad has one native item and one playable timing candidate")) return;
                 UIButton *button = [self manualButton];
                 [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-                waitUntil(^BOOL { return owner.avPlayer.rate == 16 && [button.currentTitle isEqualToString:@"Ad speed requested"]; }, deadline, ^{
+                waitUntil(^BOOL { return owner.avPlayer.rate == ASPSpeedRate() && [button.currentTitle isEqualToString:@"Ad speed requested"]; }, deadline, ^{
                     NSString *timing = @"return await new Promise(resolve=>{const real=fixtureNativeNow();"
                         "setTimeout(()=>resolve({elapsed:fixtureNativeNow()-real,interactions:__adspeed.stats.interactions,"
                         "rewards:fixture.rewardCalls,closes:fixture.closes}),4000);});";
@@ -386,9 +406,9 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
         double before = CMTimeGetSeconds(owner.avPlayer.currentTime);
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
         NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 15;
-        waitUntil(^BOOL { return owner.avPlayer.rate == 16; }, deadline, ^{
+        waitUntil(^BOOL { return owner.avPlayer.rate == ASPSpeedRate(); }, deadline, ^{
             if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) < before + 1,
-                       @"A manual press retains 16x native playback without a seek")) return;
+                       @"A manual press retains 80x native playback without a seek")) return;
             waitUntil(^BOOL { return owner.ended; }, deadline, ^{
                 if (!check(owner.closes == 0 && owner.avPlayer.rate == 0,
                            @"Manual native completion leaves the SDK Close control untouched")) return;
@@ -442,8 +462,8 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
             return;
         }
         NSDictionary *stats = web[@"stats"];
-        if (!check([stats[@"rate"] integerValue] == 16 && [stats[@"polls"] integerValue] > 0,
-                   @"WebKit runs the production 16x acceleration policy")) return;
+        if (!check([stats[@"rate"] integerValue] == 80 && [stats[@"polls"] integerValue] > 0,
+                   @"WebKit runs the production 80x acceleration policy")) return;
         if (!check([stats[@"interactions"] integerValue] == 3 && [web[@"movements"] integerValue] == 6,
                    @"WebKit synthetic input advances original tap, swipe and continue handlers")) return;
         if (!check([web[@"complete"] boolValue] && [web[@"elapsed"] doubleValue] < 4000,
@@ -480,7 +500,27 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
         if ([notification.object isKindOfClass:NSClassFromString(@"ASPSkipWindow")]) fixtureOverlay = notification.object;
     }];
     float (*rate)(void) = (float (*)(void))dlsym(RTLD_DEFAULT, "ASPSpeedRate");
-    if (!check(rate && rate() == 16, @"The jailed framework loads and exposes the shared 16x policy")) return YES;
+    if (!check(rate && rate() == 80, @"The jailed framework loads and exposes the shared 80x policy")) return YES;
+    for (NSNumber *tier in @[@40, @20, @16, @8, @4, @2]) {
+        InjectedFallbackPlayer *probe = [InjectedFallbackPlayer new];
+        probe.storedRate = 1;
+        probe.maximumRate = tier.floatValue;
+        probe.requests = NSMutableArray.array;
+        probe.rate = ASPSpeedRate();
+        AVNFinishPlaybackRate(probe, 1, ASPSpeedRate());
+        NSArray *ladder = @[@80, @40, @20, @16, @8, @4, @2];
+        NSArray *expected = [ladder subarrayWithRange:NSMakeRange(0, [ladder indexOfObject:tier] + 1)];
+        if (!check(probe.rate == tier.floatValue && [probe.requests isEqual:expected],
+                   [NSString stringWithFormat:@"The broad Logos rate correction preserves its %@x fallback", tier])) return YES;
+    }
+    InjectedFallbackPlayer *rejected = [InjectedFallbackPlayer new];
+    rejected.storedRate = 1;
+    rejected.maximumRate = 1;
+    rejected.throwsOnRejection = YES;
+    rejected.requests = NSMutableArray.array;
+    AVNFinishPlaybackRate(rejected, 1, ASPSpeedRate());
+    if (!check(rejected.rate == 1 && [rejected.requests isEqual:@[@40, @20, @16, @8, @4, @2, @1]],
+               @"Rejected broad fallback tiers preserve the original rate after exceptions")) return YES;
     id runtime = ((id (*)(id, SEL))objc_msgSend)(NSClassFromString(@"AVNRuntime"), NSSelectorFromString(@"shared"));
     id runtimeOptions = [runtime valueForKey:@"options"];
     BOOL wasEnabled = [[runtimeOptions valueForKey:@"enabled"] boolValue];
@@ -493,7 +533,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     ASPTimerSetAdActive(YES);
     NSTimeInterval outer = ASPTimerEnter(16);
     NSTimeInterval inner = ASPTimerEnter(outer);
-    if (!check(outer == (manualMode ? 16 : 1) && inner == outer,
+    if (!check(fabs(outer - (manualMode ? 16 : 16 / ASPSpeedRate())) < 1e-9 && inner == outer,
                @"Nested native timer constructors compress once and preserve manual mode")) return YES;
     ASPTimerExit();
     ASPTimerExit();
@@ -513,9 +553,9 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     BOOL injected = NO;
     for (WKUserScript *script in web.configuration.userContentController.userScripts) {
         if ([script.source containsString:@"AdVanish runtime v1"] &&
-            [script.source containsString:@"\"rate\":16"]) injected = YES;
+            [script.source containsString:@"\"rate\":80"]) injected = YES;
     }
-    if (!check(injected, @"The production WebKit initializer installs its 16x engine")) return YES;
+    if (!check(injected, @"The production WebKit initializer installs its 80x engine")) return YES;
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     ALBaseVideoViewController *owner = [ALBaseVideoViewController new];
     self.window.rootViewController = owner;
@@ -551,12 +591,12 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
             self.ordinaryPlayer.currentItem.status == AVPlayerItemStatusReadyToPlay;
     }, deadline, ^{
         self.ordinaryPlayer.rate = 1;
-        if (!check(self.ordinaryPlayer.rate == (manualMode ? 1 : 16),
+        if (!check(self.ordinaryPlayer.rate == (manualMode ? 1 : ASPSpeedRate()),
             @"Logos playback accelerates enabled automatic apps without ad-owner checks and preserves manual mode")) return;
         [self.ordinaryPlayer play];
-        if (!check(self.ordinaryPlayer.rate == (manualMode ? 1 : 16), @"The Logos play hook follows automatic and manual policy")) return;
+        if (!check(self.ordinaryPlayer.rate == (manualMode ? 1 : ASPSpeedRate()), @"The Logos play hook follows automatic and manual policy")) return;
         [self.ordinaryPlayer playImmediatelyAtRate:1];
-        if (!check(self.ordinaryPlayer.rate == (manualMode ? 1 : 16), @"The Logos immediate-play hook follows automatic and manual policy")) return;
+        if (!check(self.ordinaryPlayer.rate == (manualMode ? 1 : ASPSpeedRate()), @"The Logos immediate-play hook follows automatic and manual policy")) return;
         [self.ordinaryPlayer pause];
         if (!check(self.ordinaryPlayer.rate == 0, @"The Logos playback hooks preserve pause requests")) return;
         [self.ordinaryPlayer pause];
@@ -565,8 +605,8 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
             return;
         }
         owner.avPlayer.rate = 1;
-        waitUntil(^BOOL { return owner.avPlayer.rate == 16 || owner.ended; }, deadline, ^{
-            if (!check(owner.avPlayer.rate == 16, @"Recognized SDK playback reaches 16x through the production hook")) return;
+        waitUntil(^BOOL { return owner.avPlayer.rate == ASPSpeedRate() || owner.ended; }, deadline, ^{
+            if (!check(owner.avPlayer.rate == ASPSpeedRate(), @"Recognized SDK playback reaches 80x through the production hook")) return;
             NSTimeInterval countdownStart = NSProcessInfo.processInfo.systemUptime;
             __block NSTimeInterval countdownElapsed = -1;
             [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:NO block:^(NSTimer *timer) {
@@ -574,14 +614,14 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
             }];
             owner.avPlayer.rate = 0.5;
             owner.videoPlayer.videoView.hidden = YES;
-            waitUntil(^BOOL { return owner.avPlayer.rate == 8; }, deadline, ^{
-                if (!check(owner.avPlayer.rate == 8, @"Automatic compatibility playback continues without visibility gating")) return;
+            waitUntil(^BOOL { return owner.avPlayer.rate == ASPSpeedRate() / 2; }, deadline, ^{
+                if (!check(owner.avPlayer.rate == ASPSpeedRate() / 2, @"Automatic compatibility playback continues without visibility gating")) return;
                 owner.videoPlayer.videoView.hidden = NO;
                 owner.avPlayer.rate = 1;
-                waitUntil(^BOOL { return owner.avPlayer.rate == 16; }, deadline, ^{
-                    if (!check(owner.avPlayer.rate == 16, @"The Logos hook preserves subsequent SDK playback requests")) return;
+                waitUntil(^BOOL { return owner.avPlayer.rate == ASPSpeedRate(); }, deadline, ^{
+                    if (!check(owner.avPlayer.rate == ASPSpeedRate(), @"The Logos hook preserves subsequent SDK playback requests")) return;
                     waitUntil(^BOOL { return owner.ended; }, deadline, ^{
-                        if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) >= 95.95,
+                        if (!check(CMTimeGetSeconds(owner.avPlayer.currentTime) >= CMTimeGetSeconds(owner.avPlayer.currentItem.duration) - 0.05,
                                    @"Accelerated playback reaches a real end event without seeking")) return;
                         if (!check(countdownElapsed >= 0 && countdownElapsed < 1.0,
                                    [NSString stringWithFormat:@"Native SDK countdowns accelerate inside an active ad (elapsed=%.2fs)", countdownElapsed])) return;

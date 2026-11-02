@@ -2,7 +2,7 @@
 
 # AdVanish
 
-16x ad fast-forwarding for iOS.
+80x ad fast-forwarding for iOS.
 
 [![Build](https://github.com/maxblox2999/AdVanish/actions/workflows/build.yml/badge.svg)](https://github.com/maxblox2999/AdVanish/actions)
 [![Test release](https://img.shields.io/github/v/release/maxblox2999/AdVanish?include_prereleases&style=flat-square&color=8957e5)](https://github.com/maxblox2999/AdVanish/releases)
@@ -18,7 +18,7 @@
 
 **Jailed:** inject the framework into an authorized decrypted IPA, then re-sign it. [Instructions](project/BUILD.md#ipa-injection).
 
-**Automatic ads** enables supported acceleration and completion. Turn it off for button-only acceleration. Speed targets **16x**, with lower rates when a player rejects it.
+**Automatic ads** enables supported acceleration and completion. Turn it off for button-only acceleration. Speed targets **80x**, with lower rates when a player rejects it.
 
 Rewards and server validation stay with the app.
 

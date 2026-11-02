@@ -23,8 +23,8 @@ const config = {
 };
 let portA;
 let portB;
-function html(child, playback, automatic, compatibility = false) {
-    return `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#eee}video{display:block;width:320px;height:180px}iframe{width:360px;height:210px;border:0}</style><script>window.realNow=performance.now.bind(performance);window.realTimeout=setTimeout.bind(window);</script><script src="/engine.js?playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}"></script><script>
+function html(child, playback, automatic, compatibility = false, requestedRate = 16) {
+    return `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#eee}video{display:block;width:320px;height:180px}iframe{width:360px;height:210px;border:0}</style><script>window.realNow=performance.now.bind(performance);window.realTimeout=setTimeout.bind(window);</script><script src="/engine.js?playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}&rate=${requestedRate}"></script><script>
     window.fixture = {messages:[],closes:0,errors:[]};
     window.addEventListener('error',e=>fixture.errors.push(String(e.message)));
     window.addEventListener('unhandledrejection',e=>fixture.errors.push(String(e.reason)));
@@ -46,7 +46,7 @@ function html(child, playback, automatic, compatibility = false) {
             report('playable-ready');
         }
     });
-    window.addFrame=async video=>{const frame=document.createElement('iframe');frame.src='http://127.0.0.1:${portB}/child?video='+(video?'1':'0')+'&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}';document.body.append(frame);await until(()=>fixture.messages.some(m=>m.source===frame.contentWindow&&m.phase==='ready'),'frame ready');return frame};
+    window.addFrame=async video=>{const frame=document.createElement('iframe');frame.src='http://127.0.0.1:${portB}/child?video='+(video?'1':'0')+'&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}&rate=${requestedRate}';document.body.append(frame);await until(()=>fixture.messages.some(m=>m.source===frame.contentWindow&&m.phase==='ready'),'frame ready');return frame};
     ${child ? `window.addEventListener('DOMContentLoaded',async()=>{try{if(new URL(location.href).searchParams.get('video')==='1')await addVideo();report('ready')}catch(e){fixture.errors.push(String(e));report('error')}});` : ''}
     </script><body></body>`;
 }
@@ -54,7 +54,7 @@ function serve(req, res) {
     const url = new URL(req.url, 'http://127.0.0.1');
     if (url.pathname === '/engine.js') {
         const script = source.replace('__ADSPEED_CONFIG__', JSON.stringify({
-            ...config, automatic: url.searchParams.get('automatic') !== '0',
+            ...config, rate: Number(url.searchParams.get('rate')) || 16, automatic: url.searchParams.get('automatic') !== '0',
             compatibilityPlayback: url.searchParams.get('compatibility') === '1'
         }));
         res.writeHead(200, { 'Content-Type': 'text/javascript' });
@@ -85,7 +85,7 @@ function serve(req, res) {
         return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(html(url.pathname === '/child', url.searchParams.get('playback') === '1', url.searchParams.get('automatic') !== '0', url.searchParams.get('compatibility') === '1'));
+    res.end(html(url.pathname === '/child', url.searchParams.get('playback') === '1', url.searchParams.get('automatic') !== '0', url.searchParams.get('compatibility') === '1', Number(url.searchParams.get('rate')) || 16));
 }
 const serverA = http.createServer(serve);
 const serverB = http.createServer(serve);
@@ -115,9 +115,9 @@ async function evaluate(sessionId, expression) {
     if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails));
     return r.result.value;
 }
-async function runCase(name, body, verify, playback = false, automatic = true, compatibility = false) {
+async function runCase(name, body, verify, playback = false, automatic = true, compatibility = false, requestedRate = 16) {
     const { targetId } = await command('Target.createTarget', {
-        url: `http://127.0.0.1:${portA}/?case=${name}&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}`
+        url: `http://127.0.0.1:${portA}/?case=${name}&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}&rate=${requestedRate}`
     });
     const { sessionId } = await command('Target.attachToTarget', { targetId, flatten: true });
     try {
@@ -946,6 +946,95 @@ async function main() {
             assert.deepEqual(result.errors, []);
         }, true, automatic, compatibility));
     }
+
+    for (const automatic of [false, true]) {
+        cases.push(await runCase('80x-video-clock-animation-' + (automatic ? 'automatic' : 'manual'), `
+            delete window.mraid;
+            const video = await addVideo();
+            const target = document.createElement('div');
+            target.style.cssText = 'width:80px;height:80px;background:#456';
+            document.body.append(target);
+            const animation = target.animate([{opacity:1},{opacity:0.8}], {duration:8000,iterations:Infinity});
+            await animation.ready;
+            __adspeed.setAdContext(true);
+            const initialRate = video.playbackRate;
+            let action = null;
+            if (!${automatic}) {
+                await sleep(120);
+                if (video.playbackRate !== 1) throw Error('Manual video accelerated before request');
+                action = await __adspeed.skipAsync();
+            }
+            const acceptedRate = video.playbackRate;
+            const realStart = realNow(), virtualStart = performance.now();
+            let originalCallback = 0;
+            setTimeout(() => originalCallback++, 8000);
+            await until(() => originalCallback === 1, '80x original timer callback', 1500);
+            const measured = {real:realNow()-realStart,virtual:performance.now()-virtualStart};
+            const animationRate = animation.playbackRate;
+            __adspeed.setAdContext(false);
+            return {...state(),initialRate,acceptedRate,action,measured,animationRate,restoredAnimation:animation.playbackRate,
+                originalCallback,targetRate:__adspeed.stats.rate};
+        `, result => {
+            assert.equal(result.targetRate, 80);
+            assert.ok([80,16,8,4,2].includes(result.acceptedRate));
+            if (!automatic) {
+                assert.equal(result.initialRate, 1);
+                assert.equal(result.action.handled, 1);
+            }
+            assert.equal(result.originalCallback, 1);
+            assert.ok(result.measured.real < 1200);
+            assert.ok(result.measured.virtual > result.measured.real * 40);
+            assert.ok(result.measured.virtual < result.measured.real * 120);
+            assert.equal(result.animationRate, 80);
+            assert.equal(result.restoredAnimation, 1);
+            assert.equal(result.videos[0].seeks, 0);
+            assert.equal(result.closes, 0);
+            assert.deepEqual(result.errors, []);
+        }, true, automatic, false, 80));
+    }
+    cases.push(await runCase('80x-broad-ordinary-countdown-without-ad-context', `
+        delete window.mraid;
+        const node = document.createElement('div');
+        node.textContent = '8';
+        document.body.append(node);
+        let callbacks = 0, input = 0;
+        node.addEventListener('click', () => input++);
+        __adspeed.setAdContext(false);
+        const realStart = realNow(), virtualStart = performance.now();
+        setTimeout(() => callbacks++, 8000);
+        await until(() => callbacks === 1, '80x broad countdown', 1500);
+        return {...state(),callbacks,input,measured:{real:realNow()-realStart,virtual:performance.now()-virtualStart},
+            interactions:__adspeed.stats.interactions,targetRate:__adspeed.stats.rate};
+    `, result => {
+        assert.equal(result.targetRate, 80);
+        assert.equal(result.callbacks, 1);
+        assert.ok(result.measured.virtual > result.measured.real * 40);
+        assert.equal(result.input, 0);
+        assert.equal(result.interactions, 0);
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }, false, true, true, 80));
+    cases.push(await runCase('80x-real-video-supported-four-times-fallback', `
+        delete window.mraid;
+        const video = await addVideo();
+        const native = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'playbackRate');
+        const writes = [];
+        Object.defineProperty(video, 'playbackRate', {
+            get() { return native.get.call(this); },
+            set(value) { writes.push(value); if (value > 4) throw Error('Fixture player limit'); native.set.call(this, value); }
+        });
+        __adspeed.setAdContext(true);
+        const accepted = video.playbackRate;
+        await sleep(150);
+        return {...state(),accepted,writes,targetRate:__adspeed.stats.rate};
+    `, result => {
+        assert.equal(result.targetRate, 80);
+        assert.equal(result.accepted, 4);
+        assert.deepEqual(result.writes, [80,16,8,4]);
+        assert.equal(result.videos[0].seeks, 0);
+        assert.equal(result.closes, 0);
+        assert.deepEqual(result.errors, []);
+    }, true, true, false, 80));
     const report = {
         sourceSha256,
         browser: version,

@@ -266,8 +266,8 @@ test('runs without browser globals and does not need to resolve configuration', 
     assert.doesNotThrow(() => vm.runInNewContext(source));
 });
 
-test('clamps finite rate and replaces malformed values with 16', () => {
-    for (const [input, expected] of [[0, 1], [-4, 1], [100, 16], [4, 4], [null, 16], ['bad', 16]]) {
+test('clamps finite rate and replaces malformed values with 80', () => {
+    for (const [input, expected] of [[0, 1], [-4, 1], [100, 80], [4, 4], [null, 80], ['bad', 80]]) {
         const env = environment({rate: input});
         const media = video(env);
         env.emit('play', media);
@@ -2081,4 +2081,103 @@ test('compatibility playback suspends while the document is hidden and resumes o
     env.advance(100);
     assert.equal(media.playbackRate, 16);
     assert.equal(env.sandbox.performance.now(), 3300);
+});
+
+const fastConfig = {...adConfig, rate: 80};
+test('80x automatic playback accelerates video timers clocks and animation without completion', () => {
+    const env = environment(fastConfig);
+    const media = video(env);
+    const item = animation(env);
+    env.document.getAnimations = () => [item];
+    const closes = installClose(env);
+    let calls = 0;
+    env.sandbox.setTimeout(() => calls++, 8000);
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(99);
+    assert.equal(calls, 0);
+    env.advance(1);
+    assert.equal(calls, 1);
+    assert.equal(media.playbackRate, 80);
+    assert.equal(env.sandbox.performance.now(), 8000);
+    assert.equal(item.playbackRate, 80);
+    assert.deepEqual(media.seeks, []);
+    assert.equal(closes(), 0);
+});
+for (const supported of [16, 8, 4, 2]) {
+    test('80x automatic playback falls back to ' + supported + 'x once without repeated rejected writes', () => {
+        const env = environment(fastConfig);
+        const media = video(env);
+        let accepted = 1;
+        Object.defineProperty(media, 'playbackRate', {
+            configurable: true,
+            get() { return accepted; },
+            set(value) {
+                media.rates.push(value);
+                if (value > supported) throw Error('Unsupported rate');
+                accepted = value;
+                env.emit('ratechange', media);
+            }
+        });
+        env.sandbox.__adspeed.setAdContext(true);
+        assert.equal(media.playbackRate, supported);
+        const attempts = media.rates.length;
+        env.advance(2000);
+        assert.equal(media.rates.length, attempts);
+        assert.deepEqual(media.seeks, []);
+        env.sandbox.__adspeed.setAdContext(false);
+        assert.equal(media.playbackRate, 1);
+    });
+}
+test('80x manual playback waits for a press and accepts a supported video fallback', async () => {
+    const env = environment({...manualAdConfig, rate: 80});
+    const media = video(env);
+    let accepted = 1;
+    Object.defineProperty(media, 'playbackRate', {
+        configurable: true,
+        get() { return accepted; },
+        set(value) {
+            media.rates.push(value);
+            if (value > 16) throw Error('Unsupported rate');
+            accepted = value;
+            env.emit('ratechange', media);
+        }
+    });
+    env.sandbox.__adspeed.setAdContext(true);
+    env.advance(100);
+    assert.equal(media.playbackRate, 1);
+    assert.equal(env.sandbox.performance.now(), 100);
+    const action = await env.sandbox.__adspeed.skipAsync();
+    assert.equal(action.handled, 1);
+    assert.equal(media.playbackRate, 16);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 8100);
+    assert.deepEqual(media.seeks, []);
+});
+test('80x broad playback accelerates ordinary waiting content while manual mode remains idle', () => {
+    for (const automatic of [false, true]) {
+        const env = environment({...fastConfig, compatibilityPlayback: true, automatic});
+        let calls = 0;
+        env.sandbox.setTimeout(() => calls++, 8000);
+        env.advance(100);
+        assert.equal(calls, automatic ? 1 : 0);
+        assert.equal(env.sandbox.performance.now(), automatic ? 8000 : 100);
+        assert.equal(env.sandbox.__adspeed.stats.interactions, 0);
+    }
+});
+test('80x manual countdown timing preserves callback and replacement authorization', async () => {
+    const env = environment({...manualAdConfig, rate: 80});
+    const timer = control(env, '10', {tagName: 'SPAN', id: 'ad-countdown'});
+    env.sandbox.__adspeed.setAdContext(true);
+    let calls = 0;
+    env.sandbox.setTimeout(() => calls++, 8000);
+    assert.equal((await env.sandbox.__adspeed.skipAsync()).kind, 'timing');
+    env.advance(100);
+    assert.equal(calls, 1);
+    assert.equal(env.sandbox.performance.now(), 8000);
+    timer.isConnected = false;
+    env.controls.splice(env.controls.indexOf(timer), 1);
+    control(env, '10', {tagName: 'SPAN', id: 'ad-countdown'});
+    env.observers[0].callback([]);
+    env.advance(100);
+    assert.equal(env.sandbox.performance.now(), 8100);
 });

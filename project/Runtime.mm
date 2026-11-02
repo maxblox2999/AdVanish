@@ -92,7 +92,7 @@
         runtime.messageName = [@"AVN_" stringByAppendingString:NSUUID.UUID.UUIDString];
         AVNOptions *o = runtime.options;
         NSDictionary *configuration = @{
-            @"rate": @16, @"automatic": @(o.automatic), @"speedVideo": @(o.video),
+            @"rate": @(ASPSpeedRate()), @"automatic": @(o.automatic), @"speedVideo": @(o.video),
             @"compatibilityPlayback": @YES,
             @"compressTimers": @(o.timers), @"accelerateClock": @(o.clocks),
             @"forceInline": @(o.inlineVideo), @"recognizedAd": @NO,
@@ -271,7 +271,9 @@ BOOL AVNBlocksURL(NSURL *url) {
 void AVNFinishPlaybackRate(AVPlayer *player, float requested, float applied) {
     if (applied == requested || requested <= 0 || ASPSpeedInternalChange()) return;
     if (player.rate >= applied * 0.9f) return;
-    for (float candidate = applied / 2; candidate > requested && candidate >= 2; candidate /= 2) {
+    const float tiers[] = {80.0f, 40.0f, 20.0f, 16.0f, 8.0f, 4.0f, 2.0f};
+    for (float candidate : tiers) {
+        if (candidate >= applied || candidate <= requested) continue;
         @try { ASPSpeedSetRate(player, candidate); } @catch (NSException *exception) { continue; }
         if (player.rate >= candidate * 0.9f) return;
     }

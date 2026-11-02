@@ -2,6 +2,7 @@
 
 import importlib.util
 import io
+import plistlib
 from pathlib import Path
 import struct
 import tarfile
@@ -42,12 +43,14 @@ def fat(loads):
     return header + b"".join(pieces)
 
 
-def package(architecture, prefix, substrate, root_api):
+def package(architecture, prefix, substrate, root_api, settings_version="0.4.0"):
     loads = [substrate] + ([root_api] if root_api else [])
     files = {
         prefix + "Library/MobileSubstrate/DynamicLibraries/advanish.dylib": fat(loads),
         prefix + "Library/PreferenceBundles/adspeedprefs.bundle/adspeedprefs": fat([root_api] if root_api else []),
     }
+    if settings_version is not None:
+        files[prefix + "Library/PreferenceBundles/adspeedprefs.bundle/Info.plist"] = plistlib.dumps({"CFBundleVersion": settings_version})
     control = f"Package: com.maxblox2999.advanish\nVersion: 0.4.0\nArchitecture: {architecture}\n".encode()
     members = {"debian-binary": b"2.0\n", "control.tar.gz": archive({"control": control}), "data.tar.gz": archive(files)}
     output = b"!<arch>\n"
@@ -63,6 +66,16 @@ class PackageTests(unittest.TestCase):
             path = Path(directory) / "test.deb"
             path.write_bytes(data)
             return verifier.verify(path, variant, "com.maxblox2999.advanish", "advanish")
+
+    def test_rejects_stale_settings_bundle_version(self):
+        data = package("iphoneos-arm64", "var/jb/", "@rpath/libsubstrate.dylib", None, "0.3.0")
+        with self.assertRaisesRegex(ValueError, "Settings bundle version"):
+            self.verify(data, "rootless")
+
+    def test_rejects_missing_settings_metadata(self):
+        data = package("iphoneos-arm64", "var/jb/", "@rpath/libsubstrate.dylib", None, None)
+        with self.assertRaisesRegex(ValueError, "Missing Settings"):
+            self.verify(data, "rootless")
 
     def test_roothide_relocated_dependencies(self):
         data = package("iphoneos-arm64e", "", "@loader_path/.jbroot/usr/lib/libsubstrate.dylib", "@loader_path/.jbroot/usr/lib/libroothide.dylib")

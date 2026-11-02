@@ -11,7 +11,7 @@
 static char kStateKey;
 static thread_local BOOL internalRateChange;
 
-float ASPSpeedRate(void) { return 16.0f; }
+float ASPSpeedRate(void) { return 80.0f; }
 BOOL ASPSpeedInternalChange(void) { return internalRateChange; }
 
 void ASPSpeedSetRate(AVPlayer *player, float rate) {
@@ -195,7 +195,7 @@ BOOL ASPSpeedRequestRate(AVPlayer *player, UIView *root, float originalRate, flo
     if (requestedRate <= originalRate || state.speedAttempts >= 8) return NO;
     state.speedAttempts += 1;
     float requested = fminf(requestedRate, state.rateCeiling);
-    const float tiers[] = {requested, 8.0f, 4.0f, 2.0f};
+    const float tiers[] = {requested, 40.0f, 20.0f, 16.0f, 8.0f, 4.0f, 2.0f};
     float previous = INFINITY;
     for (float candidate : tiers) {
         if (candidate >= previous || candidate > requested || candidate <= originalRate) continue;
