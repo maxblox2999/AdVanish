@@ -100,7 +100,11 @@ static UIViewController *findOwner(UIViewController *controller, UIView *root, N
     *remaining -= 1;
     for (UIViewController *child in controller.childViewControllers.reverseObjectEnumerator) {
         UIViewController *found = findOwner(child, root, remaining);
-        if (found) return found;
+        if (found) {
+            if (found == child && kindOfNamedClass(controller, @"GADFullScreenAdViewController") &&
+                child.class == NSClassFromString(@"GADWebViewController")) continue;
+            return found;
+        }
     }
     return adController(controller) ? controller : nil;
 }

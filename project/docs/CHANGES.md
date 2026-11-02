@@ -1,5 +1,10 @@
 # Changes
 
+## 0.8.12
+
+- Reused HTML Close buttons can advance after an eligible label changes, with stale-token and duplicate protection.
+- Google fullscreen ads retain their completion owner when hosting a Google web component.
+
 ## 0.8.11
 
 - Added Pangle, OpenWrap, Chartboost and HyprMX controller recognition and scoped Store suppression.

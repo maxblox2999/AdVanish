@@ -1171,18 +1171,22 @@
         return handled ? 1 : 0;
     }
 
-    var completedCloseNodes = new WeakSet();
+    var completedCloseNodes = new WeakMap();
     var closeSnapshot = null;
     var closeRequests = 0;
     var closeSequence = 0;
+
+    function closeRole(node) {
+        return String(node.getAttribute && node.getAttribute('aria-label') || node.textContent || '')
+            .trim().toLowerCase().replace(/\s+/g, ' ');
+    }
 
     function closeControl(node) {
         if (!node || node.disabled || (node.getAttribute && node.getAttribute('aria-disabled') === 'true')) return false;
         for (var parent = node, depth = 0; parent && depth < 16; parent = parent.parentElement, depth += 1) {
             if (String(parent.tagName).toLowerCase() === 'a') return false;
         }
-        var label = String(node.getAttribute && node.getAttribute('aria-label') || node.textContent || '')
-            .trim().toLowerCase().replace(/\s+/g, ' ');
+        var label = closeRole(node);
         if (!/^(?:close(?: ad)?|dismiss(?: ad)?|x|×|✕|✖|fermer|cerrar|schließen|fechar|chiudi|閉じる|닫기|关闭|關閉)$/.test(label)) return false;
         if (/^(?:x|×|✕|✖)$/.test(label)) {
             var rect = node.getBoundingClientRect();
@@ -1200,13 +1204,15 @@
         var selected = null;
         for (var index = 0; index < Math.min(nodes.length, 128); index += 1) {
             var node = nodes[index];
-            if (completedCloseNodes.has(node) || !closeControl(node)) continue;
+            var completed = completedCloseNodes.get(node);
+            if ((completed && completed.has(closeRole(node))) || !closeControl(node)) continue;
             if (selected) return null;
             selected = node;
         }
         if (!selected) return null;
         var token = String(dateNow()) + ':' + String(++closeSequence);
-        closeSnapshot = {node: selected, token: token, context: contextGeneration, expires: dateNow() + 2000};
+        closeSnapshot = {node: selected, role: closeRole(selected), token: token,
+            context: contextGeneration, expires: dateNow() + 2000};
         return token;
     }
 
@@ -1215,8 +1221,14 @@
         closeSnapshot = null;
         if (!snapshot || snapshot.token !== token || snapshot.expires < dateNow() ||
             snapshot.context !== contextGeneration || !automatic || !autoDismiss || !recognizedAd ||
-            pageHidden() || closeRequests >= 8 || !closeControl(snapshot.node)) return false;
-        completedCloseNodes.add(snapshot.node);
+            pageHidden() || closeRequests >= 8 || !closeControl(snapshot.node) ||
+            snapshot.role !== closeRole(snapshot.node)) return false;
+        var completed = completedCloseNodes.get(snapshot.node);
+        if (!completed) {
+            completed = new Set();
+            completedCloseNodes.set(snapshot.node, completed);
+        }
+        completed.add(snapshot.role);
         closeRequests += 1;
         try {
             if (typeof snapshot.node.click === 'function') snapshot.node.click();

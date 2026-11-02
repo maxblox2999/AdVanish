@@ -2303,3 +2303,57 @@ test('web end-card action requests have a bounded per-document limit', () => {
     control(env, 'Close');
     assert.equal(env.sandbox.__adspeed.inspectClose(), null);
 });
+
+test('web end cards reuse one Close node only for a new eligible role', () => {
+    const env = environment({autoDismiss: true});
+    const close = control(env, 'Close');
+    const api = env.sandbox.__adspeed;
+    assert.equal(api.closeCompletedAd(api.inspectClose()), true);
+    assert.equal(api.inspectClose(), null);
+    close.textContent = 'Dismiss ad';
+    assert.equal(api.closeCompletedAd(api.inspectClose()), true);
+    assert.equal(api.inspectClose(), null);
+    close.textContent = 'Close';
+    assert.equal(api.inspectClose(), null);
+    assert.equal(close.events.length, 2);
+});
+
+test('web Close tokens cannot cross a reused node role change', () => {
+    const env = environment({autoDismiss: true});
+    const close = control(env, 'Close');
+    const api = env.sandbox.__adspeed;
+    const old = api.inspectClose();
+    close.textContent = 'Dismiss ad';
+    assert.equal(api.closeCompletedAd(old), false);
+    assert.equal(close.events.length, 0);
+    assert.equal(api.closeCompletedAd(api.inspectClose()), true);
+    assert.equal(close.events.length, 1);
+});
+
+test('reused web Close nodes reject countdowns and retain the action limit', () => {
+    const env = environment({autoDismiss: true});
+    const close = control(env, 'Close');
+    const api = env.sandbox.__adspeed;
+    assert.equal(api.closeCompletedAd(api.inspectClose()), true);
+    close.textContent = '5';
+    assert.equal(api.inspectClose(), null);
+    for (const label of ['Close ad', 'Dismiss', 'Dismiss ad', 'Fermer', 'Cerrar', 'Fechar', 'Chiudi']) {
+        close.textContent = label;
+        assert.equal(api.closeCompletedAd(api.inspectClose()), true);
+    }
+    close.textContent = 'Schließen';
+    assert.equal(api.inspectClose(), null);
+    assert.equal(close.events.length, 8);
+});
+
+test('web ad context changes do not replay a consumed Close role', () => {
+    const env = environment({autoDismiss: true});
+    const close = control(env, 'Close');
+    const api = env.sandbox.__adspeed;
+    assert.equal(api.closeCompletedAd(api.inspectClose()), true);
+    api.setAdContext(false);
+    assert.equal(api.inspectClose(), null);
+    api.setAdContext(true);
+    assert.equal(api.inspectClose(), null);
+    assert.equal(close.events.length, 1);
+});

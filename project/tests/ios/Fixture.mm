@@ -221,6 +221,16 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 @implementation GADFullScreenAdViewController
 @end
 
+@interface GADWebViewController : UIViewController
+@end
+@implementation GADWebViewController
+@end
+
+@interface GADBrowserViewController : GADWebViewController
+@end
+@implementation GADBrowserViewController
+@end
+
 @interface GADInterstitialAd : NSObject
 @property (nonatomic, strong) GADFullScreenAdViewController *controller;
 @property (nonatomic) NSUInteger presentations;
@@ -382,7 +392,78 @@ static BOOL testAppLovinPlayableOwner(UIViewController *presenter) {
     return YES;
 }
 
+
+static BOOL testGoogleWebOwner(UIViewController *presenter) {
+    __block NSUInteger rewards = 0;
+    GADRewardedAd *ad = [GADRewardedAd new];
+    [ad presentFromRootViewController:presenter userDidEarnRewardHandler:^{ rewards += 1; }];
+    GADWebViewController *webOwner = [GADWebViewController new];
+    [ad.controller addChildViewController:webOwner];
+    webOwner.view.frame = ad.controller.view.bounds;
+    [ad.controller.view addSubview:webOwner.view];
+    [webOwner didMoveToParentViewController:ad.controller];
+    [ad.controller.view bringSubviewToFront:ad.controller.closeButton];
+    ASPAdSurface *surface = ASPFindAdSurface(@[presenter.view.window], YES);
+    if (!check(surface.owner == ad.controller && surface.root == ad.controller.view,
+               @"A Google web component retains its actual fullscreen completion owner")) return NO;
+    ASPAdCompletionTrackController(surface.owner);
+    if (!check(rewards == 0 && ad.controller.closes == 0,
+               @"A nested Google web component still waits for the actual SDK reward")) return NO;
+    [ad emitSDKReward];
+    if (!check(rewards == 1 && ad.controller.closes == 1,
+               @"A nested Google web component closes after its matching SDK reward")) return NO;
+    ASPAdCompletionTrackController(ad.controller);
+    if (!check(rewards == 1 && ad.controller.closes == 1,
+               @"Repeated tracking cannot replay the nested Google Close")) return NO;
+
+    [(UIButton *)ad.controller.closeButton setTitle:@"Dismiss ad" forState:UIControlStateNormal];
+    UIView *cover = [[UIView alloc] initWithFrame:ad.controller.view.bounds];
+    cover.backgroundColor = UIColor.blackColor;
+    [ad.controller.view addSubview:cover];
+    ASPAdCompletionTrackController(ad.controller);
+    if (!check(ad.controller.closes == 1,
+               @"An opaque overlay still blocks its covered Google Close")) return NO;
+    [cover removeFromSuperview];
+    ASPAdCompletionTrackController(ad.controller);
+    if (!check(ad.controller.closes == 2 && rewards == 1,
+               @"Removing an opaque overlay exposes the next eligible Close without replaying reward")) return NO;
+
+    NSArray<Class> *classes = @[MAFullscreenAdViewController.class,
+        GADFullScreenAdViewController.class, GADBrowserViewController.class];
+    for (Class cls in classes) {
+        UIViewController *child = [cls new];
+        [ad.controller addChildViewController:child];
+        child.view.frame = ad.controller.view.bounds;
+        [ad.controller.view addSubview:child.view];
+        [child didMoveToParentViewController:ad.controller];
+        ASPAdSurface *childSurface = ASPFindAdSurface(@[presenter.view.window], YES);
+        BOOL preserved = childSurface.owner == child;
+        [child willMoveToParentViewController:nil];
+        [child.view removeFromSuperview];
+        [child removeFromParentViewController];
+        if (!check(preserved, [NSString stringWithFormat:@"%@ retains its separate nested owner",
+                              NSStringFromClass(cls)])) return NO;
+    }
+    [ad.controller willMoveToParentViewController:nil];
+    [ad.controller.view removeFromSuperview];
+    [ad.controller removeFromParentViewController];
+    [webOwner willMoveToParentViewController:nil];
+    [webOwner.view removeFromSuperview];
+    [webOwner removeFromParentViewController];
+    [presenter addChildViewController:webOwner];
+    webOwner.view.frame = presenter.view.bounds;
+    [presenter.view addSubview:webOwner.view];
+    [webOwner didMoveToParentViewController:presenter];
+    ASPAdSurface *standalone = ASPFindAdSurface(@[presenter.view.window], YES);
+    BOOL preserved = standalone.owner == webOwner;
+    [webOwner willMoveToParentViewController:nil];
+    [webOwner.view removeFromSuperview];
+    [webOwner removeFromParentViewController];
+    return check(preserved, @"A standalone Google web controller remains recognized");
+}
+
 static void testGoogleRewarded(UIViewController *presenter) {
+    if (!testGoogleWebOwner(presenter)) return;
     __block NSUInteger nilRootRewards = 0;
     GADRewardedAd *nilRoot = [GADRewardedAd new];
     nilRoot.fallbackPresenter = presenter;
