@@ -15,8 +15,8 @@ static BOOL kindOfNamedClass(id object, NSString *name) {
 static BOOL adController(UIViewController *controller) {
     // Resolve supported owners at use time so a framework loaded after the tweak
     // constructor is covered as well. Keep the known SDK controllers and also
-    // recognize full-screen controllers whose names carry common ad tokens, so
-    // renamed or newer SDK controllers are not missed.
+    // use the original tweak's prefix/suffix heuristic, so renamed or newer SDK
+    // controllers are recognized instead of being skipped.
     for (NSString *name in @[@"GADFullScreenAdViewController", @"GADInterstitialAdViewController",
                             @"GADAppOpenAdViewController", @"MAFullscreenAdViewController",
                             @"ALBaseVideoViewController", @"ALInterstitialAdViewController",
@@ -33,11 +33,18 @@ static BOOL adController(UIViewController *controller) {
                             @"MPRewardedVideoViewController"]) {
         if (kindOfNamedClass(controller, name)) return YES;
     }
-    NSString *className = NSStringFromClass(controller.class) ?: @"";
-    for (NSString *token in @[@"Ad", @"Interstitial", @"Rewarded", @"Fullscreen", @"FullScreen",
-                              @"Overlay", @"Creative", @"AdUnit", @"AdView", @"VideoAd", @"UADS",
-                              @"Vungle", @"IronSource", @"Chartboost", @"AdColony", @"Pangle"]) {
-        if ([className rangeOfString:token].location != NSNotFound) return YES;
+    NSString *name = NSStringFromClass(controller.class) ?: @"";
+    NSArray *prefixes = @[@"AL", @"MA", @"GAD", @"UADS", @"UnityAds", @"Vungle", @"MTG", @"IS",
+                          @"IronSource", @"IM", @"InMobi", @"Bigo", @"BU", @"Pangle", @"FBAd"];
+    NSArray *suffixes = @[@"ViewController", @"VideoController", @"Fullscreen", @"FullScreen",
+                          @"AdController", @"VideoPlayer", @"PlayerController", @"AdViewController"];
+    BOOL hasPrefix = NO;
+    for (NSString *prefix in prefixes) {
+        if ([name hasPrefix:prefix]) { hasPrefix = YES; break; }
+    }
+    if (!hasPrefix) return NO;
+    for (NSString *suffix in suffixes) {
+        if ([name rangeOfString:suffix].location != NSNotFound) return YES;
     }
     return NO;
 }
