@@ -121,14 +121,14 @@ jobs:
           FIXTURE: ${{ matrix.fixture }}
         run: |
           set -euo pipefail
-          args=()
+          args=(--video tests/ios/fixture.mp4 --device "$SIM_UDID")
           case "$FIXTURE" in
             settings) args+=(--settings); report=ios-settings.json ;;
             native) report=ios-simulator.json ;;
             injected) args+=(--injected --framework "$RUNNER_TEMP/advanish-framework"); report=ios-injected.json ;;
             manual) args+=(--injected --manual --framework "$RUNNER_TEMP/advanish-framework"); report=ios-injected-manual.json ;;
           esac
-          python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --device "$SIM_UDID" "${args[@]}" --output "dist/ios/$report"
+          python3 scripts/test-ios.py "${args[@]}" --output "dist/ios/$report"
       - name: Delete simulator
         if: always()
         run: |
