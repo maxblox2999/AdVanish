@@ -38,7 +38,7 @@ jobs:
   runner_fallback:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 32
+    timeout-minutes: 92
     permissions:
       contents: read
       actions: write
@@ -50,7 +50,9 @@ jobs:
         run: python3 scripts/runner-fallback.py
 
   checks:
-    runs-on: ubuntu-latest
+    name: checks
+    timeout-minutes: 30
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Verify runner retry commit
@@ -61,14 +63,14 @@ jobs:
         run: |
           test "$EXPECTED_COMMIT" = "$GITHUB_SHA"
           test "$RETRY_RUNNER" = macos-15-intel
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
       - name: Reject CRLF in tracked text files
         working-directory: .
         run: |
           python3 -c 'import pathlib, subprocess, sys; suffixes = {".m", ".mm", ".h", ".xm", ".plist", ".yml", ".md", ".py", ".sh", ".cjs", ".js", ".json", ".env"}; names = {"control", "Makefile", "LICENSE", "NOTICE.md"}; files = [n for n in subprocess.check_output(["git", "ls-files", "-z"], text=True).split("\0") if n and (pathlib.Path(n).suffix in suffixes or n in names)]; bad = [n for n in files if b"\r" in pathlib.Path(n).read_bytes()]; print("\n".join(bad)); sys.exit(1 if bad else 0)'
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-      - name: Test web engine and check generated source
+      - name: Test web engine and tools
         run: |
           node scripts/embed-web.cjs
           node --test tests/web.test.cjs
@@ -78,103 +80,118 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Test Chromium media and playable paths
         env:
-          BROWSER_PATH: /usr/bin/google-chrome
+          BROWSER_PATH: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
         run: node tests/browser/verify.cjs
-      - name: Archive complete source
+      - name: Prepare shared simulator and fixture tools
         run: |
-          mkdir -p dist/source "$RUNNER_TEMP/source-id"
-          git -C .. archive --format=tar --prefix=AdVanish/ HEAD > "$RUNNER_TEMP/advanish-source.tar"
-          printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/source-id/SOURCE_COMMIT"
-          tar --append --file="$RUNNER_TEMP/advanish-source.tar" --transform='s,^,AdVanish/,' -C "$RUNNER_TEMP/source-id" SOURCE_COMMIT
-          gzip -n < "$RUNNER_TEMP/advanish-source.tar" > dist/source/AdVanish-source.tar.gz
-          cp dist/browser.json dist/source/browser.json
-          cd dist/source
-          sha256sum AdVanish-source.tar.gz > SHA256SUMS
+          set -euo pipefail
+          python3 scripts/test-ios.py --prepare "AdVanish-checks-${{ github.run_id }}" > "$RUNNER_TEMP/advanish-udid" &
+          prepare=$!
+          trap 'kill "$prepare" 2>/dev/null || true' EXIT
+          bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" jailed
+          export THEOS="$RUNNER_TEMP/advanish-tools/theos"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          python3 scripts/build-jailed.py --simulator --output "$RUNNER_TEMP/advanish-framework"
+          wait "$prepare"
+          trap - EXIT
+          echo "SIM_UDID=$(cat "$RUNNER_TEMP/advanish-udid")" >> "$GITHUB_ENV"
+      - name: Check production Settings
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --device "$SIM_UDID" --settings --output dist/ios/ios-settings.json
+      - name: Check native playback and pending rewards
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --device "$SIM_UDID" --output dist/ios/ios-simulator.json
+      - name: Check injected initialization and hooks
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --device "$SIM_UDID" --injected --framework "$RUNNER_TEMP/advanish-framework" --output dist/ios/ios-injected.json
+      - name: Check manual mode
+        run: python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --device "$SIM_UDID" --injected --manual --framework "$RUNNER_TEMP/advanish-framework" --output dist/ios/ios-injected-manual.json
+      - name: Delete simulator
+        if: always()
+        run: |
+          device="${SIM_UDID:-$(cat "$RUNNER_TEMP/advanish-udid" 2>/dev/null || true)}"
+          if [ -n "$device" ]; then python3 scripts/test-ios.py --delete "$device"; fi
+      - name: Archive complete source
+        run: python3 scripts/archive-source.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: advanish-source-${{ github.sha }}
           path: project/dist/source/
           if-no-files-found: error
           overwrite: true
-
-  package:
-    timeout-minutes: 15
-    runs-on: ${{ inputs.runner || 'macos-15' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [rootless, rootful, roothide, jailed]
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Build and inspect package
-        run: |
-          set -euo pipefail
-          brew install ldid dpkg make
-          export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
-          bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" "${{ matrix.variant }}"
-          export THEOS="$RUNNER_TEMP/advanish-tools/theos"
-          bash scripts/build.sh "${{ matrix.variant }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: advanish-${{ matrix.variant }}-${{ github.sha }}
-          path: project/dist/${{ matrix.variant }}/
+          name: advanish-ios-settings-${{ github.sha }}
+          path: |
+            project/dist/ios/ios-settings.json
+            project/dist/ios/ios-settings-diagnostics.json
           if-no-files-found: error
           overwrite: true
-
-  ios:
-    timeout-minutes: 12
-    runs-on: ${{ inputs.runner || 'macos-15' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        fixture: [settings, native, injected, manual]
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Prepare simulator and fixture tools
-        run: |
-          set -euo pipefail
-          python3 scripts/test-ios.py --prepare "AdVanish-${{ matrix.fixture }}-${{ github.run_id }}" > "$RUNNER_TEMP/advanish-udid" &
-          prepare=$!
-          if [ "${{ matrix.fixture }}" != native ]; then
-            bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" jailed
-            export THEOS="$RUNNER_TEMP/advanish-tools/theos"
-            echo "THEOS=$THEOS" >> "$GITHUB_ENV"
-          fi
-          case "${{ matrix.fixture }}" in
-            injected|manual) python3 scripts/build-jailed.py --simulator --output "$RUNNER_TEMP/advanish-framework" ;;
-          esac
-          wait "$prepare"
-          echo "SIM_UDID=$(cat "$RUNNER_TEMP/advanish-udid")" >> "$GITHUB_ENV"
-      - name: Run complete simulator fixture
-        env:
-          FIXTURE: ${{ matrix.fixture }}
-        run: |
-          set -euo pipefail
-          args=(--video tests/ios/fixture.mp4 --device "$SIM_UDID")
-          case "$FIXTURE" in
-            settings) args+=(--settings); report=ios-settings.json ;;
-            native) report=ios-simulator.json ;;
-            injected) args+=(--injected --framework "$RUNNER_TEMP/advanish-framework"); report=ios-injected.json ;;
-            manual) args+=(--injected --manual --framework "$RUNNER_TEMP/advanish-framework"); report=ios-injected-manual.json ;;
-          esac
-          python3 scripts/test-ios.py "${args[@]}" --output "dist/ios/$report"
-      - name: Delete simulator
-        if: always()
-        run: |
-          device="${SIM_UDID:-$(cat "$RUNNER_TEMP/advanish-udid" 2>/dev/null || true)}"
-          if [ -n "$device" ]; then python3 scripts/test-ios.py --delete "$device"; fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: advanish-ios-${{ matrix.fixture }}-${{ github.sha }}
-          path: project/dist/ios/
+          name: advanish-ios-native-${{ github.sha }}
+          path: |
+            project/dist/ios/ios-simulator.json
+            project/dist/ios/ios-simulator-diagnostics.json
           if-no-files-found: error
           overwrite: true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: advanish-ios-injected-${{ github.sha }}
+          path: |
+            project/dist/ios/ios-injected.json
+            project/dist/ios/ios-injected-diagnostics.json
+          if-no-files-found: error
+          overwrite: true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: advanish-ios-manual-${{ github.sha }}
+          path: |
+            project/dist/ios/ios-injected-manual.json
+            project/dist/ios/ios-injected-manual-diagnostics.json
+          if-no-files-found: error
+          overwrite: true
+
+  rootless:
+    name: package (rootless)
+    needs: [checks]
+    if: ${{ !cancelled() && needs.checks.result == 'success' }}
+    uses: ./.github/workflows/package.yml
+    with:
+      variant: rootless
+      runner: ${{ inputs.runner || 'macos-15' }}
+
+  jailed:
+    name: package (jailed)
+    needs: [checks, rootless]
+    if: ${{ !cancelled() && needs.checks.result == 'success' }}
+    uses: ./.github/workflows/package.yml
+    with:
+      variant: jailed
+      runner: ${{ inputs.runner || 'macos-15' }}
+
+  rootful:
+    name: package (rootful)
+    needs: [checks, jailed]
+    if: ${{ !cancelled() && needs.checks.result == 'success' }}
+    uses: ./.github/workflows/package.yml
+    with:
+      variant: rootful
+      runner: ${{ inputs.runner || 'macos-15' }}
+
+  roothide:
+    name: package (roothide)
+    needs: [checks, rootful]
+    if: ${{ !cancelled() && needs.checks.result == 'success' }}
+    uses: ./.github/workflows/package.yml
+    with:
+      variant: roothide
+      runner: ${{ inputs.runner || 'macos-15' }}
 
   release:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.runner_fallback && inputs.source_commit == github.sha))
-    needs: [checks, package, ios]
+    needs: [checks, rootless, jailed, rootful, roothide]
     runs-on: ubuntu-latest
     permissions:
       contents: write

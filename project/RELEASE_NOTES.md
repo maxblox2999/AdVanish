@@ -1,11 +1,21 @@
 # AdVanish 0.8.3
 
-- Settings changes go through CFPreferences, so a reopened app sees them.
-- Rootless reads the real preferences path first instead of the bootstrap copy.
-- Turning off the fast-forward button no longer turns automatic mode off.
-- 80x playback with a lower-rate fallback when a player rejects it.
-- Native countdown timers accelerate only during a visible ad.
-- Run Settings, native, injected and manual simulator checks in parallel.
-- Stop recovery when shutdown, reboot or app readiness fails.
-- Retry an idle macOS runner queue once on Intel.
-- The release tag and package version come from `control`.
+Choose your download:
+
+- **rootless.deb** — standard rootless jailbreaks.
+- **jailed.zip** — arm64 IPA injection; inject and re-sign before installing.
+- **rootful.deb** — traditional rootful jailbreaks.
+- **roothide.deb** — RootHide bootstraps only.
+
+Jailbreak DEBs include **arm64 and arm64e** for supported older and newer iPhones. Choose by jailbreak, not chip. A compatible jailbreak or IPA signing setup is still required.
+
+Changes:
+
+- Shared checks run first, then rootless → jailed → rootful → RootHide.
+- Settings changes use CFPreferences and the current rootless preferences path.
+- Hiding the fast-forward button keeps automatic mode active.
+- 80x playback target with lower-rate fallback; native countdowns accelerate during a visible ad.
+- Failed simulator recovery stops the checks.
+- Idle macOS queues retry once on Intel.
+
+Real game rewards and physical-device compatibility remain unverified.

@@ -33,7 +33,7 @@ class RunnerFallbackTests(unittest.TestCase):
         self.assertEqual(runner.decision([job("completed", "failure"), job("queued")], 900), "done")
 
     def test_finished_build_is_not_retried(self):
-        self.assertEqual(runner.decision([job("completed", "success")], 900), "done")
+        self.assertEqual(runner.decision([job("completed", "success", name="package (" + variant + ") / build") for variant in ("rootless", "jailed", "rootful", "roothide")], 900), "done")
 
     def test_linux_watcher_does_not_block_its_own_retry(self):
         self.assertEqual(runner.decision([job("in_progress", name="runner_fallback"), job("queued")], 900), "fallback")
@@ -57,6 +57,15 @@ class RunnerFallbackTests(unittest.TestCase):
                 with patch.object(runner, "api", side_effect=[{"jobs": [job("queued")]}, {"object": {"sha": "new"}}]) as api:
                     runner.watch()
         self.assertEqual(api.call_count, 2)
+
+    def test_queued_shared_checks_can_use_runner_fallback(self):
+        self.assertEqual(runner.decision([job("queued", name="checks")], 300), "fallback")
+
+    def test_shared_checks_completion_does_not_end_watch_early(self):
+        self.assertEqual(runner.decision([job("completed", "success", name="checks")], 900), "wait")
+
+    def test_first_package_completion_keeps_watching_later_packages(self):
+        self.assertEqual(runner.decision([job("completed", "success")], 900), "wait")
 
 
 if __name__ == "__main__":

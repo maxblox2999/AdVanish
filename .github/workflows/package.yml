@@ -1,0 +1,43 @@
+name: Package
+
+on:
+  workflow_call:
+    inputs:
+      variant:
+        required: true
+        type: string
+      runner:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: project
+
+jobs:
+  build:
+    timeout-minutes: 15
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Build and inspect package
+        env:
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          set -euo pipefail
+          case "$VARIANT" in rootless|jailed|rootful|roothide) ;; *) exit 2 ;; esac
+          brew install ldid dpkg make
+          export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+          bash scripts/setup-theos.sh "$RUNNER_TEMP/advanish-tools" "$VARIANT"
+          export THEOS="$RUNNER_TEMP/advanish-tools/theos"
+          bash scripts/build.sh "$VARIANT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: advanish-${{ inputs.variant }}-${{ github.sha }}
+          path: project/dist/${{ inputs.variant }}/
+          if-no-files-found: error
+          overwrite: true

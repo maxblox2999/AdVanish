@@ -7,22 +7,28 @@ import time
 
 
 QUEUE_WAIT = 300
-WATCH_LIMIT = 1800
+WATCH_LIMIT = 5400
+
+
+def mac_jobs(jobs):
+    return [job for job in jobs if job["name"] == "checks" or job["name"].startswith(("package (", "ios ("))]
 
 
 def decision(jobs, waited):
     if any(job["name"] == "checks" and job["status"] == "completed" and job.get("conclusion") != "success" for job in jobs):
         return "done"
-    mac = [job for job in jobs if job["name"].startswith(("package (", "ios ("))]
+    mac = mac_jobs(jobs)
     if not mac:
         return "wait"
     if any(job["status"] == "completed" and job.get("conclusion") != "success" for job in mac):
         return "done"
-    if all(job["status"] == "completed" for job in mac):
+    variants = ("rootless", "jailed", "rootful", "roothide")
+    if all(any(job["name"].startswith("package (" + variant + ")") and job["status"] == "completed"
+               for job in mac) for variant in variants):
         return "done"
     if any(job["status"] not in ("queued", "completed") for job in mac):
         return "wait"
-    return "fallback" if waited >= QUEUE_WAIT else "wait"
+    return "fallback" if any(job["status"] == "queued" for job in mac) and waited >= QUEUE_WAIT else "wait"
 
 
 def api(path, payload=None):
@@ -44,7 +50,7 @@ def watch():
     while time.monotonic() - started < WATCH_LIMIT:
         jobs = api(prefix + "/actions/runs/" + run_id + "/jobs?per_page=100")["jobs"]
         now = time.monotonic()
-        mac = [job for job in jobs if job["name"].startswith(("package (", "ios ("))]
+        mac = mac_jobs(jobs)
         if any(job["status"] not in ("queued", "completed") for job in mac):
             idle_since = None
         elif idle_since is None:
