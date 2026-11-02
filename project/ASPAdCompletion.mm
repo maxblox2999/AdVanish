@@ -331,7 +331,7 @@ static void closeIfEligible(ASPRewardSession *session) {
         if (!session.closeActions) session.closeActions = [NSMapTable weakToStrongObjectsMapTable];
         NSString *key = closeActionKey(close, surface);
         NSMutableSet<NSString *> *actions = [session.closeActions objectForKey:close];
-        if ([actions containsObject:key]) {
+        if ([actions containsObject:key] || (actions.count && !closeLabel(close))) {
             closeWebEndCard(session, surface);
             return;
         }

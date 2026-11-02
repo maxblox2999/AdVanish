@@ -450,6 +450,7 @@ static void testGoogleRewarded(UIViewController *presenter) {
     ASPAdCompletionTrackController(second.controller);
     if (!check(second.controller.closes == 4 && secondRewards == 1,
                @"The reused stage control cannot repeat or fabricate another reward")) return;
+    second.controller.closeButton = finalClose;
     [finalClose setTitle:@"5" forState:UIControlStateNormal];
     ASPAdCompletionTrackController(second.controller);
     if (!check(second.controller.closes == 4,
