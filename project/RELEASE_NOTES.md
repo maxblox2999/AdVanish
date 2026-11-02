@@ -1,9 +1,9 @@
-# AdVanish 0.8.0
+# AdVanish 0.8.1
 
-- 80x target for native and web acceleration, with 40x/20x/16x/8x/4x/2x fallback when a player rejects it.
-- Native NSTimer countdowns accelerate inside an active ad.
-- Nested timer constructors compress once.
-- Disabled apps skip injection, playback hooks and timers.
-- Manual mode stays idle until a press.
-
-80x is a target, not a guarantee for every creative. Server waits and rewards stay with the app.
+- 80x playback with 40x/20x/16x/8x/4x/2x fallback when a player rejects it.
+- Native countdown timers accelerate only during a visible ad.
+- Manual mode waits for a press and never auto-closes.
+- Disabled apps skip injection, playback changes and timers.
+- Simulator tests reuse one booted device, so a wedged simulator is reset instead of hanging the build.
+- Only the first simulator query may retry; later failures are reported with diagnostics.
+- The release tag and package version come from `control`; the download check uses that tag.

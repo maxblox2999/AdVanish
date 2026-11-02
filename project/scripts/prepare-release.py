@@ -16,7 +16,8 @@ SHA = os.environ["GITHUB_SHA"]
 RUN = os.environ["GITHUB_RUN_ID"]
 INCOMING = ROOT / "incoming"
 OUTPUT = ROOT / "release"
-VERSION = "0.8.0"
+VERSION = next(line.split(":", 1)[1].strip() for line in (PROJECT / "control").read_text().splitlines()
+               if line.startswith("Version:"))
 OUTPUT.mkdir(exist_ok=True)
 reports = {}
 native = {}

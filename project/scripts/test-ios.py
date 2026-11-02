@@ -114,8 +114,11 @@ def reset(device):
 def prepare(name):
     started = time.monotonic()
     device_type, runtime, version = device_target()
+    note({"phase": "target", "elapsed": round(time.monotonic() - started, 1)})
     device = simctl("create", name, device_type, runtime, timeout=60)
+    note({"phase": "created", "elapsed": round(time.monotonic() - started, 1)})
     simctl("boot", device, timeout=120)
+    note({"phase": "booted", "elapsed": round(time.monotonic() - started, 1)})
     simctl("bootstatus", device, "-b", timeout=300)
     warm_up(device)
     note({"phase": "ready", "runtime": version, "device": device, "elapsed": round(time.monotonic() - started, 1)})
@@ -298,7 +301,10 @@ def main(video, output, injected=False, manual=False, settings=False, device=Non
                 path = diagnostics(output, device, "Native fixture did not write a result", container)
                 raise RuntimeError("Native fixture did not write a result; see " + str(path))
             report = json.loads(report_path.read_text())
-            report["runtime"] = device_target()[2]
+            try:
+                report["runtime"] = device_target()[2]
+            except Exception:
+                report["runtime"] = ""
             report["source_commit"] = source_commit()
             report["injected_framework"] = injected
             report["manual_mode"] = manual

@@ -8,7 +8,9 @@ import urllib.request
 
 repo = os.environ["GITHUB_REPOSITORY"]
 sha = os.environ["GITHUB_SHA"]
-tag = "v0.8.0"
+version = next(line.split(":", 1)[1].strip() for line in Path("project/control").read_text().splitlines()
+               if line.startswith("Version:"))
+tag = "v" + version
 base = "https://api.github.com/repos/" + repo
 headers = {"User-Agent": "AdVanish-release-verification"}
 def read(url):

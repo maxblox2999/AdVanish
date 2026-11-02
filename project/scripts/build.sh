@@ -20,6 +20,8 @@ esac
 : "${THEOS:?Set THEOS to the directory printed by scripts/setup-theos.sh}"
 test "$(git -C "$THEOS" rev-parse HEAD)" = "$THEOS_REVISION"
 make_command="${MAKE:-make}"
+version="$(awk '/^Version:/ {print $2}' control)"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" settings/Resources/Info.plist >/dev/null
 node scripts/embed-web.cjs
 node --test tests/web.test.cjs
 "$make_command" clean
@@ -30,7 +32,6 @@ node --test tests/web.test.cjs
 output_dir="dist/$variant"
 mkdir -p "$output_dir"
 package_id="$(awk '/^Package:/ {print $2}' control)"
-version="$(awk '/^Version:/ {print $2}' control)"
 package="packages/${package_id}_${version}_${architecture}.deb"
 test -f "$package"
 python3 scripts/verify-package.py "$package" "$variant" > "$output_dir/package-check.json"
