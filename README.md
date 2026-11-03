@@ -19,7 +19,8 @@ Built for modern iOS versions, with support for different jailbreak types, plus 
 
 ## Use
 
-**Jailbreak:** Install the matching rootless, rootful, or RootHide package. Apps are enabled by default; open **Settings → AdVanish** to disable one.
+**Jailbreak:** Install the matching rootless, rootful, or RootHide package. Apps are enabled by default. Open **Settings → Scroll all the way down → AdVanish** to disable one.
+If you are on iOS/iPadOS 18 or higher, **Settings → General → Scroll all the way down → AdVanish**.
 
 **Jailed:** Inject the framework into an authorized decrypted IPA, then re-sign it. See [Instructions](project/BUILD.md#ipa-injection).
 
@@ -32,7 +33,7 @@ Rewards and server validation stay with the app.
 - **Compatibility:** Rootless, rootful, RootHide, and jailed injection.
 - **iOS Versions:** iOS 15–18. *(iOS 26 is experimental)*
 - **Ad Types:** Supports reward-based ads, including server-sided ones. Designed to be universal, but it may not detect every ad type.
-- 
+
 > [!important]
 > **Known Issue:** Using this tweak for a long time can cause performance issues and slower ad completions. If you encounter any issues, simply reopen the app and report them by opening an issue.
 >
@@ -45,5 +46,9 @@ See [Ad Types](project/docs/AD_TYPES.md) and [Tests](project/docs/VALIDATION.md)
 Source code, tests, and build tools are located in [`project/`](project/).
 
 ---
+
+
+> [!CAUTION]
+> The owner is NOT responsible for how AdVanish is used and it is only meant to be used in apps you are authorized to use it in to fix their security.
 
 [maxblox2999](https://github.com/maxblox2999)  [Changes](project/docs/AUDIT.md)  [License](LICENSE)
