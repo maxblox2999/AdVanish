@@ -477,6 +477,67 @@ static BOOL testGoogleWebOwner(UIViewController *presenter) {
 @end
 
 
+@interface MTGBaseCommonJS : NSObject
+@property (nonatomic, weak) UIView *superView;
+@property (nonatomic, weak) UIView *closeView;
+@property (nonatomic) NSUInteger closeEvents;
+- (UIView *)getCloseButtonView;
+- (void)closeButtonTappedAction:(id)sender;
+@end
+@implementation MTGBaseCommonJS
+- (UIView *)getCloseButtonView { return self.closeView; }
+- (void)closeButtonTappedAction:(id)sender { self.closeEvents += 1; }
+@end
+
+static BOOL testMintegralBridgeClose(FixtureUnityController *owner) {
+    MTGBaseCommonJS *bridge = [MTGBaseCommonJS new];
+    UIView *wrapper = [[UIView alloc] initWithFrame:CGRectMake(owner.view.bounds.size.width - 56, 50, 36, 36)];
+    UIButton *image = [UIButton buttonWithType:UIButtonTypeCustom];
+    image.frame = wrapper.bounds;
+    image.userInteractionEnabled = NO;
+    [image addTarget:bridge action:@selector(closeButtonTappedAction:) forControlEvents:UIControlEventTouchUpInside];
+    [wrapper addSubview:image];
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:bridge action:@selector(closeButtonTappedAction:)];
+    [wrapper addGestureRecognizer:tap];
+    bridge.closeView = wrapper;
+    bridge.superView = owner.view;
+    [owner.view addSubview:wrapper];
+    tap.enabled = NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"Mintegral's disabled Close gesture stays untouched")) return NO;
+    tap.enabled = YES;
+    UIView *foreign = [UIView new];
+    bridge.superView = foreign;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"A Mintegral bridge outside the ad owner cannot close")) return NO;
+    bridge.superView = owner.view;
+    wrapper.hidden = YES;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"A hidden Mintegral wrapper cannot close")) return NO;
+    wrapper.hidden = NO;
+    UIView *cover = [[UIView alloc] initWithFrame:wrapper.frame];
+    [owner.view addSubview:cover];
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"An occluded Mintegral wrapper cannot close")) return NO;
+    [cover removeFromSuperview];
+    image.enabled = NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"Mintegral's disabled registered Close action stays untouched")) return NO;
+    image.enabled = YES;
+    UIView *stale = [UIView new];
+    bridge.closeView = stale;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"A stale Mintegral Close getter invalidates its wrapper")) return NO;
+    bridge.closeView = wrapper;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 1 && !image.userInteractionEnabled,
+        @"Mintegral's exposed wrapper uses its existing SDK action with a decorative button")) return NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 1, @"Mintegral's unchanged wrapper Close cannot repeat")) return NO;
+    [wrapper removeFromSuperview];
+    return YES;
+}
+
 static BOOL testMintegralNativeClose(FixtureUnityController *owner) {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
     button.frame = CGRectMake(owner.view.bounds.size.width - 56, 50, 36, 36);
@@ -539,7 +600,7 @@ static void testSdkWebClose(UIViewController *presenter, NSString *adapter, void
                                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
                                     [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
                                         if (!check(!error && [value isEqual:@1], [label stringByAppendingString:@" unchanged Close is not replayed"])) return;
-                                        if (!unity && !testMintegralNativeClose(owner)) return;
+                                        if (!unity && (!testMintegralNativeClose(owner) || !testMintegralBridgeClose(owner))) return;
                                         [owner willMoveToParentViewController:nil];
                                         [owner.view removeFromSuperview];
                                         [owner removeFromParentViewController];
