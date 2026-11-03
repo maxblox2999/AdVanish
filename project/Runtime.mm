@@ -156,7 +156,7 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
     for (WKWebView *page in surface.webViews) {
         NSString *script = [NSString stringWithUTF8String:R"JS(
             var a = window.__adspeed;
-            var result = {api: !!a, stats: a ? a.stats : null,
+            var result = {api: !!a, stats: a ? a.stats : null, viewport:[innerWidth,innerHeight], hidden:document.hidden,
                 frames: document.querySelectorAll('iframe,frame').length, controls: []};
             var nodes = document.querySelectorAll('button,[role="button"],[aria-label],[id],[class],[data-test-id],[data-testid],[data-element-id]');
             for (var i = 0; i < Math.min(nodes.length, 512) && result.controls.length < 16; i++) {
@@ -186,7 +186,11 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
                 var hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
                 result.closeHits.push({id:id, hit:hit ? hit.tagName : null,
                     hitId:hit ? String(hit.id || '').slice(0,80) : '',
-                    opacity:window.getComputedStyle(n).opacity});
+                    opacity:window.getComputedStyle(n).opacity,
+                    ancestors:(function(){var chain=[];for(var p=n;p&&chain.length<16;p=p.parentElement){
+                        var style=window.getComputedStyle(p);chain.push({tag:p.tagName,id:String(p.id||'').slice(0,80),
+                            hidden:p.hidden,display:style.display,visibility:style.visibility,opacity:style.opacity,pointer:style.pointerEvents});}
+                        return chain;})()});
             });
             return result;
         )JS"];
