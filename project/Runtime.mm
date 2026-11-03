@@ -75,7 +75,7 @@ void AVNDeviceDiagnosticLog(NSString *event, NSDictionary *fields) {
 }
 
 static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
-    if (!AVNDeviceDiagnosticsEnabled() || !surface.recognized || surface.incomplete) return;
+    if (!AVNDeviceDiagnosticsEnabled() || !surface || surface.incomplete) return;
     static NSTimeInterval previous;
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     if (now - previous < 10) return;
@@ -329,9 +329,23 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
                 @"web": @(surface.webViews.count), @"players": @(surface.players.count),
                 @"recognized": @(surface.recognized), @"incomplete": @(surface.incomplete)}];
         }
+        ASPAdSurface *fallback = surfaces.count ? nil : ASPFindAdSurface(ASPManualSkipContentWindows(), NO);
+        if (fallback) AVNDeviceInspectSurface(fallback);
+        NSMutableArray *presentations = NSMutableArray.array;
+        for (UIWindow *window in ASPManualSkipContentWindows()) {
+            UIViewController *node = window.rootViewController;
+            NSMutableArray *chain = NSMutableArray.array;
+            for (NSUInteger depth = 0; node && depth < 8; depth++) {
+                [chain addObject:AVNDeviceClassName(node)];
+                node = node.presentedViewController;
+            }
+            if (chain.count && presentations.count < 8) [presentations addObject:chain];
+        }
         AVN_DEVICE_LOG(@"runtime", @{@"enabled": @(self.options.enabled),
             @"automatic": @(self.options.automatic), @"dismissal": @(self.options.dismissal),
-            @"active": @(active), @"owners": owners});
+            @"active": @(active), @"owners": owners,
+            @"fallback": fallback ? AVNDeviceClassName(fallback.owner) : @"none",
+            @"presentations": presentations});
     }
 #endif
     for (WKWebView *page in self.pages.allObjects) [self authorize:page];
