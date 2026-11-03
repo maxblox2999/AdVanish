@@ -34,7 +34,8 @@ function environment(configuration = {}, options = {}) {
             if (selector === 'div[id],span[id],div[class],span[class]') return controls.filter(node => /^(DIV|SPAN)$/.test(node.tagName));
             if (selector === 'canvas,[role="timer"],time') return controls.filter(node => node.tagName === 'CANVAS' || node.tagName === 'TIME'
                 || (node.getAttribute && node.getAttribute('role') === 'timer'));
-            assert.ok(['button,[role="button"],[aria-label]', '[id="m-playable-skip"],[id="m-playable-close"]'].includes(selector));
+            assert.ok(['button,[role="button"],[aria-label]', '[id="m-playable-skip"],[id="m-playable-close"]',
+                'button,[role="button"],[aria-label],.simidCloseButtonButton,.simidRewardGrantedCloseButton'].includes(selector));
             return controls;
         },
         getElementsByTagName(name) {
@@ -2439,4 +2440,82 @@ test('unknown adapters and Mintegral lookalike install elements remain untouched
     assert.equal(env.sandbox.__adspeed.inspectClose('mintegral'), null);
     assert.equal(env.sandbox.__adspeed.inspectClose('unknown'), null);
     assert.equal(env.controls.reduce((count, node) => count + node.events.length, 0), 0);
+});
+
+function googleCloseControl(env, role, overrides = {}) {
+    return control(env, '', {
+        tagName: 'DIV',
+        getAttribute(name) { return name === 'class' ? role : null; },
+        getBoundingClientRect() { return {left: 380, top: 64, right: 404, bottom: 88, width: 24, height: 24}; },
+        ...overrides
+    });
+}
+
+test('Google SIMID Close uses its SDK control without selecting install or skip', () => {
+    const env = environment({autoDismiss: true});
+    const close = googleCloseControl(env, 'simidCloseButtonButton');
+    const install = googleCloseControl(env, 'install');
+    const skip = googleCloseControl(env, 'simidSkipButtonButton');
+    const api = env.sandbox.__adspeed;
+    assert.equal(api.inspectClose('unity'), null);
+    assert.equal(api.closeCompletedAd(api.inspectClose('google')), true);
+    assert.equal(close.events.length, 1);
+    assert.equal(install.events.length, 0);
+    assert.equal(skip.events.length, 0);
+});
+
+test('Google SIMID closing preserves manual mode and ad policy', () => {
+    for (const config of [{automatic: false}, {recognizedAd: false}, {autoDismiss: false}]) {
+        const env = environment({autoDismiss: true, ...config});
+        googleCloseControl(env, 'simidRewardGrantedCloseButton');
+        assert.equal(env.sandbox.__adspeed.inspectClose('google'), null);
+    }
+});
+
+test('Google SIMID rejects hidden disabled covered and linked Close controls', () => {
+    for (const overrides of [{hidden: true}, {disabled: true}, {style: {pointerEvents: 'none'}},
+        {style: {display: 'none'}}, {parentElement: {tagName: 'A', parentElement: null}}]) {
+        const env = environment({autoDismiss: true});
+        googleCloseControl(env, 'simidCloseButtonButton', overrides);
+        assert.equal(env.sandbox.__adspeed.inspectClose('google'), null);
+    }
+    const env = environment({autoDismiss: true});
+    googleCloseControl(env, 'simidCloseButtonButton');
+    env.document.elementFromPoint = () => ({contains: () => false});
+    assert.equal(env.sandbox.__adspeed.inspectClose('google'), null);
+});
+
+test('Google SIMID Close tokens reject changed roles and duplicate use', () => {
+    const env = environment({autoDismiss: true});
+    let role = 'simidCloseButtonButton';
+    const close = googleCloseControl(env, role, {getAttribute(name) { return name === 'class' ? role : null; }});
+    const api = env.sandbox.__adspeed;
+    const stale = api.inspectClose('google');
+    role = 'simidRewardGrantedCloseButton';
+    assert.equal(api.closeCompletedAd(stale), false);
+    const current = api.inspectClose('google');
+    assert.equal(api.closeCompletedAd(current), true);
+    assert.equal(api.closeCompletedAd(current), false);
+    assert.equal(close.events.length, 1);
+});
+
+test('Google SIMID rejects ambiguous controls and large or central lookalikes', () => {
+    const ambiguous = environment({autoDismiss: true});
+    googleCloseControl(ambiguous, 'simidCloseButtonButton');
+    googleCloseControl(ambiguous, 'simidRewardGrantedCloseButton');
+    assert.equal(ambiguous.sandbox.__adspeed.inspectClose('google'), null);
+    for (const rect of [{left: 0, top: 0, right: 414, bottom: 800, width: 414, height: 800},
+        {left: 190, top: 400, right: 214, bottom: 424, width: 24, height: 24}]) {
+        const env = environment({autoDismiss: true});
+        googleCloseControl(env, 'simidCloseButtonButton', {getBoundingClientRect() { return rect; }});
+        assert.equal(env.sandbox.__adspeed.inspectClose('google'), null);
+    }
+});
+
+test('Google accessible Close controls remain supported with the SIMID adapter', () => {
+    const env = environment({autoDismiss: true});
+    const close = control(env, 'Close');
+    const api = env.sandbox.__adspeed;
+    assert.equal(api.closeCompletedAd(api.inspectClose('google')), true);
+    assert.equal(close.events.length, 1);
 });

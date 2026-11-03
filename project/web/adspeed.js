@@ -1178,6 +1178,12 @@
 
     function closeRole(node, adapter) {
         if (adapter === 'mintegral') return String(node.getAttribute && node.getAttribute('id') || '');
+        if (adapter === 'google' && String(node.tagName).toLowerCase() === 'div') {
+            var roles = String(node.getAttribute('class') || '').split(/\s+/).filter(function (value) {
+                return value === 'simidCloseButtonButton' || value === 'simidRewardGrantedCloseButton';
+            });
+            if (roles.length === 1) return roles[0];
+        }
         return String(node.getAttribute && node.getAttribute('aria-label') || node.textContent || '')
             .trim().toLowerCase().replace(/\s+/g, ' ');
     }
@@ -1201,6 +1207,14 @@
             if (window.getComputedStyle(node).pointerEvents === 'none') return false;
             return visible(node) && exposed(node);
         }
+        if (adapter === 'google' && /^(?:simidCloseButtonButton|simidRewardGrantedCloseButton)$/.test(label)) {
+            var box = node.getBoundingClientRect();
+            if (box.width < 16 || box.height < 16 || box.width > 96 || box.height > 96 ||
+                box.top + box.height / 2 > window.innerHeight * 0.25 ||
+                (box.left + box.width / 2 > window.innerWidth * 0.25 &&
+                 box.left + box.width / 2 < window.innerWidth * 0.75)) return false;
+            return window.getComputedStyle(node).pointerEvents !== 'none' && visible(node) && exposed(node);
+        }
         if (!/^(?:close(?: ad)?|dismiss(?: ad)?|x|×|✕|✖|fermer|cerrar|schließen|fechar|chiudi|閉じる|닫기|关闭|關閉)$/.test(label)) return false;
         if (/^(?:x|×|✕|✖)$/.test(label)) {
             var rect = node.getBoundingClientRect();
@@ -1213,10 +1227,12 @@
 
     function inspectClose(adapter) {
         closeSnapshot = null;
-        if (adapter && adapter !== 'unity' && adapter !== 'mintegral') return null;
+        if (adapter && adapter !== 'unity' && adapter !== 'mintegral' && adapter !== 'google') return null;
         if (!automatic || !autoDismiss || !recognizedAd || pageHidden() || closeRequests >= 8) return null;
-        var nodes = document.querySelectorAll(adapter === 'mintegral'
-            ? '[id="m-playable-skip"],[id="m-playable-close"]' : 'button,[role="button"],[aria-label]');
+        var selector = 'button,[role="button"],[aria-label]';
+        if (adapter === 'mintegral') selector = '[id="m-playable-skip"],[id="m-playable-close"]';
+        if (adapter === 'google') selector += ',.simidCloseButtonButton,.simidRewardGrantedCloseButton';
+        var nodes = document.querySelectorAll(selector);
         var selected = null;
         for (var index = 0; index < Math.min(nodes.length, 128); index += 1) {
             var node = nodes[index];
