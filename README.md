@@ -33,6 +33,9 @@ Rewards and server validation stay with the app.
 - **Compatibility:** Rootless, rootful, RootHide, and jailed injection.
 - **iOS Versions:** iOS 15–18. *(iOS 26 is experimental)*
 - **Ad Types:** Supports reward-based ads, including server-sided ones. Designed to be universal, but it may not detect every ad type.
+  
+> [!IMPORTANT]
+> **AdVanish is still a new project**, so expect bugs, compatibility issues, and features that don't always work as intended. Some ads may not speed up, skip, or close properly. If you run into any problems, please open an issue and explain what happened.
 
 > [!IMPORTANT]
 > **Known Issue:** Using this tweak for a long time can cause performance issues and slower ad completions. If you encounter any issues, simply reopen the app and report them by opening an issue.
