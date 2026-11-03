@@ -15,6 +15,7 @@
 @property (nonatomic, weak) id creative;
 @property (nonatomic) BOOL ownerBound;
 @property (nonatomic) BOOL google;
+@property (nonatomic) BOOL unity;
 @property (nonatomic) BOOL requiresReward;
 @property (nonatomic) BOOL rewarded;
 @property (nonatomic) BOOL videoCompleted;
@@ -124,7 +125,7 @@ static void pruneSessions(void) {
     NSIndexSet *expired = [sessions indexesOfObjectsPassingTest:^BOOL(ASPRewardSession *session, NSUInteger index, BOOL *stop) {
         UIViewController *owner = session.owner;
         BOOL detached = session.ownerBound && (!owner || !owner.viewIfLoaded.window);
-        BOOL changedCreative = !session.google && (!session.creative ||
+        BOOL changedCreative = !session.google && !session.unity && (!session.creative ||
             objectValue(owner, NSSelectorFromString(@"currentAd")) != session.creative ||
             maxCreative(session.ad) != session.creative);
         return !session.ad || session.expires <= now || session.invalidated ||
@@ -142,7 +143,7 @@ static void pruneSessions(void) {
 
 static BOOL sameOwner(ASPRewardSession *session, ASPAdSurface *surface) {
     if (surface.owner != session.owner || !ASPAdSurfaceUnchanged(surface)) return NO;
-    if (session.google) return YES;
+    if (session.google || session.unity) return YES;
     id creative = session.creative;
     return creative && maxCreative(session.ad) == creative && surface.creative == creative;
 }
@@ -361,7 +362,7 @@ static NSString *closeActionKey(UIView *close, ASPAdSurface *surface) {
 }
 
 static void closeIfEligible(ASPRewardSession *session) {
-    BOOL eligible = session.requiresReward ? session.rewarded : session.videoCompleted;
+    BOOL eligible = session.unity || (session.requiresReward ? session.rewarded : session.videoCompleted);
     if (!gAutoDismiss || !eligible || session.closeRequested || session.invalidated || session.closeCount >= 8 ||
         session.expires <= NSProcessInfo.processInfo.systemUptime) {
         AVN_DEVICE_LOG(@"close-eligibility", @{@"class": AVNDeviceClassName(session.ad),
@@ -377,6 +378,10 @@ static void closeIfEligible(ASPRewardSession *session) {
             AVN_DEVICE_LOG(@"close-owner-mismatch", @{@"class": AVNDeviceClassName(session.ad),
                 @"owner": AVNDeviceClassName(session.owner), @"surface": AVNDeviceClassName(surface.owner)});
             continue;
+        }
+        if (session.unity) {
+            closeWebEndCard(session, surface);
+            return;
         }
         if (!session.requiresReward && !completedVideoSurfaceMatches(session, surface)) {
             session.invalidated = YES;
@@ -780,6 +785,23 @@ void ASPAdCompletionInstallHooks(void) {
 void ASPAdCompletionTrackController(UIViewController *controller) {
     if (![NSThread isMainThread]) return;
     pruneSessions();
+    Class unity = NSClassFromString(@"_TtC8UnityAds30WebViewContainerViewController");
+    if (gAutoDismiss && unity && object_getClass(controller) == unity && controller.viewIfLoaded.window) {
+        BOOL tracked = NO;
+        for (ASPRewardSession *session in sessions) {
+            if (session.unity && session.owner == controller) tracked = YES;
+        }
+        if (!tracked) {
+            ASPRewardSession *session = [ASPRewardSession new];
+            session.ad = controller;
+            session.owner = controller;
+            session.ownerBound = YES;
+            session.unity = YES;
+            session.requiresReward = YES;
+            session.expires = NSProcessInfo.processInfo.systemUptime + 600;
+            [sessions addObject:session];
+        }
+    }
     BOOL google = namedKind(controller, @"GADFullScreenAdViewController");
     for (ASPRewardSession *session in sessions.copy) {
         if (google && session.google && !session.owner && belongsToPresenter(controller, session.presenter)) {
