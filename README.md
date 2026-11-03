@@ -34,19 +34,25 @@ Rewards and server validation stay with the app.
 - **iOS Versions:** iOS 15–18. *(iOS 26 is experimental)*
 - **Ad Types:** Supports reward-based ads, including server-sided ones. Designed to be universal, but it may not detect every ad type.
 
-> [!important]
+> [!IMPORTANT]
 > **Known Issue:** Using this tweak for a long time can cause performance issues and slower ad completions. If you encounter any issues, simply reopen the app and report them by opening an issue.
+>
+> Ad skipping is still unfinished and has a lot of issues. However, ad speeding should work with nearly every ad. If speeding doesn't work in an app, please open an issue and mention which app you were using. Max will manually review the app to investigate the problem.
 >
 > The ad detection rate is very high. If an ad doesn't get skipped, it's most likely being detected but isn't supported yet. If you know how to improve support or compatibility, feel free to open an issue explaining how.
 >
 > **Note:** Auto-completion is still a work in progress and currently has limited coverage.
+
+> [!NOTE]
+> **AdVanish is NOT an ad blocker.** It speeds up advertisements and automatically closes them when possible. It is designed for iOS/iPadOS apps only and does not support web browsers such as Safari.
+>
+> YouTube, Spotify, and Roblox are NOT supported and will not receive support. AdVanish is intended only for authorized IPAs and apps you have permission to test. Bypassing advertisements, subscriptions, or restrictions in these services is outside the scope of this project.
 
 See [Ad Types](project/docs/AD_TYPES.md) and [Tests](project/docs/VALIDATION.md).
 
 Source code, tests, and build tools are located in [`project/`](project/).
 
 ---
-
 
 > [!CAUTION]
 > The owner is NOT responsible for how AdVanish is used and it is only meant to be used in apps you are authorized to use it in to fix their security.
