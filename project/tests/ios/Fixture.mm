@@ -217,9 +217,13 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 @implementation MAFullscreenAdViewController
 @end
 
-@interface GADFullScreenAdViewController : ALBaseVideoViewController
+@interface GADFullScreenAdViewController : ALBaseVideoViewController <WKNavigationDelegate>
+@property (nonatomic, copy) void (^loaded)(WKWebView *);
 @end
 @implementation GADFullScreenAdViewController
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    if (self.loaded) self.loaded(webView);
+}
 @end
 
 @interface GADWebViewController : UIViewController
@@ -617,7 +621,60 @@ static void testSdkWebClose(UIViewController *presenter, NSString *adapter, void
     NSString *markup = unity
         ? @"<!doctype html><html><body><button aria-label='Close' disabled style='position:fixed;right:12px;top:50px;width:44px;height:44px' onclick='window.closeEvents++'>X</button><script>window.closeEvents=0;</script></body></html>"
         : @"<!doctype html><html><body><div id='m-playable-close' class='m-playable-close' aria-disabled='true' style='position:fixed;right:12px;top:50px;width:44px;height:44px' onclick='window.closeEvents++'>X</div><script>window.closeEvents=0;</script></body></html>";
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (owner.loaded && !finished) result([label stringByAppendingString:@" web fixture navigation timed out"]);
+    });
     [web loadHTMLString:markup baseURL:nil];
+}
+
+static void testGoogleSimidClose(UIViewController *presenter, void (^next)(void)) {
+    GADRewardedAd *ad = [GADRewardedAd new];
+    __block NSUInteger rewards = 0;
+    [ad presentFromRootViewController:presenter userDidEarnRewardHandler:^{ rewards += 1; }];
+    ad.controller.closeButton.hidden = YES;
+    [ad.controller.videoPlayer.videoView removeFromSuperview];
+    WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
+    NSString *source = [[NSString stringWithUTF8String:kAdSpeedWebScript]
+        stringByReplacingOccurrencesOfString:@"__ADSPEED_CONFIG__"
+        withString:@"{\"rate\":80,\"automatic\":true,\"autoDismiss\":true,\"recognizedAd\":true}"];
+    [configuration.userContentController addUserScript:[[WKUserScript alloc] initWithSource:source
+        injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO]];
+    WKWebView *web = [[WKWebView alloc] initWithFrame:ad.controller.view.bounds configuration:configuration];
+    [ad.controller.view addSubview:web];
+    web.navigationDelegate = ad.controller;
+    ad.controller.loaded = ^(WKWebView *page) {
+        ad.controller.loaded = nil;
+        ASPManualSkipTrackController(ad.controller);
+        ASPAdCompletionTrackController(ad.controller);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+            [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                if (!check(!error && [value isEqual:@0] && rewards == 0,
+                    @"Google SIMID Close waits for the SDK reward callback")) return;
+                [ad emitSDKReward];
+                if (!check(rewards == 1, @"Google SIMID completion forwards the original reward handler once")) return;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                    [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                        if (!check(!error && [value isEqual:@1] && ad.controller.closes == 0,
+                            @"Google SIMID uses its rendered Close after the matching reward")) return;
+                        ASPAdCompletionTrackController(ad.controller);
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                            [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                                if (!check(!error && [value isEqual:@1], @"Google SIMID Close cannot repeat for one stage")) return;
+                                [ad.controller willMoveToParentViewController:nil];
+                                [ad.controller.view removeFromSuperview];
+                                [ad.controller removeFromParentViewController];
+                                next();
+                            }];
+                        });
+                    }];
+                });
+            }];
+        });
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (ad.controller.loaded && !finished) result(@"Google SIMID fixture navigation timed out");
+    });
+    [web loadHTMLString:@"<!doctype html><html><body><div class='simidCloseButtonButton' style='position:fixed;right:12px;top:50px;width:24px;height:24px' onclick='window.closeEvents++'>X</div><script>window.closeEvents=0;</script></body></html>" baseURL:nil];
 }
 
 static void testGoogleRewarded(UIViewController *presenter) {
@@ -708,7 +765,9 @@ static void testGoogleRewarded(UIViewController *presenter) {
     if (!testRegisteredTapClose(presenter)) return;
     if (!testAppLovinPlayableOwner(presenter)) return;
     testSdkWebClose(presenter, @"unity", ^{
-        testSdkWebClose(presenter, @"mintegral", ^{ result(nil); });
+        testSdkWebClose(presenter, @"mintegral", ^{
+            testGoogleSimidClose(presenter, ^{ result(nil); });
+        });
     });
 }
 
@@ -1087,7 +1146,7 @@ static void runFixture(ALBaseVideoViewController *owner) {
     self.window.rootViewController = owner;
     [self.window makeKeyAndVisible];
     dispatch_async(dispatch_get_main_queue(), ^{ runFixture(owner); });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         result(@"Fixture deadline exceeded");
     });
     return YES;

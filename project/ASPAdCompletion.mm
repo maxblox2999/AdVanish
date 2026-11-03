@@ -218,7 +218,7 @@ static void closeWebEndCard(ASPRewardSession *session, ASPAdSurface *surface) {
         }
     });
     [page callAsyncJavaScript:@"return window.__adspeed && window.__adspeed.inspectClose ? window.__adspeed.inspectClose(adapter) : null"
-        arguments:@{@"adapter": session.webAdapter ?: @""} inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:^(id value, NSError *error) {
+        arguments:@{@"adapter": session.google ? @"google" : (session.webAdapter ?: @"")} inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:^(id value, NSError *error) {
         if (session.webCloseGeneration != generation) return;
         if (error || ![value isKindOfClass:NSString.class] || ![value length] ||
             [value length] > 192 || !sessionVisible(session, page)) {
