@@ -9,6 +9,7 @@
 #import "ASPUniversalSkip.h"
 #import "ASPAdCompletion.h"
 #import "ASPSpeed.h"
+#include "AdSpeedWebScript.h"
 
 static NSMutableArray<NSString *> *checks;
 static BOOL finished;
@@ -462,6 +463,75 @@ static BOOL testGoogleWebOwner(UIViewController *presenter) {
     return check(preserved, @"A standalone Google web controller remains recognized");
 }
 
+
+@interface FixtureUnityController : UIViewController <WKNavigationDelegate>
+@property (nonatomic, copy) void (^loaded)(WKWebView *);
+@end
+@implementation FixtureUnityController
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    if (self.loaded) self.loaded(webView);
+}
+@end
+
+static void testUnityWebClose(UIViewController *presenter) {
+    const char *name = "_TtC8UnityAds30WebViewContainerViewController";
+    Class cls = NSClassFromString(@(name));
+    if (!cls) {
+        cls = objc_allocateClassPair(FixtureUnityController.class, name, 0);
+        objc_registerClassPair(cls);
+    }
+    FixtureUnityController *owner = [cls new];
+    [presenter addChildViewController:owner];
+    owner.view.frame = presenter.view.bounds;
+    [presenter.view addSubview:owner.view];
+    [owner didMoveToParentViewController:presenter];
+    WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
+    NSString *source = [[NSString stringWithUTF8String:kAdSpeedWebScript]
+        stringByReplacingOccurrencesOfString:@"__ADSPEED_CONFIG__"
+        withString:@"{\"rate\":80,\"automatic\":true,\"autoDismiss\":true,\"recognizedAd\":true}"];
+    [configuration.userContentController addUserScript:[[WKUserScript alloc] initWithSource:source
+        injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO]];
+    WKWebView *web = [[WKWebView alloc] initWithFrame:owner.view.bounds configuration:configuration];
+    [owner.view addSubview:web];
+    web.navigationDelegate = owner;
+    owner.loaded = ^(WKWebView *page) {
+        owner.loaded = nil;
+        ASPManualSkipTrackController(owner);
+        ASPAdCompletionConfigure(NO);
+        ASPAdCompletionTrackController(owner);
+        [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+            if (!check(!error && [value isEqual:@0], @"Manual mode leaves Unity's Close untouched")) return;
+            ASPAdCompletionConfigure(YES);
+            ASPAdCompletionTrackController(owner);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                    if (!check(!error && [value isEqual:@0], @"A disabled Unity Close cannot end the ad")) return;
+                    [page evaluateJavaScript:@"document.querySelector('button').disabled=false" completionHandler:^(id value, NSError *error) {
+                        if (!check(!error, @"Unity enables its own end-card Close")) return;
+                        ASPAdCompletionTrackController(owner);
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                            [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                                if (!check(!error && [value isEqual:@1], @"Unity's enabled Close runs without a pre-close reward callback")) return;
+                                ASPAdCompletionTrackController(owner);
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                                    [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                                        if (!check(!error && [value isEqual:@1], @"Unity's unchanged Close is not replayed")) return;
+                                        [owner willMoveToParentViewController:nil];
+                                        [owner.view removeFromSuperview];
+                                        [owner removeFromParentViewController];
+                                        result(nil);
+                                    }];
+                                });
+                            }];
+                        });
+                    }];
+                }];
+            });
+        }];
+    };
+    [web loadHTMLString:@"<!doctype html><html><body><button aria-label='Close' disabled style='position:fixed;right:12px;top:50px;width:44px;height:44px' onclick='window.closeEvents++'>X</button><script>window.closeEvents=0;</script></body></html>" baseURL:nil];
+}
+
 static void testGoogleRewarded(UIViewController *presenter) {
     if (!testGoogleWebOwner(presenter)) return;
     __block NSUInteger nilRootRewards = 0;
@@ -549,7 +619,7 @@ static void testGoogleRewarded(UIViewController *presenter) {
     [withoutHandler.controller removeFromParentViewController];
     if (!testRegisteredTapClose(presenter)) return;
     if (!testAppLovinPlayableOwner(presenter)) return;
-    result(nil);
+    testUnityWebClose(presenter);
 }
 
 static void runOrdinaryCase(UIViewController *presenter, NSUInteger kind, NSTimeInterval deadline) {
