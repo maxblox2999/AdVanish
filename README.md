@@ -44,9 +44,12 @@ Rewards and server validation stay with the app.
 > **Note:** Auto-completion is still a work in progress and currently has limited coverage.
 
 > [!NOTE]
-> **AdVanish is NOT an ad blocker.** It speeds up advertisements and automatically closes them when possible. It is designed for iOS/iPadOS apps only and does not support web browsers such as Safari.
+> **AdVanish is NOT an ad blocker.** It speeds up ads and automatically closes them when possible. It only works with iOS/iPadOS apps, not browsers like Safari.
 >
-> YouTube, Spotify, and Roblox are NOT supported and will not receive support. AdVanish is intended only for authorized IPAs and apps you have permission to test. Bypassing advertisements, subscriptions, or restrictions in these services is outside the scope of this project.
+> YouTube, Spotify, Roblox etc etc.. are NOT supported and never will be.
+> AdVanish is only meant for IPAs and apps you have permission to test.
+> It will not support bypassing ads, subscriptions, or restrictions in those apps.
+
 
 See [Ad Types](project/docs/AD_TYPES.md) and [Tests](project/docs/VALIDATION.md).
 
