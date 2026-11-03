@@ -117,18 +117,25 @@ async function evaluate(sessionId, expression) {
     return r.result.value;
 }
 async function runCase(name, body, verify, playback = false, automatic = true, compatibility = false, requestedRate = 16) {
+    const url = `http://127.0.0.1:${portA}/?case=${name}&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}&rate=${requestedRate}`;
     const { targetId } = await command('Target.createTarget', {
-        url: `http://127.0.0.1:${portA}/?case=${name}&playback=${playback ? 1 : 0}&automatic=${automatic ? 1 : 0}&compatibility=${compatibility ? 1 : 0}&rate=${requestedRate}`
+        url: 'about:blank'
     });
     const { sessionId } = await command('Target.attachToTarget', { targetId, flatten: true });
     try {
         await command('Target.activateTarget', { targetId });
         await command('Emulation.setFocusEmulationEnabled', { enabled: true }, sessionId);
         await command('Runtime.enable', {}, sessionId);
+        await command('Page.enable', {}, sessionId);
+        const navigation = await command('Page.navigate', { url }, sessionId);
+        assert.equal(navigation.errorText, undefined, 'Fixture navigation failed');
+        let ready = false;
         for (let i = 0; i < 100; i++) {
-            if (await evaluate(sessionId, '!!(window.fixture&&document.body&&window.__adspeed)')) break;
+            ready = await evaluate(sessionId, '!!(window.fixture&&document.body&&window.__adspeed&&window.addVideo)');
+            if (ready) break;
             await sleep(30);
         }
+        assert.ok(ready, 'Fixture did not initialize: ' + await evaluate(sessionId, 'location.href'));
         const value = await evaluate(sessionId, `(async()=>{${body}})()`);
         try { verify(value); } catch (error) {
             console.error(JSON.stringify({case: name, passed: false, ...value}));

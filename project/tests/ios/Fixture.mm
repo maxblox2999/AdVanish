@@ -538,6 +538,13 @@ static BOOL testMintegralBridgeClose(FixtureUnityController *owner) {
         @"Mintegral's exposed wrapper uses its existing SDK action with a decorative button")) return NO;
     ASPAdCompletionTrackController(owner);
     if (!check(bridge.closeEvents == 1, @"Mintegral's unchanged wrapper Close cannot repeat")) return NO;
+    wrapper.hidden = YES;
+    ASPAdCompletionTrackController(owner);
+    wrapper.hidden = NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 2, @"Mintegral can reuse its wrapper after a hidden stage transition")) return NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 2, @"Mintegral's reused wrapper still fires only once per stage")) return NO;
     [wrapper removeFromSuperview];
     return YES;
 }

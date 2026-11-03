@@ -404,7 +404,11 @@ static void closeIfEligible(ASPRewardSession *session) {
             session.invalidated = YES;
             return;
         }
-        if (session.lastCloseView && !exposedClose(session.lastCloseView, surface)) {
+        BOOL previousExposed = exposedClose(session.lastCloseView, surface);
+        if (!previousExposed && [session.webAdapter isEqualToString:@"mintegral"]) {
+            previousExposed = mintegralBridgeButton(session.lastCloseView, surface) != nil;
+        }
+        if (session.lastCloseView && !previousExposed) {
             [session.closeActions removeObjectForKey:session.lastCloseView];
             session.lastCloseView = nil;
         }

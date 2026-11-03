@@ -2,6 +2,7 @@
 
 - Add SDK-owned Unity and Mintegral Close handling and Google SIMID end-card controls.
 - Reject web Close controls covered by an ancestor element.
+- Prevent repeated actions on an unchanged Mintegral Close wrapper.
 - Recognize Moloco fullscreen ads for the existing App Store prompt filter.
 - Preserve 80x acceleration, manual mode and SDK reward requirements.
 - Shorten Settings and project copy.
