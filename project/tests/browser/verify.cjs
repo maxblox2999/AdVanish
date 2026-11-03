@@ -398,7 +398,13 @@ async function main() {
         const f = await addFrame(true);
         const action = await __adspeed.skipAsync();
         await until(() => fixture.messages.some(m => m.source === f.contentWindow && m.phase === 'ended'),
-            'child natural completion', 8000);
+            'child natural completion', 8000).catch(async error => {
+                f.contentWindow.postMessage({fixtureCommand: 'state'}, '*');
+                await sleep(100);
+                throw new Error(error.message + ': ' + JSON.stringify({action, ...state(),
+                    hidden: document.hidden, stats: __adspeed.stats,
+                    child: fixture.messages.filter(m => m.source === f.contentWindow).map(m => ({phase: m.phase, state: m.state}))}));
+            });
         f.contentWindow.postMessage({fixtureCommand: 'state'}, '*');
         await until(() => fixture.messages.some(m => m.source === f.contentWindow && m.phase === 'state'), 'child state');
         return {action, child: fixture.messages.filter(m => m.source === f.contentWindow).at(-1).state, ...state()};
