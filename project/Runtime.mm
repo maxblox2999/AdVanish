@@ -95,7 +95,19 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
                 }
             }
             CGRect frame = [view convertRect:view.bounds toView:surface.window];
+            CGPoint middle = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+            UIView *hit = [surface.window hitTest:middle withEvent:nil];
+            NSMutableArray *targets = NSMutableArray.array;
+            for (id target in control.allTargets) {
+                if (targets.count >= 8) break;
+                BOOL viewTarget = [target isKindOfClass:UIView.class];
+                [targets addObject:@{@"class": AVNDeviceClassName(target),
+                    @"owner": @(target == surface.owner),
+                    @"viewOwned": @(viewTarget && [(UIView *)target isDescendantOfView:surface.root])}];
+            }
             [controls addObject:@{@"class": AVNDeviceClassName(view),
+                @"targets": targets, @"parent": AVNDeviceClassName(view.superview),
+                @"hit": AVNDeviceClassName(hit), @"hitInside": @(hit == view || [hit isDescendantOfView:view]),
                 @"enabled": @(control.enabled), @"visible": @(ASPViewVisibleInSurface(view, surface.root)),
                 @"frame": NSStringFromCGRect(frame), @"actions": actions}];
         }
