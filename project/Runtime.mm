@@ -108,7 +108,8 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
             [controls addObject:@{@"class": AVNDeviceClassName(view),
                 @"targets": targets, @"parent": AVNDeviceClassName(view.superview),
                 @"hit": AVNDeviceClassName(hit), @"hitInside": @(hit == view || [hit isDescendantOfView:view]),
-                @"enabled": @(control.enabled), @"visible": @(ASPViewVisibleInSurface(view, surface.root)),
+                @"enabled": @(control.enabled), @"interactive": @(control.userInteractionEnabled),
+                @"visible": @(ASPViewVisibleInSurface(view, surface.root)),
                 @"frame": NSStringFromCGRect(frame), @"actions": actions}];
         }
         if (![view isKindOfClass:WKWebView.class] && pending.count + view.subviews.count < 256) {
@@ -141,6 +142,16 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
                     display:style.display, visibility:style.visibility, pointer:style.pointerEvents,
                     x:r.x,y:r.y,width:r.width,height:r.height});
             }
+            result.closeHits = [];
+            ['m-playable-skip','m-playable-close'].forEach(function(id) {
+                var n = document.getElementById(id);
+                if (!n) return;
+                var r = n.getBoundingClientRect();
+                var hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                result.closeHits.push({id:id, hit:hit ? hit.tagName : null,
+                    hitId:hit ? String(hit.id || '').slice(0,80) : '',
+                    opacity:window.getComputedStyle(n).opacity});
+            });
             return result;
         )JS"];
         [page callAsyncJavaScript:script arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld
@@ -214,6 +225,9 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
 @property (nonatomic, copy) NSString *messageName;
 @property (nonatomic, strong) dispatch_source_t timer;
 @property (nonatomic) BOOL refreshQueued;
+#if defined(AVN_DEVICE_DIAGNOSTICS) && AVN_DEVICE_DIAGNOSTICS
+@property (nonatomic, strong) NSMapTable<WKWebView *, NSMutableArray<WKFrameInfo *> *> *diagnosticFrames;
+#endif
 + (instancetype)shared;
 - (void)begin;
 - (void)requestAdapters;
@@ -293,6 +307,18 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
         arguments:@{@"context": value} inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:nil];
 }
 - (void)userContentController:(WKUserContentController *)controller didReceiveScriptMessage:(WKScriptMessage *)message {
+#if defined(AVN_DEVICE_DIAGNOSTICS) && AVN_DEVICE_DIAGNOSTICS
+    if (AVNDeviceDiagnosticsEnabled() && message.webView && !message.frameInfo.mainFrame) {
+        if (!self.diagnosticFrames) self.diagnosticFrames = [NSMapTable weakToStrongObjectsMapTable];
+        NSMutableArray *frames = [self.diagnosticFrames objectForKey:message.webView];
+        if (!frames) {
+            frames = NSMutableArray.array;
+            [self.diagnosticFrames setObject:frames forKey:message.webView];
+        }
+        if (frames.count >= 12) [frames removeObjectAtIndex:0];
+        [frames addObject:message.frameInfo];
+    }
+#endif
     if (message.frameInfo.mainFrame && message.webView) [self authorize:message.webView];
 }
 - (void)mount:(WKWebView *)page {
@@ -337,6 +363,41 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
         for (ASPAdSurface *surface in surfaces) {
             if (owners.count >= 16) break;
             AVNDeviceInspectSurface(surface);
+            if ([NSStringFromClass(surface.owner.class) isEqualToString:@"MTGVideoBaseViewController"]) {
+                static NSTimeInterval lastFrameProbe;
+                if (diagnosticNow - lastFrameProbe >= 10) {
+                    lastFrameProbe = diagnosticNow;
+                    for (WKWebView *page in surface.webViews) {
+                        NSArray *frames = [[self.diagnosticFrames objectForKey:page] copy];
+                        for (NSUInteger index = 0; index < frames.count; index++) {
+                            NSString *script = [NSString stringWithUTF8String:R"JS(
+                                var result = {controls:[], frames:document.querySelectorAll('iframe,frame').length};
+                                var nodes=document.querySelectorAll('button,[role="button"],[aria-label],[id],[class]');
+                                for(var i=0;i<Math.min(nodes.length,512)&&result.controls.length<12;i++){
+                                    var n=nodes[i];
+                                    var id=String(n.id||'');
+                                    var cls=String(n.className||'');
+                                    var label=n.getAttribute('aria-label')||'';
+                                    if(!/close|dismiss|skip|^x$|^×$/i.test(id+' '+cls+' '+label))continue;
+                                    var r=n.getBoundingClientRect();
+                                    var hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+                                    result.controls.push({tag:n.tagName,id:id.slice(0,80),cls:cls.slice(0,80),
+                                        disabled:!!n.disabled,visible:r.width>0&&r.height>0,
+                                        x:r.x,y:r.y,width:r.width,height:r.height,
+                                        hit:hit ? hit.tagName : null,hitInside:!!hit&&(hit===n||n.contains(hit))});
+                                }
+                                return result;
+                            )JS"];
+                            [page callAsyncJavaScript:script arguments:@{} inFrame:frames[index]
+                                inContentWorld:WKContentWorld.pageWorld completionHandler:^(id value, NSError *error) {
+                                    AVN_DEVICE_LOG(@"mintegral-frame", @{@"class": AVNDeviceClassName(surface.owner),
+                                        @"index": @(index), @"error": @(error.code),
+                                        @"result": [value isKindOfClass:NSDictionary.class] ? value : @{}});
+                                }];
+                        }
+                    }
+                }
+            }
             [owners addObject:@{@"class": NSStringFromClass(surface.owner.class) ?: @"nil",
                 @"web": @(surface.webViews.count), @"players": @(surface.players.count),
                 @"recognized": @(surface.recognized), @"incomplete": @(surface.incomplete)}];
