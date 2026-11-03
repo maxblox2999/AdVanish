@@ -73,6 +73,72 @@ void AVNDeviceDiagnosticLog(NSString *event, NSDictionary *fields) {
     } @catch (NSException *exception) {
     }
 }
+
+static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
+    if (!AVNDeviceDiagnosticsEnabled() || !surface.recognized || surface.incomplete) return;
+    static NSTimeInterval previous;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (now - previous < 10) return;
+    previous = now;
+    NSMutableArray *controls = NSMutableArray.array;
+    NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:surface.root];
+    NSUInteger count = 0;
+    while (pending.count && count++ < 256) {
+        UIView *view = pending.lastObject;
+        [pending removeLastObject];
+        if ([view isKindOfClass:UIControl.class] && controls.count < 24) {
+            UIControl *control = (UIControl *)view;
+            NSMutableArray *actions = NSMutableArray.array;
+            for (id target in control.allTargets) {
+                for (NSString *action in [control actionsForTarget:target forControlEvent:UIControlEventTouchUpInside]) {
+                    if (actions.count < 8) [actions addObject:action];
+                }
+            }
+            CGRect frame = [view convertRect:view.bounds toView:surface.window];
+            [controls addObject:@{@"class": AVNDeviceClassName(view),
+                @"enabled": @(control.enabled), @"visible": @(ASPViewVisibleInSurface(view, surface.root)),
+                @"frame": NSStringFromCGRect(frame), @"actions": actions}];
+        }
+        if (![view isKindOfClass:WKWebView.class] && pending.count + view.subviews.count < 256) {
+            [pending addObjectsFromArray:view.subviews];
+        }
+    }
+    AVN_DEVICE_LOG(@"surface-controls", @{@"class": AVNDeviceClassName(surface.owner), @"controls": controls});
+    for (WKWebView *page in surface.webViews) {
+        NSString *script = [NSString stringWithUTF8String:R"JS(
+            var a = window.__adspeed;
+            var result = {api: !!a, stats: a ? a.stats : null,
+                frames: document.querySelectorAll('iframe,frame').length, controls: []};
+            var nodes = document.querySelectorAll('button,[role="button"],[aria-label],[id],[class],[data-test-id],[data-testid]');
+            for (var i = 0; i < Math.min(nodes.length, 512) && result.controls.length < 16; i++) {
+                var n = nodes[i];
+                var attributes = {};
+                var relevant = false;
+                ['id','class','aria-label','data-test-id','data-testid'].forEach(function(key) {
+                    var value = n.getAttribute(key) || '';
+                    if (value.length < 100 && /close|dismiss|skip|^x$|^×$/i.test(value)) {
+                        attributes[key] = value;
+                        relevant = true;
+                    }
+                });
+                if (!relevant) continue;
+                var r = n.getBoundingClientRect();
+                var style = window.getComputedStyle(n);
+                result.controls.push({tag:n.tagName, attrs:attributes, disabled:!!n.disabled,
+                    ariaDisabled:n.getAttribute('aria-disabled'), hidden:!!n.hidden,
+                    display:style.display, visibility:style.visibility, pointer:style.pointerEvents,
+                    x:r.x,y:r.y,width:r.width,height:r.height});
+            }
+            return result;
+        )JS"];
+        [page callAsyncJavaScript:script arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld
+            completionHandler:^(id result, NSError *error) {
+                AVN_DEVICE_LOG(@"surface-web", @{@"class": AVNDeviceClassName(surface.owner),
+                    @"error": @(error.code), @"result": [result isKindOfClass:NSDictionary.class] ? result : @{}});
+            }];
+    }
+}
+
 #endif
 
 @interface AVNOptions : NSObject
@@ -258,6 +324,7 @@ void AVNDeviceDiagnosticLog(NSString *event, NSDictionary *fields) {
         NSMutableArray *owners = NSMutableArray.array;
         for (ASPAdSurface *surface in surfaces) {
             if (owners.count >= 16) break;
+            AVNDeviceInspectSurface(surface);
             [owners addObject:@{@"class": NSStringFromClass(surface.owner.class) ?: @"nil",
                 @"web": @(surface.webViews.count), @"players": @(surface.players.count),
                 @"recognized": @(surface.recognized), @"incomplete": @(surface.incomplete)}];
