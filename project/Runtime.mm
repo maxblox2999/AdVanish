@@ -74,6 +74,17 @@ void AVNDeviceDiagnosticLog(NSString *event, NSDictionary *fields) {
     }
 }
 
+static id AVNDeviceObjectGetter(id object, NSString *name) {
+    SEL selector = NSSelectorFromString(name);
+    NSMethodSignature *signature = [object methodSignatureForSelector:selector];
+    if (!signature || signature.numberOfArguments != 2 || signature.methodReturnType[0] != '@') return nil;
+    @try {
+        return ((id (*)(id, SEL))objc_msgSend)(object, selector);
+    } @catch (NSException *exception) {
+        return nil;
+    }
+}
+
 static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
     if (!AVNDeviceDiagnosticsEnabled() || !surface || surface.incomplete) return;
     static NSTimeInterval previous;
@@ -101,6 +112,31 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
             for (id target in control.allTargets) {
                 if (targets.count >= 8) break;
                 BOOL viewTarget = [target isKindOfClass:UIView.class];
+                if ([AVNDeviceClassName(target) isEqualToString:@"MTGBaseCommonJS"]) {
+                    NSMutableDictionary *bindings = NSMutableDictionary.dictionary;
+                    for (NSString *name in @[@"baseBridgWebView", @"baseTemplateController", @"superView", @"presentingViewController", @"getCloseButtonView", @"fetchCurrentView"]) {
+                        id value = AVNDeviceObjectGetter(target, name);
+                        BOOL isView = [value isKindOfClass:UIView.class];
+                        bindings[name] = @{@"class": AVNDeviceClassName(value),
+                            @"owner": @(value == surface.owner),
+                            @"control": @(value == control),
+                            @"web": @([surface.webViews containsObject:value ?: NSNull.null]),
+                            @"owned": @(isView && [(UIView *)value isDescendantOfView:surface.root]),
+                            @"hit": @(value == hit),
+                            @"hitWithin": @(isView && [hit isDescendantOfView:(UIView *)value])};
+                    }
+                    NSMutableArray *gestures = NSMutableArray.array;
+                    for (UIView *node in @[view, view.superview ?: view, hit ?: view]) {
+                        for (UIGestureRecognizer *gesture in node.gestureRecognizers) {
+                            if (gestures.count < 12) [gestures addObject:@{@"class": AVNDeviceClassName(gesture),
+                                @"view": AVNDeviceClassName(node), @"enabled": @(gesture.enabled),
+                                @"onControl": @(node == view), @"onHit": @(node == hit)}];
+                        }
+                    }
+                    AVN_DEVICE_LOG(@"mintegral-bindings", @{@"class": AVNDeviceClassName(target),
+                        @"bindings": bindings, @"gestures": gestures, @"interactive": @(control.userInteractionEnabled),
+                        @"parentInteractive": @(view.superview.userInteractionEnabled)});
+                }
                 [targets addObject:@{@"class": AVNDeviceClassName(target),
                     @"owner": @(target == surface.owner),
                     @"viewOwned": @(viewTarget && [(UIView *)target isDescendantOfView:surface.root])}];
