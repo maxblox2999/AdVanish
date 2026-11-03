@@ -109,12 +109,12 @@ static void AVNDeviceInspectSurface(ASPAdSurface *surface) {
             var a = window.__adspeed;
             var result = {api: !!a, stats: a ? a.stats : null,
                 frames: document.querySelectorAll('iframe,frame').length, controls: []};
-            var nodes = document.querySelectorAll('button,[role="button"],[aria-label],[id],[class],[data-test-id],[data-testid]');
+            var nodes = document.querySelectorAll('button,[role="button"],[aria-label],[id],[class],[data-test-id],[data-testid],[data-element-id]');
             for (var i = 0; i < Math.min(nodes.length, 512) && result.controls.length < 16; i++) {
                 var n = nodes[i];
                 var attributes = {};
                 var relevant = false;
-                ['id','class','aria-label','data-test-id','data-testid'].forEach(function(key) {
+                ['id','class','aria-label','data-test-id','data-testid','data-element-id'].forEach(function(key) {
                     var value = n.getAttribute(key) || '';
                     if (value.length < 100 && /close|dismiss|skip|^x$|^×$/i.test(value)) {
                         attributes[key] = value;
