@@ -12,8 +12,6 @@
 
 </div>
 
-## Install
-
 | Setup | Download |
 | --- | --- |
 | Rootless jailbreak | rootless.deb |
@@ -21,15 +19,13 @@
 | RootHide bootstrap | roothide.deb |
 | IPA injection | jailed.zip, then inject and re-sign |
 
-DEBs include arm64 and arm64e. Targets iOS 15-18; iOS 26 is experimental and has a low chance of working.
+DEBs include arm64 and arm64e. Targets iOS 15-18; iOS 26 is experimental with a low chance of working.
 
-## Use
+Open Settings -> AdVanish. Turn off Automatic ads for button-only use. Reopen the game after changes.
 
-Open Settings -> AdVanish. Apps are enabled by default. Turn off Automatic ads for button-only acceleration. Reopen the game after changing settings.
+Video and web timing target 80x, with lower-rate fallback. Automatic mode also speeds non-ad content in enabled apps. Google banner blocking is optional.
 
-Video and web timing target 80x, with lower-rate fallback. Automatic mode also speeds non-ad media in enabled apps. Google banner blocking is optional.
-
-Automatic closing has limited coverage and is still unreliable in real games. Rewards require normal SDK completion and server validation. Simulator checks do not verify real-game rewards.
+Auto-close depends on the SDK. Rewards still require SDK completion and server validation.
 
 [Ad support](project/docs/AD_TYPES.md) | [Tests](project/docs/VALIDATION.md) | [Changes](project/docs/CHANGES.md)
 

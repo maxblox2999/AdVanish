@@ -1,6 +1,6 @@
 # Tests
 
-Run from project/:
+From project/:
 
 ```sh
 node scripts/embed-web.cjs
@@ -11,7 +11,7 @@ node tests/browser/verify.cjs
 
 Browser tests need Node.js 22+ and Edge, or Chromium set through BROWSER_PATH.
 
-On macOS, install Xcode and an iOS Simulator:
+With Xcode and an iOS Simulator on macOS:
 
 ```sh
 python3 scripts/test-ios.py --video tests/ios/fixture.mp4
@@ -19,8 +19,8 @@ python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --output di
 python3 scripts/test-ios.py --video tests/ios/fixture.mp4 --injected --manual --output dist/ios-injected-manual.json
 ```
 
-Actions also runs the production Settings fixture. Simulator tests use real UIKit, AVPlayer and WebKit with mocked SDK events and rate rejection. Browser tests cover video, playable timing, frames, controls, animations and cleanup.
+Actions checks production Settings, native playback, injected hooks and manual mode. UIKit, AVPlayer and WebKit are real; SDK callbacks and rate rejection are mocked. Browser checks cover media, timers, playables, frames, controls and animations.
 
-Package checks verify layout, architecture, dependencies and minimum iOS. Release reports record the tested source commit.
+Package checks cover layout, architectures, dependencies and minimum iOS. Release reports identify the tested commit.
 
-These checks do not establish real-game ad closing, reward payouts or physical-device compatibility.
+On a rootless iPhone running Subway Surfers, Unity automatic closing and reward payouts passed. Mintegral closing is still being tested. Simulator results do not prove other games or server reward flows.
