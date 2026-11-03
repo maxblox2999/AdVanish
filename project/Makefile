@@ -20,6 +20,9 @@ ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
 advanish_CFLAGS += -DADSPEED_ROOTHIDE=1
 advanish_LDFLAGS += -lroothide
 endif
+ifeq ($(AVN_DEVICE_DIAGNOSTICS),1)
+advanish_CFLAGS += -DAVN_DEVICE_DIAGNOSTICS=1
+endif
 SUBPROJECTS = settings
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/aggregate.mk

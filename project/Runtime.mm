@@ -17,6 +17,63 @@
 #include "AdSpeedWebScript.h"
 #import "ASPTimers.h"
 #import "AVNRuntime.h"
+#import "AVNDeviceDiagnostics.h"
+
+
+#if defined(AVN_DEVICE_DIAGNOSTICS) && AVN_DEVICE_DIAGNOSTICS
+BOOL AVNDeviceDiagnosticsEnabled(void) {
+    static BOOL enabled;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        enabled = [NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.kiloo.subwaysurfers"];
+    });
+    return enabled;
+}
+
+void AVNDeviceDiagnosticLog(NSString *event, NSDictionary *fields) {
+    if (!AVNDeviceDiagnosticsEnabled()) return;
+    @try {
+        @synchronized (NSBundle.mainBundle) {
+            static NSMutableDictionary<NSString *, NSDictionary *> *previous;
+            if (!previous) previous = NSMutableDictionary.dictionary;
+            NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+            NSString *key = [NSString stringWithFormat:@"%@|%@|%@", event,
+                fields[@"class"] ?: @"", fields[@"selector"] ?: @""];
+            NSDictionary *last = previous[key];
+            if ([last[@"fields"] isEqual:fields] && now - [last[@"time"] doubleValue] < 10) return;
+            if (previous.count >= 128) [previous removeAllObjects];
+            previous[key] = @{@"fields": fields, @"time": @(now)};
+            NSMutableDictionary *record = [fields mutableCopy];
+            record[@"event"] = event;
+            record[@"uptime"] = @(now);
+            NSData *json = [NSJSONSerialization dataWithJSONObject:record options:NSJSONWritingSortedKeys error:nil];
+            if (!json || json.length > 8192) return;
+            NSMutableData *line = [json mutableCopy];
+            [line appendBytes:"\n" length:1];
+            NSString *directory = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
+            if (!directory) return;
+            NSString *path = [directory stringByAppendingPathComponent:@"AdVanish-device.log"];
+            if (![NSFileManager.defaultManager fileExistsAtPath:path]) {
+                [NSFileManager.defaultManager createFileAtPath:path contents:nil
+                    attributes:@{NSFileProtectionKey: NSFileProtectionCompleteUntilFirstUserAuthentication}];
+            }
+            NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:path];
+            if (!file) return;
+            @try {
+                unsigned long long length = [file seekToEndOfFile];
+                if (length + line.length > 128 * 1024) {
+                    [file truncateFileAtOffset:0];
+                    [file seekToFileOffset:0];
+                }
+                [file writeData:line];
+            } @finally {
+                [file closeFile];
+            }
+        }
+    } @catch (NSException *exception) {
+    }
+}
+#endif
 
 @interface AVNOptions : NSObject
 @property (nonatomic) BOOL enabled;
@@ -183,11 +240,33 @@
 }
 - (void)refresh {
     if (!NSThread.isMainThread) return;
-    if (!self.options.enabled) { ASPTimerSetAdActive(NO); return; }
+    if (!self.options.enabled) {
+        AVN_DEVICE_LOG(@"runtime", @{@"enabled": @NO, @"automatic": @(self.options.automatic),
+            @"dismissal": @(self.options.dismissal)});
+        ASPTimerSetAdActive(NO);
+        return;
+    }
     ASPManualSkipRefresh();
     BOOL active = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
     ASPAdCompletionTrackController(nil);
     NSArray<ASPAdSurface *> *surfaces = ASPManualSkipAdSurfaces();
+#if defined(AVN_DEVICE_DIAGNOSTICS) && AVN_DEVICE_DIAGNOSTICS
+    static NSTimeInterval lastDiagnosticRefresh;
+    NSTimeInterval diagnosticNow = NSProcessInfo.processInfo.systemUptime;
+    if (AVNDeviceDiagnosticsEnabled() && diagnosticNow - lastDiagnosticRefresh >= 1) {
+        lastDiagnosticRefresh = diagnosticNow;
+        NSMutableArray *owners = NSMutableArray.array;
+        for (ASPAdSurface *surface in surfaces) {
+            if (owners.count >= 16) break;
+            [owners addObject:@{@"class": NSStringFromClass(surface.owner.class) ?: @"nil",
+                @"web": @(surface.webViews.count), @"players": @(surface.players.count),
+                @"recognized": @(surface.recognized), @"incomplete": @(surface.incomplete)}];
+        }
+        AVN_DEVICE_LOG(@"runtime", @{@"enabled": @(self.options.enabled),
+            @"automatic": @(self.options.automatic), @"dismissal": @(self.options.dismissal),
+            @"active": @(active), @"owners": owners});
+    }
+#endif
     for (WKWebView *page in self.pages.allObjects) [self authorize:page];
     if (active) {
         for (ASPAdSurface *surface in surfaces) {
@@ -224,6 +303,9 @@
 - (void)begin {
     ASPManualSkipConfigure(self.options.enabled && self.options.button && !self.options.automatic);
     ASPAdCompletionConfigure(self.options.automatic && self.options.dismissal);
+    AVN_DEVICE_LOG(@"runtime-start", @{@"enabled": @(self.options.enabled),
+        @"automatic": @(self.options.automatic), @"dismissal": @(self.options.dismissal),
+        @"video": @(self.options.video), @"timers": @(self.options.timers)});
     ASPAdCompletionInstallHooks();
     AVNInstallStoreHooks();
     AVNInstallBannerHooks();
