@@ -34,7 +34,7 @@ function environment(configuration = {}, options = {}) {
             if (selector === 'div[id],span[id],div[class],span[class]') return controls.filter(node => /^(DIV|SPAN)$/.test(node.tagName));
             if (selector === 'canvas,[role="timer"],time') return controls.filter(node => node.tagName === 'CANVAS' || node.tagName === 'TIME'
                 || (node.getAttribute && node.getAttribute('role') === 'timer'));
-            assert.equal(selector, 'button,[role="button"],[aria-label]');
+            assert.ok(['button,[role="button"],[aria-label]', '[id="m-playable-skip"],[id="m-playable-close"]'].includes(selector));
             return controls;
         },
         getElementsByTagName(name) {
@@ -2356,4 +2356,87 @@ test('web ad context changes do not replay a consumed Close role', () => {
     api.setAdContext(true);
     assert.equal(api.inspectClose(), null);
     assert.equal(close.events.length, 1);
+});
+
+function mintegralControl(env, id, overrides = {}) {
+    return control(env, '', {
+        tagName: 'DIV',
+        getAttribute(name) { return name === 'id' || name === 'class' ? id : null; },
+        getBoundingClientRect() { return {left: 350, top: 20, right: 380, bottom: 50, width: 30, height: 30}; },
+        ...overrides
+    });
+}
+
+test('Mintegral advances its enabled skip and final Close without install actions', () => {
+    const env = environment({autoDismiss: true});
+    const skip = mintegralControl(env, 'm-playable-skip');
+    const close = mintegralControl(env, 'm-playable-close', {hidden: true});
+    const install = mintegralControl(env, 'skip-content-install');
+    const api = env.sandbox.__adspeed;
+    assert.equal(api.inspectClose(), null);
+    assert.equal(api.closeCompletedAd(api.inspectClose('mintegral')), true);
+    skip.hidden = true;
+    close.hidden = false;
+    assert.equal(api.closeCompletedAd(api.inspectClose('mintegral')), true);
+    assert.equal(api.inspectClose('mintegral'), null);
+    assert.equal(skip.events.length, 1);
+    assert.equal(close.events.length, 1);
+    assert.equal(install.events.length, 0);
+});
+
+test('Mintegral closing preserves manual mode and disabled ad policy', () => {
+    for (const config of [{automatic: false}, {recognizedAd: false}, {autoDismiss: false}]) {
+        const env = environment({autoDismiss: true, ...config});
+        mintegralControl(env, 'm-playable-close');
+        assert.equal(env.sandbox.__adspeed.inspectClose('mintegral'), null);
+    }
+});
+
+test('Mintegral rejects hidden disabled covered and noninteractive Close controls', () => {
+    for (const overrides of [{hidden: true}, {disabled: true}, {style: {pointerEvents: 'none'}},
+        {style: {display: 'none'}}, {parentElement: {tagName: 'A', parentElement: null}}]) {
+        const env = environment({autoDismiss: true});
+        mintegralControl(env, 'm-playable-close', overrides);
+        assert.equal(env.sandbox.__adspeed.inspectClose('mintegral'), null);
+    }
+    const env = environment({autoDismiss: true});
+    mintegralControl(env, 'm-playable-close');
+    env.document.elementFromPoint = () => ({contains: () => false});
+    assert.equal(env.sandbox.__adspeed.inspectClose('mintegral'), null);
+});
+
+test('Mintegral tokens cannot cross a skip-to-close role change', () => {
+    const env = environment({autoDismiss: true});
+    let role = 'm-playable-skip';
+    const close = mintegralControl(env, role, {getAttribute(name) {
+        return name === 'id' || name === 'class' ? role : null;
+    }});
+    const api = env.sandbox.__adspeed;
+    const stale = api.inspectClose('mintegral');
+    role = 'm-playable-close';
+    assert.equal(api.closeCompletedAd(stale), false);
+    assert.equal(close.events.length, 0);
+    assert.equal(api.closeCompletedAd(api.inspectClose('mintegral')), true);
+});
+
+test('Mintegral rejects ambiguous and oversized Close controls', () => {
+    const ambiguous = environment({autoDismiss: true});
+    mintegralControl(ambiguous, 'm-playable-skip');
+    mintegralControl(ambiguous, 'm-playable-close');
+    assert.equal(ambiguous.sandbox.__adspeed.inspectClose('mintegral'), null);
+    const large = environment({autoDismiss: true});
+    mintegralControl(large, 'm-playable-close', {getBoundingClientRect() {
+        return {left:0,top:0,width:400,height:800,right:400,bottom:800};
+    }});
+    assert.equal(large.sandbox.__adspeed.inspectClose('mintegral'), null);
+});
+
+test('unknown adapters and Mintegral lookalike install elements remain untouched', () => {
+    const env = environment({autoDismiss: true});
+    mintegralControl(env, 'skip-content-install');
+    mintegralControl(env, 'm-playable-skip-page');
+    mintegralControl(env, 'm-playable-close', {tagName:'SPAN'});
+    assert.equal(env.sandbox.__adspeed.inspectClose('mintegral'), null);
+    assert.equal(env.sandbox.__adspeed.inspectClose('unknown'), null);
+    assert.equal(env.controls.reduce((count, node) => count + node.events.length, 0), 0);
 });
