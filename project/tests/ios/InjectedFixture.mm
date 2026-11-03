@@ -362,7 +362,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     id options = [runtime valueForKey:@"options"];
     BOOL redirects = [[options valueForKey:@"redirects"] boolValue];
     [options setValue:@NO forKey:@"redirects"];
-    for (NSString *name in @[@"PAGRewardedVideoDisplayViewController", @"PAGRewardedVideoWebViewController", @"PAGNativeExpressRewardedVideoAdDisplayViewController", @"PAGRewardedInterstitialRootViewController", @"PAGAppOpenAdViewController", @"PAGPlayableLandingPageViewController", @"POBModalViewController", @"POBPlayerViewController", @"CHBAdContainerViewController", @"CHBAdWebViewController", @"HYPROfferFullscreenAdViewController"]) {
+    for (NSString *name in @[@"PAGRewardedVideoDisplayViewController", @"PAGRewardedVideoWebViewController", @"PAGNativeExpressRewardedVideoAdDisplayViewController", @"PAGRewardedInterstitialRootViewController", @"PAGAppOpenAdViewController", @"PAGPlayableLandingPageViewController", @"POBModalViewController", @"POBPlayerViewController", @"CHBAdContainerViewController", @"CHBAdWebViewController", @"HYPROfferFullscreenAdViewController", @"_TtC9MolocoSDK26FullscreenAdViewController"]) {
         Class sdkClass = NSClassFromString(name);
         if (!sdkClass) {
             sdkClass = objc_allocateClassPair(UIViewController.class, name.UTF8String, 0);

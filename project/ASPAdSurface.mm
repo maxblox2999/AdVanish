@@ -38,7 +38,8 @@ static BOOL adController(UIViewController *controller) {
                             @"POBPlayerViewController",
                             @"CHBAdContainerViewController",
                             @"CHBAdWebViewController",
-                            @"HYPROfferFullscreenAdViewController"]) {
+                            @"HYPROfferFullscreenAdViewController",
+                            @"_TtC9MolocoSDK26FullscreenAdViewController"]) {
         if (kindOfNamedClass(controller, name)) return YES;
     }
     NSString *name = NSStringFromClass(controller.class) ?: @"";

@@ -1090,7 +1090,7 @@ static void runFixture(ALBaseVideoViewController *owner) {
         [legacyOwner removeFromParentViewController];
         if (!check(originalOwnerRecognized, @"The original MA fullscreen owner remains recognized alongside newer SDK owners")) return;
 
-        for (NSString *name in @[@"PAGRewardedVideoDisplayViewController", @"PAGRewardedVideoWebViewController", @"PAGNativeExpressRewardedVideoAdDisplayViewController", @"PAGRewardedInterstitialRootViewController", @"PAGAppOpenAdViewController", @"PAGPlayableLandingPageViewController", @"POBModalViewController", @"POBPlayerViewController", @"CHBAdContainerViewController", @"CHBAdWebViewController", @"HYPROfferFullscreenAdViewController"]) {
+        for (NSString *name in @[@"PAGRewardedVideoDisplayViewController", @"PAGRewardedVideoWebViewController", @"PAGNativeExpressRewardedVideoAdDisplayViewController", @"PAGRewardedInterstitialRootViewController", @"PAGAppOpenAdViewController", @"PAGPlayableLandingPageViewController", @"POBModalViewController", @"POBPlayerViewController", @"CHBAdContainerViewController", @"CHBAdWebViewController", @"HYPROfferFullscreenAdViewController", @"_TtC9MolocoSDK26FullscreenAdViewController"]) {
             Class sdkClass = NSClassFromString(name);
             if (!sdkClass) {
                 sdkClass = objc_allocateClassPair(UIViewController.class, name.UTF8String, 0);

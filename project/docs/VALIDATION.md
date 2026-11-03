@@ -23,4 +23,4 @@ Actions checks production Settings, native playback, injected hooks and manual m
 
 Package checks cover layout, architectures, dependencies and minimum iOS. Release reports identify the tested commit.
 
-On a rootless iPhone running Subway Surfers, Unity automatic closing and reward payouts passed. Mintegral closing is still being tested. Simulator results do not prove other games or server reward flows.
+On a rootless iPhone running Subway Surfers, Unity automatic closing and reward payouts passed. New Google and Mintegral completion paths still need live verification. Moloco auto-close is unsupported. Simulator results do not prove other games or server reward flows.

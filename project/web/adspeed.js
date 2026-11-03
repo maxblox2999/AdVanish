@@ -184,7 +184,7 @@
             && video.readyState >= 2 && visible(video);
     }
 
-    function exposed(node) {
+    function exposed(node, allowAncestor) {
         if (typeof document.elementFromPoint !== 'function') return false;
         var rect = node.getBoundingClientRect();
         var left = Math.max(0, rect.left);
@@ -198,7 +198,7 @@
                     var hit = document.elementFromPoint(left + (right - left) * x / 4,
                         top + (bottom - top) * y / 4);
                     if (hit === node || (hit && typeof node.contains === 'function' && node.contains(hit))
-                        || (hit && typeof hit.contains === 'function' && hit.contains(node))) return true;
+                        || (allowAncestor !== false && hit && typeof hit.contains === 'function' && hit.contains(node))) return true;
                 }
             }
         } catch (error) {
@@ -1205,7 +1205,7 @@
                 (bounds.left + bounds.width / 2 > window.innerWidth * 0.25 &&
                  bounds.left + bounds.width / 2 < window.innerWidth * 0.75)) return false;
             if (window.getComputedStyle(node).pointerEvents === 'none') return false;
-            return visible(node) && exposed(node);
+            return visible(node) && exposed(node, false);
         }
         if (adapter === 'google' && /^(?:simidCloseButtonButton|simidRewardGrantedCloseButton)$/.test(label)) {
             var box = node.getBoundingClientRect();
@@ -1213,7 +1213,7 @@
                 box.top + box.height / 2 > window.innerHeight * 0.25 ||
                 (box.left + box.width / 2 > window.innerWidth * 0.25 &&
                  box.left + box.width / 2 < window.innerWidth * 0.75)) return false;
-            return window.getComputedStyle(node).pointerEvents !== 'none' && visible(node) && exposed(node);
+            return window.getComputedStyle(node).pointerEvents !== 'none' && visible(node) && exposed(node, false);
         }
         if (!/^(?:close(?: ad)?|dismiss(?: ad)?|x|×|✕|✖|fermer|cerrar|schließen|fechar|chiudi|閉じる|닫기|关闭|關閉)$/.test(label)) return false;
         if (/^(?:x|×|✕|✖)$/.test(label)) {
@@ -1222,7 +1222,7 @@
                 (rect.left + rect.width / 2 > window.innerWidth * 0.25 &&
                  rect.left + rect.width / 2 < window.innerWidth * 0.75)) return false;
         }
-        return visible(node) && exposed(node);
+        return visible(node) && exposed(node, false);
     }
 
     function inspectClose(adapter) {

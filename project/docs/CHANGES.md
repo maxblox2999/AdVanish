@@ -1,5 +1,12 @@
 # Changes
 
+## 0.8.13
+
+- Added Unity and Mintegral SDK-owned Close paths and Google SIMID controls.
+- Close hit tests reject ancestor-only hits.
+- Moloco fullscreen recognition scopes the existing Store prompt filter.
+- Preserved 80x acceleration, manual mode and reward gates; shortened project copy.
+
 ## 0.8.12
 
 - Reused HTML Close buttons can advance after an eligible label changes, with stale-token and duplicate protection.
