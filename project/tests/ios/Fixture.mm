@@ -466,12 +466,33 @@ static BOOL testGoogleWebOwner(UIViewController *presenter) {
 
 @interface FixtureUnityController : UIViewController <WKNavigationDelegate>
 @property (nonatomic, copy) void (^loaded)(WKWebView *);
+@property (nonatomic) NSUInteger nativeCloses;
+- (void)closeButtonTappedAction:(UIButton *)sender;
 @end
 @implementation FixtureUnityController
+- (void)closeButtonTappedAction:(UIButton *)sender { self.nativeCloses += 1; }
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
     if (self.loaded) self.loaded(webView);
 }
 @end
+
+
+static BOOL testMintegralNativeClose(FixtureUnityController *owner) {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+    button.frame = CGRectMake(owner.view.bounds.size.width - 56, 50, 36, 36);
+    [button addTarget:owner action:@selector(closeButtonTappedAction:) forControlEvents:UIControlEventTouchUpInside];
+    [owner.view addSubview:button];
+    button.enabled = NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.nativeCloses == 0, @"Mintegral's disabled native X stays untouched")) return NO;
+    button.enabled = YES;
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.nativeCloses == 1, @"Mintegral's owned native X receives its existing UIKit action")) return NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.nativeCloses == 1, @"Mintegral's native X cannot fire twice for one stage")) return NO;
+    [button removeFromSuperview];
+    return YES;
+}
 
 static void testSdkWebClose(UIViewController *presenter, NSString *adapter, void (^next)(void)) {
     BOOL unity = [adapter isEqualToString:@"unity"];
@@ -518,6 +539,7 @@ static void testSdkWebClose(UIViewController *presenter, NSString *adapter, void
                                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
                                     [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
                                         if (!check(!error && [value isEqual:@1], [label stringByAppendingString:@" unchanged Close is not replayed"])) return;
+                                        if (!unity && !testMintegralNativeClose(owner)) return;
                                         [owner willMoveToParentViewController:nil];
                                         [owner.view removeFromSuperview];
                                         [owner removeFromParentViewController];

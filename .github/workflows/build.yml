@@ -31,7 +31,7 @@ on:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' || inputs.runner_fallback == true }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || inputs.runner_fallback == true }}
 
 permissions:
   contents: read

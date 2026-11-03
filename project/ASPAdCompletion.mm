@@ -286,6 +286,31 @@ static UIView *findCloseControl(ASPAdSurface *surface) {
     return pending.count ? nil : selected;
 }
 
+
+static UIView *findMintegralCloseControl(ASPAdSurface *surface) {
+    NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:surface.root];
+    UIView *selected = nil;
+    NSUInteger visited = 0;
+    while (pending.count && visited++ < 512) {
+        UIView *view = pending.lastObject;
+        [pending removeLastObject];
+        if ([view isKindOfClass:UIControl.class]) {
+            UIControl *control = (UIControl *)view;
+            NSArray<NSString *> *actions = [control actionsForTarget:surface.owner forControlEvent:UIControlEventTouchUpInside];
+            if (control.allTargets.count == 1 && [control.allTargets containsObject:surface.owner] &&
+                actions.count == 1 && [actions.firstObject isEqualToString:@"closeButtonTappedAction:"] &&
+                exposedClose(control, surface)) {
+                if (selected && selected != control) return nil;
+                selected = control;
+            }
+        }
+        if ([view isKindOfClass:WKWebView.class]) continue;
+        if (pending.count + view.subviews.count > 512) return nil;
+        [pending addObjectsFromArray:view.subviews];
+    }
+    return pending.count ? nil : selected;
+}
+
 static NSString *closeActionKey(UIView *close, ASPAdSurface *surface) {
     NSMutableArray<NSString *> *parts = NSMutableArray.array;
     [parts addObject:[NSString stringWithFormat:@"%p", close.superview]];
@@ -316,7 +341,7 @@ static void closeIfEligible(ASPRewardSession *session) {
         session.expires <= NSProcessInfo.processInfo.systemUptime) return;
     for (ASPAdSurface *surface in ASPManualSkipAdSurfaces()) {
         if (!sameOwner(session, surface)) continue;
-        if (session.webAdapter) {
+        if (session.webAdapter && ![session.webAdapter isEqualToString:@"mintegral"]) {
             closeWebEndCard(session, surface);
             return;
         }
@@ -328,7 +353,8 @@ static void closeIfEligible(ASPRewardSession *session) {
             [session.closeActions removeObjectForKey:session.lastCloseView];
             session.lastCloseView = nil;
         }
-        UIView *close = findCloseControl(surface);
+        UIView *close = [session.webAdapter isEqualToString:@"mintegral"]
+            ? findMintegralCloseControl(surface) : findCloseControl(surface);
         if (!close) {
             closeWebEndCard(session, surface);
             return;
