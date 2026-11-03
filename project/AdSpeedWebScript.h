@@ -1178,17 +1178,31 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
     var closeRequests = 0;
     var closeSequence = 0;
 
-    function closeRole(node) {
+    function closeRole(node, adapter) {
+        if (adapter === 'mintegral') return String(node.getAttribute && node.getAttribute('id') || '');
         return String(node.getAttribute && node.getAttribute('aria-label') || node.textContent || '')
             .trim().toLowerCase().replace(/\s+/g, ' ');
     }
 
-    function closeControl(node) {
+    function closeControl(node, adapter) {
         if (!node || node.disabled || (node.getAttribute && node.getAttribute('aria-disabled') === 'true')) return false;
         for (var parent = node, depth = 0; parent && depth < 16; parent = parent.parentElement, depth += 1) {
             if (String(parent.tagName).toLowerCase() === 'a') return false;
         }
-        var label = closeRole(node);
+        var label = closeRole(node, adapter);
+        if (adapter === 'mintegral') {
+            if (String(node.tagName).toLowerCase() !== 'div' ||
+                (label !== 'm-playable-skip' && label !== 'm-playable-close')) return false;
+            var classes = String(node.getAttribute('class') || '').split(/\s+/);
+            if (classes.indexOf(label) < 0) return false;
+            var bounds = node.getBoundingClientRect();
+            if (bounds.width < 16 || bounds.height < 16 || bounds.width > 96 || bounds.height > 96 ||
+                bounds.top + bounds.height / 2 > window.innerHeight * 0.25 ||
+                (bounds.left + bounds.width / 2 > window.innerWidth * 0.25 &&
+                 bounds.left + bounds.width / 2 < window.innerWidth * 0.75)) return false;
+            if (window.getComputedStyle(node).pointerEvents === 'none') return false;
+            return visible(node) && exposed(node);
+        }
         if (!/^(?:close(?: ad)?|dismiss(?: ad)?|x|×|✕|✖|fermer|cerrar|schließen|fechar|chiudi|閉じる|닫기|关闭|關閉)$/.test(label)) return false;
         if (/^(?:x|×|✕|✖)$/.test(label)) {
             var rect = node.getBoundingClientRect();
@@ -1199,21 +1213,23 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
         return visible(node) && exposed(node);
     }
 
-    function inspectClose() {
+    function inspectClose(adapter) {
         closeSnapshot = null;
+        if (adapter && adapter !== 'unity' && adapter !== 'mintegral') return null;
         if (!automatic || !autoDismiss || !recognizedAd || pageHidden() || closeRequests >= 8) return null;
-        var nodes = document.querySelectorAll('button,[role="button"],[aria-label]');
+        var nodes = document.querySelectorAll(adapter === 'mintegral'
+            ? '[id="m-playable-skip"],[id="m-playable-close"]' : 'button,[role="button"],[aria-label]');
         var selected = null;
         for (var index = 0; index < Math.min(nodes.length, 128); index += 1) {
             var node = nodes[index];
             var completed = completedCloseNodes.get(node);
-            if ((completed && completed.has(closeRole(node))) || !closeControl(node)) continue;
+            if ((completed && completed.has(closeRole(node, adapter))) || !closeControl(node, adapter)) continue;
             if (selected) return null;
             selected = node;
         }
         if (!selected) return null;
         var token = String(dateNow()) + ':' + String(++closeSequence);
-        closeSnapshot = {node: selected, role: closeRole(selected), token: token,
+        closeSnapshot = {node: selected, role: closeRole(selected, adapter), adapter: adapter, token: token,
             context: contextGeneration, expires: dateNow() + 2000};
         return token;
     }
@@ -1223,8 +1239,8 @@ static const char kAdSpeedWebScript[] = R"ADSPEEDJS(// Copyright (C) 2026 maxblo
         closeSnapshot = null;
         if (!snapshot || snapshot.token !== token || snapshot.expires < dateNow() ||
             snapshot.context !== contextGeneration || !automatic || !autoDismiss || !recognizedAd ||
-            pageHidden() || closeRequests >= 8 || !closeControl(snapshot.node) ||
-            snapshot.role !== closeRole(snapshot.node)) return false;
+            pageHidden() || closeRequests >= 8 || !closeControl(snapshot.node, snapshot.adapter) ||
+            snapshot.role !== closeRole(snapshot.node, snapshot.adapter)) return false;
         var completed = completedCloseNodes.get(snapshot.node);
         if (!completed) {
             completed = new Set();

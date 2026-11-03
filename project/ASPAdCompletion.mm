@@ -14,7 +14,7 @@
 @property (nonatomic, weak) id creative;
 @property (nonatomic) BOOL ownerBound;
 @property (nonatomic) BOOL google;
-@property (nonatomic) BOOL unity;
+@property (nonatomic, copy) NSString *webAdapter;
 @property (nonatomic) BOOL requiresReward;
 @property (nonatomic) BOOL rewarded;
 @property (nonatomic) BOOL videoCompleted;
@@ -106,7 +106,7 @@ static void pruneSessions(void) {
     NSIndexSet *expired = [sessions indexesOfObjectsPassingTest:^BOOL(ASPRewardSession *session, NSUInteger index, BOOL *stop) {
         UIViewController *owner = session.owner;
         BOOL detached = session.ownerBound && (!owner || !owner.viewIfLoaded.window);
-        BOOL changedCreative = !session.google && !session.unity && (!session.creative ||
+        BOOL changedCreative = !session.google && !session.webAdapter && (!session.creative ||
             objectValue(owner, NSSelectorFromString(@"currentAd")) != session.creative ||
             maxCreative(session.ad) != session.creative);
         return !session.ad || session.expires <= now || session.invalidated ||
@@ -124,7 +124,7 @@ static void pruneSessions(void) {
 
 static BOOL sameOwner(ASPRewardSession *session, ASPAdSurface *surface) {
     if (surface.owner != session.owner || !ASPAdSurfaceUnchanged(surface)) return NO;
-    if (session.google || session.unity) return YES;
+    if (session.google || session.webAdapter) return YES;
     id creative = session.creative;
     return creative && maxCreative(session.ad) == creative && surface.creative == creative;
 }
@@ -217,8 +217,8 @@ static void closeWebEndCard(ASPRewardSession *session, ASPAdSurface *surface) {
             session.webClosePending = NO;
         }
     });
-    [page callAsyncJavaScript:@"return window.__adspeed && window.__adspeed.inspectClose ? window.__adspeed.inspectClose() : null"
-        arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:^(id value, NSError *error) {
+    [page callAsyncJavaScript:@"return window.__adspeed && window.__adspeed.inspectClose ? window.__adspeed.inspectClose(adapter) : null"
+        arguments:@{@"adapter": session.webAdapter ?: @""} inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:^(id value, NSError *error) {
         if (session.webCloseGeneration != generation) return;
         if (error || ![value isKindOfClass:NSString.class] || ![value length] ||
             [value length] > 192 || !sessionVisible(session, page)) {
@@ -311,12 +311,12 @@ static NSString *closeActionKey(UIView *close, ASPAdSurface *surface) {
 }
 
 static void closeIfEligible(ASPRewardSession *session) {
-    BOOL eligible = session.unity || (session.requiresReward ? session.rewarded : session.videoCompleted);
+    BOOL eligible = session.webAdapter || (session.requiresReward ? session.rewarded : session.videoCompleted);
     if (!gAutoDismiss || !eligible || session.closeRequested || session.invalidated || session.closeCount >= 8 ||
         session.expires <= NSProcessInfo.processInfo.systemUptime) return;
     for (ASPAdSurface *surface in ASPManualSkipAdSurfaces()) {
         if (!sameOwner(session, surface)) continue;
-        if (session.unity) {
+        if (session.webAdapter) {
             closeWebEndCard(session, surface);
             return;
         }
@@ -664,17 +664,21 @@ void ASPAdCompletionTrackController(UIViewController *controller) {
     if (![NSThread isMainThread]) return;
     pruneSessions();
     Class unity = NSClassFromString(@"_TtC8UnityAds30WebViewContainerViewController");
-    if (gAutoDismiss && unity && object_getClass(controller) == unity && controller.viewIfLoaded.window) {
+    Class mintegral = NSClassFromString(@"MTGVideoBaseViewController");
+    NSString *adapter = nil;
+    if (unity && object_getClass(controller) == unity) adapter = @"unity";
+    if (mintegral && object_getClass(controller) == mintegral) adapter = @"mintegral";
+    if (gAutoDismiss && adapter && controller.viewIfLoaded.window) {
         BOOL tracked = NO;
         for (ASPRewardSession *session in sessions) {
-            if (session.unity && session.owner == controller) tracked = YES;
+            if (session.webAdapter && session.owner == controller) tracked = YES;
         }
         if (!tracked) {
             ASPRewardSession *session = [ASPRewardSession new];
             session.ad = controller;
             session.owner = controller;
             session.ownerBound = YES;
-            session.unity = YES;
+            session.webAdapter = adapter;
             session.requiresReward = YES;
             session.expires = NSProcessInfo.processInfo.systemUptime + 600;
             [sessions addObject:session];

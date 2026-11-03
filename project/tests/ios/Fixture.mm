@@ -473,8 +473,10 @@ static BOOL testGoogleWebOwner(UIViewController *presenter) {
 }
 @end
 
-static void testUnityWebClose(UIViewController *presenter) {
-    const char *name = "_TtC8UnityAds30WebViewContainerViewController";
+static void testSdkWebClose(UIViewController *presenter, NSString *adapter, void (^next)(void)) {
+    BOOL unity = [adapter isEqualToString:@"unity"];
+    NSString *label = unity ? @"Unity" : @"Mintegral";
+    const char *name = unity ? "_TtC8UnityAds30WebViewContainerViewController" : "MTGVideoBaseViewController";
     Class cls = NSClassFromString(@(name));
     if (!cls) {
         cls = objc_allocateClassPair(FixtureUnityController.class, name, 0);
@@ -500,26 +502,26 @@ static void testUnityWebClose(UIViewController *presenter) {
         ASPAdCompletionConfigure(NO);
         ASPAdCompletionTrackController(owner);
         [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
-            if (!check(!error && [value isEqual:@0], @"Manual mode leaves Unity's Close untouched")) return;
+            if (!check(!error && [value isEqual:@0], [label stringByAppendingString:@" manual mode leaves Close untouched"])) return;
             ASPAdCompletionConfigure(YES);
             ASPAdCompletionTrackController(owner);
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
                 [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
-                    if (!check(!error && [value isEqual:@0], @"A disabled Unity Close cannot end the ad")) return;
-                    [page evaluateJavaScript:@"document.querySelector('button').disabled=false" completionHandler:^(id value, NSError *error) {
-                        if (!check(!error, @"Unity enables its own end-card Close")) return;
+                    if (!check(!error && [value isEqual:@0], [label stringByAppendingString:@" disabled Close cannot end the ad"])) return;
+                    [page evaluateJavaScript:@"var close=document.querySelector('button,#m-playable-close');close.disabled=false;close.setAttribute('aria-disabled','false')" completionHandler:^(id value, NSError *error) {
+                        if (!check(!error, [label stringByAppendingString:@" enables its own end-card Close"])) return;
                         ASPAdCompletionTrackController(owner);
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
                             [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
-                                if (!check(!error && [value isEqual:@1], @"Unity's enabled Close runs without a pre-close reward callback")) return;
+                                if (!check(!error && [value isEqual:@1], [label stringByAppendingString:@" enabled Close runs without a pre-close reward callback"])) return;
                                 ASPAdCompletionTrackController(owner);
                                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
                                     [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
-                                        if (!check(!error && [value isEqual:@1], @"Unity's unchanged Close is not replayed")) return;
+                                        if (!check(!error && [value isEqual:@1], [label stringByAppendingString:@" unchanged Close is not replayed"])) return;
                                         [owner willMoveToParentViewController:nil];
                                         [owner.view removeFromSuperview];
                                         [owner removeFromParentViewController];
-                                        result(nil);
+                                        next();
                                     }];
                                 });
                             }];
@@ -529,7 +531,10 @@ static void testUnityWebClose(UIViewController *presenter) {
             });
         }];
     };
-    [web loadHTMLString:@"<!doctype html><html><body><button aria-label='Close' disabled style='position:fixed;right:12px;top:50px;width:44px;height:44px' onclick='window.closeEvents++'>X</button><script>window.closeEvents=0;</script></body></html>" baseURL:nil];
+    NSString *markup = unity
+        ? @"<!doctype html><html><body><button aria-label='Close' disabled style='position:fixed;right:12px;top:50px;width:44px;height:44px' onclick='window.closeEvents++'>X</button><script>window.closeEvents=0;</script></body></html>"
+        : @"<!doctype html><html><body><div id='m-playable-close' class='m-playable-close' aria-disabled='true' style='position:fixed;right:12px;top:50px;width:44px;height:44px' onclick='window.closeEvents++'>X</div><script>window.closeEvents=0;</script></body></html>";
+    [web loadHTMLString:markup baseURL:nil];
 }
 
 static void testGoogleRewarded(UIViewController *presenter) {
@@ -619,7 +624,9 @@ static void testGoogleRewarded(UIViewController *presenter) {
     [withoutHandler.controller removeFromParentViewController];
     if (!testRegisteredTapClose(presenter)) return;
     if (!testAppLovinPlayableOwner(presenter)) return;
-    testUnityWebClose(presenter);
+    testSdkWebClose(presenter, @"unity", ^{
+        testSdkWebClose(presenter, @"mintegral", ^{ result(nil); });
+    });
 }
 
 static void runOrdinaryCase(UIViewController *presenter, NSUInteger kind, NSTimeInterval deadline) {
