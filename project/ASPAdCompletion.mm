@@ -338,6 +338,59 @@ static UIView *findCloseControl(ASPAdSurface *surface) {
 }
 
 
+static BOOL voidObjects(Method method, NSUInteger count);
+
+static UIControl *mintegralBridgeButton(UIView *close, ASPAdSurface *surface) {
+    if ([close isKindOfClass:UIControl.class] || !close.userInteractionEnabled ||
+        !ASPViewVisibleInSurface(close, surface.root)) return nil;
+    CGRect bounds = [close convertRect:close.bounds toView:surface.window];
+    CGRect window = surface.window.bounds;
+    if (bounds.size.width < 16 || bounds.size.height < 16 ||
+        bounds.size.width > 96 || bounds.size.height > 96 ||
+        CGRectGetMidY(bounds) > window.size.height * 0.25 ||
+        (CGRectGetMidX(bounds) > window.size.width * 0.25 &&
+         CGRectGetMidX(bounds) < window.size.width * 0.75)) return nil;
+    UIView *hit = [surface.window hitTest:CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds)) withEvent:nil];
+    if (hit != close && ![hit isDescendantOfView:close]) return nil;
+    NSUInteger taps = 0;
+    for (UIGestureRecognizer *gesture in close.gestureRecognizers) {
+        if (![gesture isKindOfClass:UITapGestureRecognizer.class] || !gesture.enabled) continue;
+        UITapGestureRecognizer *tap = (UITapGestureRecognizer *)gesture;
+        if (![tap isMemberOfClass:UITapGestureRecognizer.class] ||
+            tap.numberOfTapsRequired != 1 || tap.numberOfTouchesRequired != 1) return nil;
+        taps += 1;
+    }
+    if (taps != 1) return nil;
+    NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:close];
+    UIControl *selected = nil;
+    NSUInteger visited = 0;
+    while (pending.count && visited++ < 32) {
+        UIView *view = pending.lastObject;
+        [pending removeLastObject];
+        if ([view isKindOfClass:UIControl.class]) {
+            UIControl *control = (UIControl *)view;
+            if (control.allTargets.count != 1 || !control.enabled ||
+                !ASPViewVisibleInSurface(control, surface.root)) continue;
+            id target = control.allTargets.anyObject;
+            if (object_getClass(target) != NSClassFromString(@"MTGBaseCommonJS") ||
+                objectValue(target, NSSelectorFromString(@"getCloseButtonView")) != close) continue;
+            id parent = objectValue(target, NSSelectorFromString(@"superView"));
+            if (![parent isKindOfClass:UIView.class] || ![close isDescendantOfView:parent] ||
+                (parent != surface.root && ![(UIView *)parent isDescendantOfView:surface.root])) continue;
+            NSArray<NSString *> *actions = [control actionsForTarget:target forControlEvent:UIControlEventTouchUpInside];
+            if (actions.count != 1 || ![actions.firstObject isEqualToString:@"closeButtonTappedAction:"]) continue;
+            Method method = class_getInstanceMethod(object_getClass(target), NSSelectorFromString(actions.firstObject));
+            if (!voidObjects(method, 1)) continue;
+            if (selected && selected != control) return nil;
+            selected = control;
+        }
+        if ([view isKindOfClass:WKWebView.class]) continue;
+        if (pending.count + view.subviews.count > 32) return nil;
+        [pending addObjectsFromArray:view.subviews];
+    }
+    return pending.count ? nil : selected;
+}
+
 static UIView *findMintegralCloseControl(ASPAdSurface *surface) {
     NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:surface.root];
     UIView *selected = nil;
@@ -345,15 +398,17 @@ static UIView *findMintegralCloseControl(ASPAdSurface *surface) {
     while (pending.count && visited++ < 512) {
         UIView *view = pending.lastObject;
         [pending removeLastObject];
+        BOOL eligible = mintegralBridgeButton(view, surface) != nil;
         if ([view isKindOfClass:UIControl.class]) {
             UIControl *control = (UIControl *)view;
             NSArray<NSString *> *actions = [control actionsForTarget:surface.owner forControlEvent:UIControlEventTouchUpInside];
-            if (control.allTargets.count == 1 && [control.allTargets containsObject:surface.owner] &&
+            eligible = control.allTargets.count == 1 && [control.allTargets containsObject:surface.owner] &&
                 actions.count == 1 && [actions.firstObject isEqualToString:@"closeButtonTappedAction:"] &&
-                exposedClose(control, surface)) {
-                if (selected && selected != control) return nil;
-                selected = control;
-            }
+                exposedClose(control, surface);
+        }
+        if (eligible) {
+            if (selected && selected != view) return nil;
+            selected = view;
         }
         if ([view isKindOfClass:WKWebView.class]) continue;
         if (pending.count + view.subviews.count > 512) return nil;
@@ -447,6 +502,11 @@ static void closeIfEligible(ASPRewardSession *session) {
         @try {
             if ([close isKindOfClass:UIControl.class]) {
                 [(UIControl *)close sendActionsForControlEvents:UIControlEventTouchUpInside];
+            } else if ([session.webAdapter isEqualToString:@"mintegral"]) {
+                UIControl *button = mintegralBridgeButton(close, surface);
+                AVN_DEVICE_LOG(@"mintegral-wrapper-close", @{@"class": AVNDeviceClassName(surface.owner),
+                    @"bound": @(button != nil)});
+                if (button) [button sendActionsForControlEvents:UIControlEventTouchUpInside];
             } else {
                 ASPCloseTapRegistration *registration = eligibleCloseTap(close, surface.owner);
                 if (registration) ((void (*)(id, SEL))objc_msgSend)(registration.target, registration.action);
