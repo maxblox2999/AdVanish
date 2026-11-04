@@ -1,5 +1,12 @@
 # Changes
 
+## 0.8.13
+
+- Added Unity and Mintegral SDK-owned Close handling and Google SIMID controls.
+- Fixed repeated Mintegral wrapper actions and covered web Close hit tests.
+- Recognized Moloco fullscreen ads for Store prompt filtering; Moloco auto-close remains unsupported.
+- Kept 80x acceleration, manual mode and SDK reward requirements.
+
 ## 0.8.12
 
 - Fixed reused HTML Close buttons so they can work again when their label changes. Also prevents outdated or duplicate actions.

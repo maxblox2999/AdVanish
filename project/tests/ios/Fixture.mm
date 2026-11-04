@@ -9,6 +9,7 @@
 #import "ASPUniversalSkip.h"
 #import "ASPAdCompletion.h"
 #import "ASPSpeed.h"
+#include "AdSpeedWebScript.h"
 
 static NSMutableArray<NSString *> *checks;
 static BOOL finished;
@@ -216,9 +217,13 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
 @implementation MAFullscreenAdViewController
 @end
 
-@interface GADFullScreenAdViewController : ALBaseVideoViewController
+@interface GADFullScreenAdViewController : ALBaseVideoViewController <WKNavigationDelegate>
+@property (nonatomic, copy) void (^loaded)(WKWebView *);
 @end
 @implementation GADFullScreenAdViewController
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    if (self.loaded) self.loaded(webView);
+}
 @end
 
 @interface GADWebViewController : UIViewController
@@ -462,6 +467,223 @@ static BOOL testGoogleWebOwner(UIViewController *presenter) {
     return check(preserved, @"A standalone Google web controller remains recognized");
 }
 
+
+@interface FixtureUnityController : UIViewController <WKNavigationDelegate>
+@property (nonatomic, copy) void (^loaded)(WKWebView *);
+@property (nonatomic) NSUInteger nativeCloses;
+- (void)closeButtonTappedAction:(UIButton *)sender;
+@end
+@implementation FixtureUnityController
+- (void)closeButtonTappedAction:(UIButton *)sender { self.nativeCloses += 1; }
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    if (self.loaded) self.loaded(webView);
+}
+@end
+
+
+@interface MTGBaseCommonJS : NSObject
+@property (nonatomic, weak) UIView *superView;
+@property (nonatomic, weak) UIView *closeView;
+@property (nonatomic) NSUInteger closeEvents;
+- (UIView *)getCloseButtonView;
+- (void)closeButtonTappedAction:(id)sender;
+@end
+@implementation MTGBaseCommonJS
+- (UIView *)getCloseButtonView { return self.closeView; }
+- (void)closeButtonTappedAction:(id)sender { self.closeEvents += 1; }
+@end
+
+static BOOL testMintegralBridgeClose(FixtureUnityController *owner) {
+    MTGBaseCommonJS *bridge = [MTGBaseCommonJS new];
+    UIView *wrapper = [[UIView alloc] initWithFrame:CGRectMake(owner.view.bounds.size.width - 56, 50, 36, 36)];
+    UIButton *image = [UIButton buttonWithType:UIButtonTypeCustom];
+    image.frame = wrapper.bounds;
+    image.userInteractionEnabled = NO;
+    [image addTarget:bridge action:@selector(closeButtonTappedAction:) forControlEvents:UIControlEventTouchUpInside];
+    [wrapper addSubview:image];
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:bridge action:@selector(closeButtonTappedAction:)];
+    [wrapper addGestureRecognizer:tap];
+    bridge.closeView = wrapper;
+    bridge.superView = owner.view;
+    [owner.view addSubview:wrapper];
+    tap.enabled = NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"Mintegral's disabled Close gesture stays untouched")) return NO;
+    tap.enabled = YES;
+    UIView *foreign = [UIView new];
+    bridge.superView = foreign;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"A Mintegral bridge outside the ad owner cannot close")) return NO;
+    bridge.superView = owner.view;
+    wrapper.hidden = YES;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"A hidden Mintegral wrapper cannot close")) return NO;
+    wrapper.hidden = NO;
+    UIView *cover = [[UIView alloc] initWithFrame:wrapper.frame];
+    [owner.view addSubview:cover];
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"An occluded Mintegral wrapper cannot close")) return NO;
+    [cover removeFromSuperview];
+    image.enabled = NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"Mintegral's disabled registered Close action stays untouched")) return NO;
+    image.enabled = YES;
+    UIView *stale = [UIView new];
+    bridge.closeView = stale;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 0, @"A stale Mintegral Close getter invalidates its wrapper")) return NO;
+    bridge.closeView = wrapper;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 1 && !image.userInteractionEnabled,
+        @"Mintegral's exposed wrapper uses its existing SDK action with a decorative button")) return NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 1, @"Mintegral's unchanged wrapper Close cannot repeat")) return NO;
+    wrapper.hidden = YES;
+    ASPAdCompletionTrackController(owner);
+    wrapper.hidden = NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 2, @"Mintegral can reuse its wrapper after a hidden stage transition")) return NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(bridge.closeEvents == 2, @"Mintegral's reused wrapper still fires only once per stage")) return NO;
+    [wrapper removeFromSuperview];
+    return YES;
+}
+
+static BOOL testMintegralNativeClose(FixtureUnityController *owner) {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+    button.frame = CGRectMake(owner.view.bounds.size.width - 56, 50, 36, 36);
+    [button addTarget:owner action:@selector(closeButtonTappedAction:) forControlEvents:UIControlEventTouchUpInside];
+    [owner.view addSubview:button];
+    button.enabled = NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.nativeCloses == 0, @"Mintegral's disabled native X stays untouched")) return NO;
+    button.enabled = YES;
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.nativeCloses == 1, @"Mintegral's owned native X receives its existing UIKit action")) return NO;
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.nativeCloses == 1, @"Mintegral's native X cannot fire twice for one stage")) return NO;
+    [button removeFromSuperview];
+    return YES;
+}
+
+static void testSdkWebClose(UIViewController *presenter, NSString *adapter, void (^next)(void)) {
+    BOOL unity = [adapter isEqualToString:@"unity"];
+    NSString *label = unity ? @"Unity" : @"Mintegral";
+    const char *name = unity ? "_TtC8UnityAds30WebViewContainerViewController" : "MTGVideoBaseViewController";
+    Class cls = NSClassFromString(@(name));
+    if (!cls) {
+        cls = objc_allocateClassPair(FixtureUnityController.class, name, 0);
+        objc_registerClassPair(cls);
+    }
+    FixtureUnityController *owner = [cls new];
+    [presenter addChildViewController:owner];
+    owner.view.frame = presenter.view.bounds;
+    [presenter.view addSubview:owner.view];
+    [owner didMoveToParentViewController:presenter];
+    WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
+    NSString *source = [[NSString stringWithUTF8String:kAdSpeedWebScript]
+        stringByReplacingOccurrencesOfString:@"__ADSPEED_CONFIG__"
+        withString:@"{\"rate\":80,\"automatic\":true,\"autoDismiss\":true,\"recognizedAd\":true}"];
+    [configuration.userContentController addUserScript:[[WKUserScript alloc] initWithSource:source
+        injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO]];
+    WKWebView *web = [[WKWebView alloc] initWithFrame:owner.view.bounds configuration:configuration];
+    [owner.view addSubview:web];
+    web.navigationDelegate = owner;
+    owner.loaded = ^(WKWebView *page) {
+        owner.loaded = nil;
+        ASPManualSkipTrackController(owner);
+        ASPAdCompletionConfigure(NO);
+        ASPAdCompletionTrackController(owner);
+        [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+            if (!check(!error && [value isEqual:@0], [label stringByAppendingString:@" manual mode leaves Close untouched"])) return;
+            ASPAdCompletionConfigure(YES);
+            ASPAdCompletionTrackController(owner);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                    if (!check(!error && [value isEqual:@0], [label stringByAppendingString:@" disabled Close cannot end the ad"])) return;
+                    [page evaluateJavaScript:@"var close=document.querySelector('button,#m-playable-close');close.disabled=false;close.setAttribute('aria-disabled','false')" completionHandler:^(id value, NSError *error) {
+                        if (!check(!error, [label stringByAppendingString:@" enables its own end-card Close"])) return;
+                        ASPAdCompletionTrackController(owner);
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                            [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                                if (!check(!error && [value isEqual:@1], [label stringByAppendingString:@" enabled Close runs without a pre-close reward callback"])) return;
+                                ASPAdCompletionTrackController(owner);
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                                    [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                                        if (!check(!error && [value isEqual:@1], [label stringByAppendingString:@" unchanged Close is not replayed"])) return;
+                                        if (!unity && (!testMintegralNativeClose(owner) || !testMintegralBridgeClose(owner))) return;
+                                        [owner willMoveToParentViewController:nil];
+                                        [owner.view removeFromSuperview];
+                                        [owner removeFromParentViewController];
+                                        next();
+                                    }];
+                                });
+                            }];
+                        });
+                    }];
+                }];
+            });
+        }];
+    };
+    NSString *markup = unity
+        ? @"<!doctype html><html><body><button aria-label='Close' disabled style='position:fixed;right:12px;top:50px;width:44px;height:44px' onclick='window.closeEvents++'>X</button><script>window.closeEvents=0;</script></body></html>"
+        : @"<!doctype html><html><body><div id='m-playable-close' class='m-playable-close' aria-disabled='true' style='position:fixed;right:12px;top:50px;width:44px;height:44px' onclick='window.closeEvents++'>X</div><script>window.closeEvents=0;</script></body></html>";
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (owner.loaded && !finished) result([label stringByAppendingString:@" web fixture navigation timed out"]);
+    });
+    [web loadHTMLString:markup baseURL:nil];
+}
+
+static void testGoogleSimidClose(UIViewController *presenter, void (^next)(void)) {
+    GADRewardedAd *ad = [GADRewardedAd new];
+    __block NSUInteger rewards = 0;
+    [ad presentFromRootViewController:presenter userDidEarnRewardHandler:^{ rewards += 1; }];
+    ad.controller.closeButton.hidden = YES;
+    [ad.controller.videoPlayer.videoView removeFromSuperview];
+    WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
+    NSString *source = [[NSString stringWithUTF8String:kAdSpeedWebScript]
+        stringByReplacingOccurrencesOfString:@"__ADSPEED_CONFIG__"
+        withString:@"{\"rate\":80,\"automatic\":true,\"autoDismiss\":true,\"recognizedAd\":true}"];
+    [configuration.userContentController addUserScript:[[WKUserScript alloc] initWithSource:source
+        injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO]];
+    WKWebView *web = [[WKWebView alloc] initWithFrame:ad.controller.view.bounds configuration:configuration];
+    [ad.controller.view addSubview:web];
+    web.navigationDelegate = ad.controller;
+    ad.controller.loaded = ^(WKWebView *page) {
+        ad.controller.loaded = nil;
+        ASPManualSkipTrackController(ad.controller);
+        ASPAdCompletionTrackController(ad.controller);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+            [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                if (!check(!error && [value isEqual:@0] && rewards == 0,
+                    @"Google SIMID Close waits for the SDK reward callback")) return;
+                [ad emitSDKReward];
+                if (!check(rewards == 1, @"Google SIMID completion forwards the original reward handler once")) return;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                    [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                        if (!check(!error && [value isEqual:@1] && ad.controller.closes == 0,
+                            @"Google SIMID uses its rendered Close after the matching reward")) return;
+                        ASPAdCompletionTrackController(ad.controller);
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+                            [page evaluateJavaScript:@"window.closeEvents" completionHandler:^(id value, NSError *error) {
+                                if (!check(!error && [value isEqual:@1], @"Google SIMID Close cannot repeat for one stage")) return;
+                                [ad.controller willMoveToParentViewController:nil];
+                                [ad.controller.view removeFromSuperview];
+                                [ad.controller removeFromParentViewController];
+                                next();
+                            }];
+                        });
+                    }];
+                });
+            }];
+        });
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (ad.controller.loaded && !finished) result(@"Google SIMID fixture navigation timed out");
+    });
+    [web loadHTMLString:@"<!doctype html><html><body><div class='simidCloseButtonButton' style='position:fixed;right:12px;top:50px;width:24px;height:24px' onclick='window.closeEvents++'>X</div><script>window.closeEvents=0;</script></body></html>" baseURL:nil];
+}
+
 static void testGoogleRewarded(UIViewController *presenter) {
     if (!testGoogleWebOwner(presenter)) return;
     __block NSUInteger nilRootRewards = 0;
@@ -549,7 +771,11 @@ static void testGoogleRewarded(UIViewController *presenter) {
     [withoutHandler.controller removeFromParentViewController];
     if (!testRegisteredTapClose(presenter)) return;
     if (!testAppLovinPlayableOwner(presenter)) return;
-    result(nil);
+    testSdkWebClose(presenter, @"unity", ^{
+        testSdkWebClose(presenter, @"mintegral", ^{
+            testGoogleSimidClose(presenter, ^{ result(nil); });
+        });
+    });
 }
 
 static void runOrdinaryCase(UIViewController *presenter, NSUInteger kind, NSTimeInterval deadline) {
@@ -871,7 +1097,7 @@ static void runFixture(ALBaseVideoViewController *owner) {
         [legacyOwner removeFromParentViewController];
         if (!check(originalOwnerRecognized, @"The original MA fullscreen owner remains recognized alongside newer SDK owners")) return;
 
-        for (NSString *name in @[@"PAGRewardedVideoDisplayViewController", @"PAGRewardedVideoWebViewController", @"PAGNativeExpressRewardedVideoAdDisplayViewController", @"PAGRewardedInterstitialRootViewController", @"PAGAppOpenAdViewController", @"PAGPlayableLandingPageViewController", @"POBModalViewController", @"POBPlayerViewController", @"CHBAdContainerViewController", @"CHBAdWebViewController", @"HYPROfferFullscreenAdViewController"]) {
+        for (NSString *name in @[@"PAGRewardedVideoDisplayViewController", @"PAGRewardedVideoWebViewController", @"PAGNativeExpressRewardedVideoAdDisplayViewController", @"PAGRewardedInterstitialRootViewController", @"PAGAppOpenAdViewController", @"PAGPlayableLandingPageViewController", @"POBModalViewController", @"POBPlayerViewController", @"CHBAdContainerViewController", @"CHBAdWebViewController", @"HYPROfferFullscreenAdViewController", @"_TtC9MolocoSDK26FullscreenAdViewController"]) {
             Class sdkClass = NSClassFromString(name);
             if (!sdkClass) {
                 sdkClass = objc_allocateClassPair(UIViewController.class, name.UTF8String, 0);
@@ -927,7 +1153,7 @@ static void runFixture(ALBaseVideoViewController *owner) {
     self.window.rootViewController = owner;
     [self.window makeKeyAndVisible];
     dispatch_async(dispatch_get_main_queue(), ^{ runFixture(owner); });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         result(@"Fixture deadline exceeded");
     });
     return YES;

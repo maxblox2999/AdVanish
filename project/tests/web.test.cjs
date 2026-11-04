@@ -24,9 +24,16 @@ function environment(configuration = {}, options = {}) {
     const document = {
         hidden: !!options.hidden,
         visibilityState: options.hidden ? 'hidden' : 'visible',
-        // Default fixtures model unobstructed media under one container. Tests
-        // for occlusion replace this with the actual frontmost fixture node.
-        elementFromPoint() {
+        elementFromPoint(x, y) {
+            if (options.hitControls) {
+                for (const node of controls.slice().reverse()) {
+                    const style = node.style || {};
+                    if (node.hidden || node.isConnected === false || style.display === 'none' ||
+                        style.visibility === 'hidden' || style.pointerEvents === 'none') continue;
+                    const rect = node.getBoundingClientRect();
+                    if (x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom) return node;
+                }
+            }
             return {contains(node) { return videos.includes(node) || frameNodes.includes(node) || controls.includes(node); }};
         },
         querySelectorAll(selector) {
@@ -34,7 +41,8 @@ function environment(configuration = {}, options = {}) {
             if (selector === 'div[id],span[id],div[class],span[class]') return controls.filter(node => /^(DIV|SPAN)$/.test(node.tagName));
             if (selector === 'canvas,[role="timer"],time') return controls.filter(node => node.tagName === 'CANVAS' || node.tagName === 'TIME'
                 || (node.getAttribute && node.getAttribute('role') === 'timer'));
-            assert.equal(selector, 'button,[role="button"],[aria-label]');
+            assert.ok(['button,[role="button"],[aria-label]', '[id="m-playable-skip"],[id="m-playable-close"]',
+                'button,[role="button"],[aria-label],.simidCloseButtonButton,.simidRewardGrantedCloseButton'].includes(selector));
             return controls;
         },
         getElementsByTagName(name) {
@@ -2228,8 +2236,12 @@ test('App Store hiding prevents anchor navigation only in an ad', () => {
     }
 });
 
+function closingEnvironment(configuration = {}) {
+    return environment(configuration, {hitControls: true});
+}
+
 test('an eligible web Close still requires an explicit one-use request', () => {
-    const env = environment({autoDismiss: true});
+    const env = closingEnvironment({autoDismiss: true});
     const close = control(env, 'Close ad');
     env.advance(1000);
     assert.equal(close.events.length, 0);
@@ -2241,7 +2253,7 @@ test('an eligible web Close still requires an explicit one-use request', () => {
 });
 
 test('web end cards accept new Close controls without repeating the previous stage', () => {
-    const env = environment({autoDismiss: true});
+    const env = closingEnvironment({autoDismiss: true});
     const first = control(env, 'Close');
     assert.equal(env.sandbox.__adspeed.closeCompletedAd(env.sandbox.__adspeed.inspectClose()), true);
     const second = control(env, 'Dismiss ad');
@@ -2254,14 +2266,14 @@ test('web end cards accept new Close controls without repeating the previous sta
 test('web closing preserves manual mode and disabled dismissal settings', () => {
     for (const config of [{autoDismiss: false}, {autoDismiss: true, automatic: false},
         {autoDismiss: true, recognizedAd: false}]) {
-        const env = environment(config);
+        const env = closingEnvironment(config);
         control(env, 'Close');
         assert.equal(env.sandbox.__adspeed.inspectClose(), null);
     }
 });
 
 test('web Close authorization expires and is invalidated by context changes', () => {
-    const env = environment({autoDismiss: true});
+    const env = closingEnvironment({autoDismiss: true});
     const close = control(env, 'Close');
     const old = env.sandbox.__adspeed.inspectClose();
     env.sandbox.__adspeed.setAdContext(false);
@@ -2274,7 +2286,7 @@ test('web Close authorization expires and is invalidated by context changes', ()
 });
 
 test('hidden, disabled and ambiguous Close controls do not activate', () => {
-    const env = environment({autoDismiss: true});
+    const env = closingEnvironment({autoDismiss: true});
     const close = control(env, 'Close', {disabled: true});
     assert.equal(env.sandbox.__adspeed.inspectClose(), null);
     close.disabled = false;
@@ -2282,12 +2294,14 @@ test('hidden, disabled and ambiguous Close controls do not activate', () => {
     close.hidden = true;
     assert.equal(env.sandbox.__adspeed.closeCompletedAd(token), false);
     close.hidden = false;
-    control(env, 'Dismiss');
+    control(env, 'Dismiss', {getBoundingClientRect() {
+        return {left: 20, top: 400, right: 100, bottom: 444, width: 80, height: 44};
+    }});
     assert.equal(env.sandbox.__adspeed.inspectClose(), null);
 });
 
 test('web dismissal rejects install links and central game X controls', () => {
-    const env = environment({autoDismiss: true});
+    const env = closingEnvironment({autoDismiss: true});
     control(env, 'Install');
     control(env, 'X');
     control(env, 'Close', {parentElement: {tagName: 'A', parentElement: null}});
@@ -2295,7 +2309,7 @@ test('web dismissal rejects install links and central game X controls', () => {
 });
 
 test('web end-card action requests have a bounded per-document limit', () => {
-    const env = environment({autoDismiss: true});
+    const env = closingEnvironment({autoDismiss: true});
     for (let index = 0; index < 8; index++) {
         control(env, 'Close');
         assert.equal(env.sandbox.__adspeed.closeCompletedAd(env.sandbox.__adspeed.inspectClose()), true);
@@ -2305,7 +2319,7 @@ test('web end-card action requests have a bounded per-document limit', () => {
 });
 
 test('web end cards reuse one Close node only for a new eligible role', () => {
-    const env = environment({autoDismiss: true});
+    const env = closingEnvironment({autoDismiss: true});
     const close = control(env, 'Close');
     const api = env.sandbox.__adspeed;
     assert.equal(api.closeCompletedAd(api.inspectClose()), true);
@@ -2319,7 +2333,7 @@ test('web end cards reuse one Close node only for a new eligible role', () => {
 });
 
 test('web Close tokens cannot cross a reused node role change', () => {
-    const env = environment({autoDismiss: true});
+    const env = closingEnvironment({autoDismiss: true});
     const close = control(env, 'Close');
     const api = env.sandbox.__adspeed;
     const old = api.inspectClose();
@@ -2331,7 +2345,7 @@ test('web Close tokens cannot cross a reused node role change', () => {
 });
 
 test('reused web Close nodes reject countdowns and retain the action limit', () => {
-    const env = environment({autoDismiss: true});
+    const env = closingEnvironment({autoDismiss: true});
     const close = control(env, 'Close');
     const api = env.sandbox.__adspeed;
     assert.equal(api.closeCompletedAd(api.inspectClose()), true);
@@ -2347,7 +2361,7 @@ test('reused web Close nodes reject countdowns and retain the action limit', () 
 });
 
 test('web ad context changes do not replay a consumed Close role', () => {
-    const env = environment({autoDismiss: true});
+    const env = closingEnvironment({autoDismiss: true});
     const close = control(env, 'Close');
     const api = env.sandbox.__adspeed;
     assert.equal(api.closeCompletedAd(api.inspectClose()), true);
@@ -2357,3 +2371,189 @@ test('web ad context changes do not replay a consumed Close role', () => {
     assert.equal(api.inspectClose(), null);
     assert.equal(close.events.length, 1);
 });
+
+function mintegralControl(env, id, overrides = {}) {
+    return control(env, '', {
+        tagName: 'DIV',
+        getAttribute(name) { return name === 'id' || name === 'class' ? id : null; },
+        getBoundingClientRect() { return {left: 350, top: 20, right: 380, bottom: 50, width: 30, height: 30}; },
+        ...overrides
+    });
+}
+
+test('Mintegral advances its enabled skip and final Close without install actions', () => {
+    const env = closingEnvironment({autoDismiss: true});
+    const skip = mintegralControl(env, 'm-playable-skip');
+    const close = mintegralControl(env, 'm-playable-close', {hidden: true});
+    const install = mintegralControl(env, 'skip-content-install', {getBoundingClientRect() {
+        return {left: 100, top: 600, right: 300, bottom: 644, width: 200, height: 44};
+    }});
+    const api = env.sandbox.__adspeed;
+    assert.equal(api.inspectClose(), null);
+    assert.equal(api.closeCompletedAd(api.inspectClose('mintegral')), true);
+    skip.hidden = true;
+    close.hidden = false;
+    assert.equal(api.closeCompletedAd(api.inspectClose('mintegral')), true);
+    assert.equal(api.inspectClose('mintegral'), null);
+    assert.equal(skip.events.length, 1);
+    assert.equal(close.events.length, 1);
+    assert.equal(install.events.length, 0);
+});
+
+test('Mintegral closing preserves manual mode and disabled ad policy', () => {
+    for (const config of [{automatic: false}, {recognizedAd: false}, {autoDismiss: false}]) {
+        const env = closingEnvironment({autoDismiss: true, ...config});
+        mintegralControl(env, 'm-playable-close');
+        assert.equal(env.sandbox.__adspeed.inspectClose('mintegral'), null);
+    }
+});
+
+test('Mintegral rejects hidden disabled covered and noninteractive Close controls', () => {
+    for (const overrides of [{hidden: true}, {disabled: true}, {style: {pointerEvents: 'none'}},
+        {style: {display: 'none'}}, {parentElement: {tagName: 'A', parentElement: null}}]) {
+        const env = closingEnvironment({autoDismiss: true});
+        mintegralControl(env, 'm-playable-close', overrides);
+        assert.equal(env.sandbox.__adspeed.inspectClose('mintegral'), null);
+    }
+    const env = closingEnvironment({autoDismiss: true});
+    mintegralControl(env, 'm-playable-close');
+    env.document.elementFromPoint = () => ({contains: () => false});
+    assert.equal(env.sandbox.__adspeed.inspectClose('mintegral'), null);
+});
+
+test('Mintegral tokens cannot cross a skip-to-close role change', () => {
+    const env = closingEnvironment({autoDismiss: true});
+    let role = 'm-playable-skip';
+    const close = mintegralControl(env, role, {getAttribute(name) {
+        return name === 'id' || name === 'class' ? role : null;
+    }});
+    const api = env.sandbox.__adspeed;
+    const stale = api.inspectClose('mintegral');
+    role = 'm-playable-close';
+    assert.equal(api.closeCompletedAd(stale), false);
+    assert.equal(close.events.length, 0);
+    assert.equal(api.closeCompletedAd(api.inspectClose('mintegral')), true);
+});
+
+test('Mintegral rejects ambiguous and oversized Close controls', () => {
+    const ambiguous = closingEnvironment({autoDismiss: true});
+    mintegralControl(ambiguous, 'm-playable-skip');
+    mintegralControl(ambiguous, 'm-playable-close', {getBoundingClientRect() {
+        return {left: 20, top: 20, right: 50, bottom: 50, width: 30, height: 30};
+    }});
+    assert.equal(ambiguous.sandbox.__adspeed.inspectClose('mintegral'), null);
+    const large = closingEnvironment({autoDismiss: true});
+    mintegralControl(large, 'm-playable-close', {getBoundingClientRect() {
+        return {left:0,top:0,width:400,height:800,right:400,bottom:800};
+    }});
+    assert.equal(large.sandbox.__adspeed.inspectClose('mintegral'), null);
+});
+
+test('unknown adapters and Mintegral lookalike install elements remain untouched', () => {
+    const env = closingEnvironment({autoDismiss: true});
+    mintegralControl(env, 'skip-content-install');
+    mintegralControl(env, 'm-playable-skip-page');
+    mintegralControl(env, 'm-playable-close', {tagName:'SPAN'});
+    assert.equal(env.sandbox.__adspeed.inspectClose('mintegral'), null);
+    assert.equal(env.sandbox.__adspeed.inspectClose('unknown'), null);
+    assert.equal(env.controls.reduce((count, node) => count + node.events.length, 0), 0);
+});
+
+function googleCloseControl(env, role, overrides = {}) {
+    return control(env, '', {
+        tagName: 'DIV',
+        getAttribute(name) { return name === 'class' ? role : null; },
+        getBoundingClientRect() { return {left: 380, top: 64, right: 404, bottom: 88, width: 24, height: 24}; },
+        ...overrides
+    });
+}
+
+test('Google SIMID Close uses its SDK control without selecting install or skip', () => {
+    const env = closingEnvironment({autoDismiss: true});
+    const close = googleCloseControl(env, 'simidCloseButtonButton');
+    const install = googleCloseControl(env, 'install', {getBoundingClientRect() {
+        return {left: 100, top: 600, right: 300, bottom: 644, width: 200, height: 44};
+    }});
+    const skip = googleCloseControl(env, 'simidSkipButtonButton', {getBoundingClientRect() {
+        return {left: 20, top: 64, right: 44, bottom: 88, width: 24, height: 24};
+    }});
+    const api = env.sandbox.__adspeed;
+    assert.equal(api.inspectClose('unity'), null);
+    assert.equal(api.closeCompletedAd(api.inspectClose('google')), true);
+    assert.equal(close.events.length, 1);
+    assert.equal(install.events.length, 0);
+    assert.equal(skip.events.length, 0);
+});
+
+test('Google SIMID closing preserves manual mode and ad policy', () => {
+    for (const config of [{automatic: false}, {recognizedAd: false}, {autoDismiss: false}]) {
+        const env = closingEnvironment({autoDismiss: true, ...config});
+        googleCloseControl(env, 'simidRewardGrantedCloseButton');
+        assert.equal(env.sandbox.__adspeed.inspectClose('google'), null);
+    }
+});
+
+test('Google SIMID rejects hidden disabled covered and linked Close controls', () => {
+    for (const overrides of [{hidden: true}, {disabled: true}, {style: {pointerEvents: 'none'}},
+        {style: {display: 'none'}}, {parentElement: {tagName: 'A', parentElement: null}}]) {
+        const env = closingEnvironment({autoDismiss: true});
+        googleCloseControl(env, 'simidCloseButtonButton', overrides);
+        assert.equal(env.sandbox.__adspeed.inspectClose('google'), null);
+    }
+    const env = closingEnvironment({autoDismiss: true});
+    googleCloseControl(env, 'simidCloseButtonButton');
+    env.document.elementFromPoint = () => ({contains: () => false});
+    assert.equal(env.sandbox.__adspeed.inspectClose('google'), null);
+});
+
+test('Google SIMID Close tokens reject changed roles and duplicate use', () => {
+    const env = closingEnvironment({autoDismiss: true});
+    let role = 'simidCloseButtonButton';
+    const close = googleCloseControl(env, role, {getAttribute(name) { return name === 'class' ? role : null; }});
+    const api = env.sandbox.__adspeed;
+    const stale = api.inspectClose('google');
+    role = 'simidRewardGrantedCloseButton';
+    assert.equal(api.closeCompletedAd(stale), false);
+    const current = api.inspectClose('google');
+    assert.equal(api.closeCompletedAd(current), true);
+    assert.equal(api.closeCompletedAd(current), false);
+    assert.equal(close.events.length, 1);
+});
+
+test('Google SIMID rejects ambiguous controls and large or central lookalikes', () => {
+    const ambiguous = closingEnvironment({autoDismiss: true});
+    googleCloseControl(ambiguous, 'simidCloseButtonButton');
+    googleCloseControl(ambiguous, 'simidRewardGrantedCloseButton', {getBoundingClientRect() {
+        return {left: 20, top: 64, right: 44, bottom: 88, width: 24, height: 24};
+    }});
+    assert.equal(ambiguous.sandbox.__adspeed.inspectClose('google'), null);
+    for (const rect of [{left: 0, top: 0, right: 414, bottom: 800, width: 414, height: 800},
+        {left: 190, top: 400, right: 214, bottom: 424, width: 24, height: 24}]) {
+        const env = closingEnvironment({autoDismiss: true});
+        googleCloseControl(env, 'simidCloseButtonButton', {getBoundingClientRect() { return rect; }});
+        assert.equal(env.sandbox.__adspeed.inspectClose('google'), null);
+    }
+});
+
+test('Google accessible Close controls remain supported with the SIMID adapter', () => {
+    const env = closingEnvironment({autoDismiss: true});
+    const close = control(env, 'Close');
+    const api = env.sandbox.__adspeed;
+    assert.equal(api.closeCompletedAd(api.inspectClose('google')), true);
+    assert.equal(close.events.length, 1);
+});
+
+for (const adapter of ['unity', 'google', 'mintegral']) {
+    test(`${adapter} Close rejects a hit on an ancestor outside the control`, () => {
+        const env = closingEnvironment({autoDismiss: true});
+        let close;
+        if (adapter === 'google') close = googleCloseControl(env, 'simidCloseButtonButton');
+        else if (adapter === 'mintegral') close = mintegralControl(env, 'm-playable-close');
+        else close = control(env, 'Close');
+        const parent = {tagName: 'DIV', parentElement: null, contains: node => node === close};
+        close.parentElement = parent;
+        env.document.elementFromPoint = () => parent;
+        assert.equal(env.sandbox.__adspeed.inspectClose(adapter), null);
+        assert.equal(close.events.length, 0);
+    });
+}

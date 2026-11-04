@@ -88,8 +88,8 @@ def warm_up(device, timeout=60):
     """SpringBoard can accept a launch before it is ready to host an app."""
     try:
         simctl("launch", device, "com.apple.Preferences", timeout=timeout, attempts=1)
-    except RuntimeError:
-        note({"phase": "warm up"})
+    except RuntimeError as error:
+        note({"phase": "warm up", "error": str(error)[-4096:]})
         return False
     simctl_quiet("terminate", device, "com.apple.Preferences", timeout=30)
     return True

@@ -14,6 +14,7 @@
 @property (nonatomic, weak) id creative;
 @property (nonatomic) BOOL ownerBound;
 @property (nonatomic) BOOL google;
+@property (nonatomic, copy) NSString *webAdapter;
 @property (nonatomic) BOOL requiresReward;
 @property (nonatomic) BOOL rewarded;
 @property (nonatomic) BOOL videoCompleted;
@@ -105,7 +106,7 @@ static void pruneSessions(void) {
     NSIndexSet *expired = [sessions indexesOfObjectsPassingTest:^BOOL(ASPRewardSession *session, NSUInteger index, BOOL *stop) {
         UIViewController *owner = session.owner;
         BOOL detached = session.ownerBound && (!owner || !owner.viewIfLoaded.window);
-        BOOL changedCreative = !session.google && (!session.creative ||
+        BOOL changedCreative = !session.google && !session.webAdapter && (!session.creative ||
             objectValue(owner, NSSelectorFromString(@"currentAd")) != session.creative ||
             maxCreative(session.ad) != session.creative);
         return !session.ad || session.expires <= now || session.invalidated ||
@@ -123,7 +124,7 @@ static void pruneSessions(void) {
 
 static BOOL sameOwner(ASPRewardSession *session, ASPAdSurface *surface) {
     if (surface.owner != session.owner || !ASPAdSurfaceUnchanged(surface)) return NO;
-    if (session.google) return YES;
+    if (session.google || session.webAdapter) return YES;
     id creative = session.creative;
     return creative && maxCreative(session.ad) == creative && surface.creative == creative;
 }
@@ -216,8 +217,8 @@ static void closeWebEndCard(ASPRewardSession *session, ASPAdSurface *surface) {
             session.webClosePending = NO;
         }
     });
-    [page callAsyncJavaScript:@"return window.__adspeed && window.__adspeed.inspectClose ? window.__adspeed.inspectClose() : null"
-        arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:^(id value, NSError *error) {
+    [page callAsyncJavaScript:@"return window.__adspeed && window.__adspeed.inspectClose ? window.__adspeed.inspectClose(adapter) : null"
+        arguments:@{@"adapter": session.google ? @"google" : (session.webAdapter ?: @"")} inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:^(id value, NSError *error) {
         if (session.webCloseGeneration != generation) return;
         if (error || ![value isKindOfClass:NSString.class] || ![value length] ||
             [value length] > 192 || !sessionVisible(session, page)) {
@@ -285,6 +286,86 @@ static UIView *findCloseControl(ASPAdSurface *surface) {
     return pending.count ? nil : selected;
 }
 
+
+static BOOL voidObjects(Method method, NSUInteger count);
+
+static UIControl *mintegralBridgeButton(UIView *close, ASPAdSurface *surface) {
+    if ([close isKindOfClass:UIControl.class] || !close.userInteractionEnabled ||
+        !ASPViewVisibleInSurface(close, surface.root)) return nil;
+    CGRect bounds = [close convertRect:close.bounds toView:surface.window];
+    CGRect window = surface.window.bounds;
+    if (bounds.size.width < 16 || bounds.size.height < 16 ||
+        bounds.size.width > 96 || bounds.size.height > 96 ||
+        CGRectGetMidY(bounds) > window.size.height * 0.25 ||
+        (CGRectGetMidX(bounds) > window.size.width * 0.25 &&
+         CGRectGetMidX(bounds) < window.size.width * 0.75)) return nil;
+    UIView *hit = [surface.window hitTest:CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds)) withEvent:nil];
+    if (hit != close && ![hit isDescendantOfView:close]) return nil;
+    NSUInteger taps = 0;
+    for (UIGestureRecognizer *gesture in close.gestureRecognizers) {
+        if (![gesture isKindOfClass:UITapGestureRecognizer.class] || !gesture.enabled) continue;
+        UITapGestureRecognizer *tap = (UITapGestureRecognizer *)gesture;
+        if (![tap isMemberOfClass:UITapGestureRecognizer.class] ||
+            tap.numberOfTapsRequired != 1 || tap.numberOfTouchesRequired != 1) return nil;
+        taps += 1;
+    }
+    if (taps != 1) return nil;
+    NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:close];
+    UIControl *selected = nil;
+    NSUInteger visited = 0;
+    while (pending.count && visited++ < 32) {
+        UIView *view = pending.lastObject;
+        [pending removeLastObject];
+        if ([view isKindOfClass:UIControl.class]) {
+            UIControl *control = (UIControl *)view;
+            if (control.allTargets.count != 1 || !control.enabled ||
+                !ASPViewVisibleInSurface(control, surface.root)) continue;
+            id target = control.allTargets.anyObject;
+            if (object_getClass(target) != NSClassFromString(@"MTGBaseCommonJS") ||
+                objectValue(target, NSSelectorFromString(@"getCloseButtonView")) != close) continue;
+            id parent = objectValue(target, NSSelectorFromString(@"superView"));
+            if (![parent isKindOfClass:UIView.class] || ![close isDescendantOfView:parent] ||
+                (parent != surface.root && ![(UIView *)parent isDescendantOfView:surface.root])) continue;
+            NSArray<NSString *> *actions = [control actionsForTarget:target forControlEvent:UIControlEventTouchUpInside];
+            if (actions.count != 1 || ![actions.firstObject isEqualToString:@"closeButtonTappedAction:"]) continue;
+            Method method = class_getInstanceMethod(object_getClass(target), NSSelectorFromString(actions.firstObject));
+            if (!voidObjects(method, 1)) continue;
+            if (selected && selected != control) return nil;
+            selected = control;
+        }
+        if ([view isKindOfClass:WKWebView.class]) continue;
+        if (pending.count + view.subviews.count > 32) return nil;
+        [pending addObjectsFromArray:view.subviews];
+    }
+    return pending.count ? nil : selected;
+}
+
+static UIView *findMintegralCloseControl(ASPAdSurface *surface) {
+    NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:surface.root];
+    UIView *selected = nil;
+    NSUInteger visited = 0;
+    while (pending.count && visited++ < 512) {
+        UIView *view = pending.lastObject;
+        [pending removeLastObject];
+        BOOL eligible = mintegralBridgeButton(view, surface) != nil;
+        if ([view isKindOfClass:UIControl.class]) {
+            UIControl *control = (UIControl *)view;
+            NSArray<NSString *> *actions = [control actionsForTarget:surface.owner forControlEvent:UIControlEventTouchUpInside];
+            eligible = control.allTargets.count == 1 && [control.allTargets containsObject:surface.owner] &&
+                actions.count == 1 && [actions.firstObject isEqualToString:@"closeButtonTappedAction:"] &&
+                exposedClose(control, surface);
+        }
+        if (eligible) {
+            if (selected && selected != view) return nil;
+            selected = view;
+        }
+        if ([view isKindOfClass:WKWebView.class]) continue;
+        if (pending.count + view.subviews.count > 512) return nil;
+        [pending addObjectsFromArray:view.subviews];
+    }
+    return pending.count ? nil : selected;
+}
+
 static NSString *closeActionKey(UIView *close, ASPAdSurface *surface) {
     NSMutableArray<NSString *> *parts = NSMutableArray.array;
     [parts addObject:[NSString stringWithFormat:@"%p", close.superview]];
@@ -310,20 +391,29 @@ static NSString *closeActionKey(UIView *close, ASPAdSurface *surface) {
 }
 
 static void closeIfEligible(ASPRewardSession *session) {
-    BOOL eligible = session.requiresReward ? session.rewarded : session.videoCompleted;
+    BOOL eligible = session.webAdapter || (session.requiresReward ? session.rewarded : session.videoCompleted);
     if (!gAutoDismiss || !eligible || session.closeRequested || session.invalidated || session.closeCount >= 8 ||
         session.expires <= NSProcessInfo.processInfo.systemUptime) return;
     for (ASPAdSurface *surface in ASPManualSkipAdSurfaces()) {
         if (!sameOwner(session, surface)) continue;
+        if (session.webAdapter && ![session.webAdapter isEqualToString:@"mintegral"]) {
+            closeWebEndCard(session, surface);
+            return;
+        }
         if (!session.requiresReward && !completedVideoSurfaceMatches(session, surface)) {
             session.invalidated = YES;
             return;
         }
-        if (session.lastCloseView && !exposedClose(session.lastCloseView, surface)) {
+        BOOL previousExposed = exposedClose(session.lastCloseView, surface);
+        if (!previousExposed && [session.webAdapter isEqualToString:@"mintegral"]) {
+            previousExposed = mintegralBridgeButton(session.lastCloseView, surface) != nil;
+        }
+        if (session.lastCloseView && !previousExposed) {
             [session.closeActions removeObjectForKey:session.lastCloseView];
             session.lastCloseView = nil;
         }
-        UIView *close = findCloseControl(surface);
+        UIView *close = [session.webAdapter isEqualToString:@"mintegral"]
+            ? findMintegralCloseControl(surface) : findCloseControl(surface);
         if (!close) {
             closeWebEndCard(session, surface);
             return;
@@ -346,6 +436,9 @@ static void closeIfEligible(ASPRewardSession *session) {
         @try {
             if ([close isKindOfClass:UIControl.class]) {
                 [(UIControl *)close sendActionsForControlEvents:UIControlEventTouchUpInside];
+            } else if ([session.webAdapter isEqualToString:@"mintegral"]) {
+                UIControl *button = mintegralBridgeButton(close, surface);
+                if (button) [button sendActionsForControlEvents:UIControlEventTouchUpInside];
             } else {
                 ASPCloseTapRegistration *registration = eligibleCloseTap(close, surface.owner);
                 if (registration) ((void (*)(id, SEL))objc_msgSend)(registration.target, registration.action);
@@ -658,6 +751,27 @@ void ASPAdCompletionInstallHooks(void) {
 void ASPAdCompletionTrackController(UIViewController *controller) {
     if (![NSThread isMainThread]) return;
     pruneSessions();
+    Class unity = NSClassFromString(@"_TtC8UnityAds30WebViewContainerViewController");
+    Class mintegral = NSClassFromString(@"MTGVideoBaseViewController");
+    NSString *adapter = nil;
+    if (unity && object_getClass(controller) == unity) adapter = @"unity";
+    if (mintegral && object_getClass(controller) == mintegral) adapter = @"mintegral";
+    if (gAutoDismiss && adapter && controller.viewIfLoaded.window) {
+        BOOL tracked = NO;
+        for (ASPRewardSession *session in sessions) {
+            if (session.webAdapter && session.owner == controller) tracked = YES;
+        }
+        if (!tracked) {
+            ASPRewardSession *session = [ASPRewardSession new];
+            session.ad = controller;
+            session.owner = controller;
+            session.ownerBound = YES;
+            session.webAdapter = adapter;
+            session.requiresReward = YES;
+            session.expires = NSProcessInfo.processInfo.systemUptime + 600;
+            [sessions addObject:session];
+        }
+    }
     BOOL google = namedKind(controller, @"GADFullScreenAdViewController");
     for (ASPRewardSession *session in sessions.copy) {
         if (google && session.google && !session.owner && belongsToPresenter(controller, session.presenter)) {

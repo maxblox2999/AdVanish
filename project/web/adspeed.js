@@ -184,7 +184,7 @@
             && video.readyState >= 2 && visible(video);
     }
 
-    function exposed(node) {
+    function exposed(node, allowAncestor) {
         if (typeof document.elementFromPoint !== 'function') return false;
         var rect = node.getBoundingClientRect();
         var left = Math.max(0, rect.left);
@@ -198,7 +198,7 @@
                     var hit = document.elementFromPoint(left + (right - left) * x / 4,
                         top + (bottom - top) * y / 4);
                     if (hit === node || (hit && typeof node.contains === 'function' && node.contains(hit))
-                        || (hit && typeof hit.contains === 'function' && hit.contains(node))) return true;
+                        || (allowAncestor !== false && hit && typeof hit.contains === 'function' && hit.contains(node))) return true;
                 }
             }
         } catch (error) {
@@ -1176,17 +1176,45 @@
     var closeRequests = 0;
     var closeSequence = 0;
 
-    function closeRole(node) {
+    function closeRole(node, adapter) {
+        if (adapter === 'mintegral') return String(node.getAttribute && node.getAttribute('id') || '');
+        if (adapter === 'google' && String(node.tagName).toLowerCase() === 'div') {
+            var roles = String(node.getAttribute('class') || '').split(/\s+/).filter(function (value) {
+                return value === 'simidCloseButtonButton' || value === 'simidRewardGrantedCloseButton';
+            });
+            if (roles.length === 1) return roles[0];
+        }
         return String(node.getAttribute && node.getAttribute('aria-label') || node.textContent || '')
             .trim().toLowerCase().replace(/\s+/g, ' ');
     }
 
-    function closeControl(node) {
+    function closeControl(node, adapter) {
         if (!node || node.disabled || (node.getAttribute && node.getAttribute('aria-disabled') === 'true')) return false;
         for (var parent = node, depth = 0; parent && depth < 16; parent = parent.parentElement, depth += 1) {
             if (String(parent.tagName).toLowerCase() === 'a') return false;
         }
-        var label = closeRole(node);
+        var label = closeRole(node, adapter);
+        if (adapter === 'mintegral') {
+            if (String(node.tagName).toLowerCase() !== 'div' ||
+                (label !== 'm-playable-skip' && label !== 'm-playable-close')) return false;
+            var classes = String(node.getAttribute('class') || '').split(/\s+/);
+            if (classes.indexOf(label) < 0) return false;
+            var bounds = node.getBoundingClientRect();
+            if (bounds.width < 16 || bounds.height < 16 || bounds.width > 96 || bounds.height > 96 ||
+                bounds.top + bounds.height / 2 > window.innerHeight * 0.25 ||
+                (bounds.left + bounds.width / 2 > window.innerWidth * 0.25 &&
+                 bounds.left + bounds.width / 2 < window.innerWidth * 0.75)) return false;
+            if (window.getComputedStyle(node).pointerEvents === 'none') return false;
+            return visible(node) && exposed(node, false);
+        }
+        if (adapter === 'google' && /^(?:simidCloseButtonButton|simidRewardGrantedCloseButton)$/.test(label)) {
+            var box = node.getBoundingClientRect();
+            if (box.width < 16 || box.height < 16 || box.width > 96 || box.height > 96 ||
+                box.top + box.height / 2 > window.innerHeight * 0.25 ||
+                (box.left + box.width / 2 > window.innerWidth * 0.25 &&
+                 box.left + box.width / 2 < window.innerWidth * 0.75)) return false;
+            return window.getComputedStyle(node).pointerEvents !== 'none' && visible(node) && exposed(node, false);
+        }
         if (!/^(?:close(?: ad)?|dismiss(?: ad)?|x|×|✕|✖|fermer|cerrar|schließen|fechar|chiudi|閉じる|닫기|关闭|關閉)$/.test(label)) return false;
         if (/^(?:x|×|✕|✖)$/.test(label)) {
             var rect = node.getBoundingClientRect();
@@ -1194,24 +1222,28 @@
                 (rect.left + rect.width / 2 > window.innerWidth * 0.25 &&
                  rect.left + rect.width / 2 < window.innerWidth * 0.75)) return false;
         }
-        return visible(node) && exposed(node);
+        return visible(node) && exposed(node, false);
     }
 
-    function inspectClose() {
+    function inspectClose(adapter) {
         closeSnapshot = null;
+        if (adapter && adapter !== 'unity' && adapter !== 'mintegral' && adapter !== 'google') return null;
         if (!automatic || !autoDismiss || !recognizedAd || pageHidden() || closeRequests >= 8) return null;
-        var nodes = document.querySelectorAll('button,[role="button"],[aria-label]');
+        var selector = 'button,[role="button"],[aria-label]';
+        if (adapter === 'mintegral') selector = '[id="m-playable-skip"],[id="m-playable-close"]';
+        if (adapter === 'google') selector += ',.simidCloseButtonButton,.simidRewardGrantedCloseButton';
+        var nodes = document.querySelectorAll(selector);
         var selected = null;
         for (var index = 0; index < Math.min(nodes.length, 128); index += 1) {
             var node = nodes[index];
             var completed = completedCloseNodes.get(node);
-            if ((completed && completed.has(closeRole(node))) || !closeControl(node)) continue;
+            if ((completed && completed.has(closeRole(node, adapter))) || !closeControl(node, adapter)) continue;
             if (selected) return null;
             selected = node;
         }
         if (!selected) return null;
         var token = String(dateNow()) + ':' + String(++closeSequence);
-        closeSnapshot = {node: selected, role: closeRole(selected), token: token,
+        closeSnapshot = {node: selected, role: closeRole(selected, adapter), adapter: adapter, token: token,
             context: contextGeneration, expires: dateNow() + 2000};
         return token;
     }
@@ -1221,8 +1253,8 @@
         closeSnapshot = null;
         if (!snapshot || snapshot.token !== token || snapshot.expires < dateNow() ||
             snapshot.context !== contextGeneration || !automatic || !autoDismiss || !recognizedAd ||
-            pageHidden() || closeRequests >= 8 || !closeControl(snapshot.node) ||
-            snapshot.role !== closeRole(snapshot.node)) return false;
+            pageHidden() || closeRequests >= 8 || !closeControl(snapshot.node, snapshot.adapter) ||
+            snapshot.role !== closeRole(snapshot.node, snapshot.adapter)) return false;
         var completed = completedCloseNodes.get(snapshot.node);
         if (!completed) {
             completed = new Set();

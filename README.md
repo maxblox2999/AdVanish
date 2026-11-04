@@ -63,4 +63,4 @@ Source code, tests, and build tools are located in [`project/`](project/).
 > [!CAUTION]
 > The owner is NOT responsible for how AdVanish is used and it is only meant to be used in apps you are authorized to use it in to fix their security.
 
-[maxblox2999](https://github.com/maxblox2999)  [Changes](project/docs/AUDIT.md)  [License](LICENSE)
+[maxblox2999](https://github.com/maxblox2999)  [Changes](project/docs/CHANGES.md)  [License](LICENSE)

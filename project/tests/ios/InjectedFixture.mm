@@ -362,7 +362,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     id options = [runtime valueForKey:@"options"];
     BOOL redirects = [[options valueForKey:@"redirects"] boolValue];
     [options setValue:@NO forKey:@"redirects"];
-    for (NSString *name in @[@"PAGRewardedVideoDisplayViewController", @"PAGRewardedVideoWebViewController", @"PAGNativeExpressRewardedVideoAdDisplayViewController", @"PAGRewardedInterstitialRootViewController", @"PAGAppOpenAdViewController", @"PAGPlayableLandingPageViewController", @"POBModalViewController", @"POBPlayerViewController", @"CHBAdContainerViewController", @"CHBAdWebViewController", @"HYPROfferFullscreenAdViewController"]) {
+    for (NSString *name in @[@"PAGRewardedVideoDisplayViewController", @"PAGRewardedVideoWebViewController", @"PAGNativeExpressRewardedVideoAdDisplayViewController", @"PAGRewardedInterstitialRootViewController", @"PAGAppOpenAdViewController", @"PAGPlayableLandingPageViewController", @"POBModalViewController", @"POBPlayerViewController", @"CHBAdContainerViewController", @"CHBAdWebViewController", @"HYPROfferFullscreenAdViewController", @"_TtC9MolocoSDK26FullscreenAdViewController"]) {
         Class sdkClass = NSClassFromString(name);
         if (!sdkClass) {
             sdkClass = objc_allocateClassPair(UIViewController.class, name.UTF8String, 0);
@@ -575,7 +575,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
         "const schedule=typeof fixtureNativeTimeout==='function'?fixtureNativeTimeout:setTimeout.bind(window);"
         "const started=now();"
         "function poll() {"
-        "try { if (window.fixture&&fixture.complete) { resolve({complete:fixture.complete,movements:fixture.movements,"
+        "try { if (window.fixture&&fixture.complete&&window.__adspeed&&__adspeed.stats.polls>0) { resolve({complete:fixture.complete,movements:fixture.movements,"
         "rewardCalls:fixture.rewardCalls,redirectCalls:fixture.redirectCalls,closes:fixture.closes,"
         "elapsed:fixture.finishedAt-fixture.startedAt,stats:window.__adspeed?{...window.__adspeed.stats}:null,diagnostics:snapshot()}); return; }"
         "if (now()-started>15000) {resolve({runtimeError:'WebKit playable timed out',diagnostics:snapshot()});return;}"
