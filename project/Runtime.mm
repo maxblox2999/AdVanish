@@ -234,6 +234,7 @@ void AVNDeviceDiagnosticLog(NSString *event, NSDictionary *fields) {
 - (void)observe:(UIViewController *)controller {
     if (!self.options.enabled) return;
     if ([controller.viewIfLoaded.window isKindOfClass:NSClassFromString(@"ASPSkipWindow")]) return;
+    AVN_DEVICE_LOG(@"controller-observed", @{@"class": AVNDeviceClassName(controller)});
     ASPManualSkipTrackController(controller);
     ASPAdCompletionTrackController(controller);
     [self refresh];
