@@ -149,7 +149,7 @@ static BOOL boundedInteger(id value, NSUInteger maximum) {
     button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     button.layer.cornerRadius = 18;
     button.accessibilityLabel = @"Fast-forward ad";
-    button.accessibilityHint = @"Requests faster video or supported ad timing. The app controls closing and rewards. Drag to reposition.";
+    button.accessibilityHint = @"Speed up this ad. Drag to move the button.";
     [button addTarget:self action:@selector(skipCurrentAd) forControlEvents:UIControlEventTouchUpInside];
     [button addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(moveButton:)]];
     [self.view addSubview:button];

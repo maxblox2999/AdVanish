@@ -13,10 +13,7 @@ static BOOL kindOfNamedClass(id object, NSString *name) {
 }
 
 static BOOL adController(UIViewController *controller) {
-    // Resolve supported owners at use time so a framework loaded after the tweak
-    // constructor is covered as well. Keep the known SDK controllers and also
-    // use the original tweak's prefix/suffix heuristic, so renamed or newer SDK
-    // controllers are recognized instead of being skipped.
+    // Resolve late-loaded SDKs at use time; keep known owners and prefix/suffix detection.
     for (NSString *name in @[@"GADFullScreenAdViewController", @"GADInterstitialAdViewController",
                             @"GADAppOpenAdViewController", @"MAFullscreenAdViewController",
                             @"ALBaseVideoViewController", @"ALInterstitialAdViewController",
@@ -41,7 +38,8 @@ static BOOL adController(UIViewController *controller) {
                             @"POBPlayerViewController",
                             @"CHBAdContainerViewController",
                             @"CHBAdWebViewController",
-                            @"HYPROfferFullscreenAdViewController"]) {
+                            @"HYPROfferFullscreenAdViewController",
+                            @"_TtC9MolocoSDK26FullscreenAdViewController"]) {
         if (kindOfNamedClass(controller, name)) return YES;
     }
     NSString *name = NSStringFromClass(controller.class) ?: @"";
@@ -122,7 +120,6 @@ static id objectGetter(id owner, NSString *name) {
 
 static AVPlayer *ownedAppLovinPlayer(UIViewController *owner) {
     if (!kindOfNamedClass(objectGetter(owner, @"currentAd"), @"ALAd")) return nil;
-    // Resolve the owned player through videoPlayer -> videoView -> player.
     id videoView = objectGetter(objectGetter(owner, @"videoPlayer"), @"videoView");
     if (![videoView isKindOfClass:[UIView class]] ||
         !ASPViewVisibleInSurface(videoView, owner.viewIfLoaded)) return nil;
@@ -177,8 +174,7 @@ static void collectLayers(CALayer *layer, CALayer *root, NSMutableOrderedSet<AVP
         if (player && layerExposed(layer, window)) [players addObject:player];
     }
     for (CALayer *child in layer.sublayers.reverseObjectEnumerator) {
-        // UIView-backed sublayers are visited through their view, which applies
-        // ancestor clipping and stops at WKWebView's process boundary.
+        // View traversal applies clipping and stops at the WKWebView process boundary.
         if ([child.delegate isKindOfClass:[UIView class]]) continue;
         collectLayers(child, root, players, remaining);
     }
@@ -200,8 +196,7 @@ static void collectViews(UIView *view, UIView *root, NSMutableArray<WKWebView *>
 }
 
 static BOOL blocksLowerWindow(UIWindow *window) {
-    // A pass-through overlay must not hide an ad window underneath. An opaque
-    // interactive window without media must not expose a lower player's action.
+    // Pass-through overlays expose lower windows; opaque content blocks them.
     for (NSUInteger x = 1; x <= 3; x++) {
         for (NSUInteger y = 1; y <= 3; y++) {
             CGPoint point = CGPointMake(CGRectGetMinX(window.bounds) + window.bounds.size.width * x / 4,

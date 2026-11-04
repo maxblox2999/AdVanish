@@ -142,12 +142,12 @@ static id AVNSettingsObject(id receiver, NSString *name) {
     if (_specifiers) return _specifiers;
     NSMutableArray *rows = NSMutableArray.array;
     if (!self.avnApplicationIdentifier.length) {
-        [rows addObject:[self section:@"AdVanish" note:@"80x speed applies inside every app unless you disable it below."]];
+        [rows addObject:[self section:@"AdVanish" note:@"Enabled apps use up to 80x speed."]];
         [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:YES]];
         NSArray *applications = self.avnInstalledApplications;
         for (NSNumber *enabled in @[@YES, @NO]) {
             [rows addObject:[self section:enabled.boolValue ? @"Enabled apps" : @"Not enabled"
-                note:enabled.boolValue ? @"80x speed applies inside enabled apps." : nil]];
+                note:nil]];
             for (NSDictionary *app in applications) {
                 NSString *key = [@"enabled-" stringByAppendingString:app[@"identifier"]];
                 id stored = self.database[key];
@@ -164,18 +164,18 @@ static id AVNSettingsObject(id receiver, NSString *name) {
         BOOL defaultAutomatic = ![self.database[[self storageKey:@"ManualSkip"]] boolValue];
         [rows addObject:[self section:@"This app" note:@"Reopen the app after changing settings."]];
         [rows addObject:[self toggle:@"Enabled" feature:@"Enabled" initial:YES]];
-        [rows addObject:[self section:@"Ad playback" note:@"Automatic ads hides the button. Turn it off to use manual fast-forward."]];
+        [rows addObject:[self section:@"Ad playback" note:@"Turn off Automatic ads to use the button."]];
         [rows addObject:[self toggle:@"Automatic ads" feature:@"AutomaticAds" initial:defaultAutomatic]];
         [rows addObject:[self toggle:@"Show button in manual mode" feature:@"ManualSkip" initial:YES]];
-        [rows addObject:[self section:@"Banners" note:@"Blocks Google ad banners. Reopen the app after changing this setting."]];
+        [rows addObject:[self section:@"Banners" note:@"Google AdMob and Ad Manager banners only."]];
         [rows addObject:[self toggle:@"Block ad banners" feature:@"BlockBanners" initial:NO]];
-        [rows addObject:[self section:@"Video" note:@"Speeds AVPlayer playback throughout this enabled app, including non-ad video."]];
+        [rows addObject:[self section:@"Video" note:@"Includes non-ad video in this app."]];
         [rows addObject:[self toggle:@"Video speed" feature:@"SpeedUpVideo" initial:YES]];
         [rows addObject:[self toggle:@"Force inline video" feature:@"ForceInline" initial:NO]];
-        [rows addObject:[self section:@"Ad countdowns" note:@"Speeds native and web ad countdowns throughout this enabled app. Server reward checks are unchanged."]];
+        [rows addObject:[self section:@"Ad countdowns" note:@"Speeds native and web countdowns. Server checks still apply."]];
         [rows addObject:[self toggle:@"Countdowns" feature:@"CompressTimers" initial:YES]];
         [rows addObject:[self toggle:@"Gameplay clock" feature:@"AccelerateClock" initial:YES]];
-        [rows addObject:[self section:@"Completion" note:@"Automatic mode assists supported playables. Closing waits for SDK eligibility; rewards remain controlled by the app."]];
+        [rows addObject:[self section:@"Completion" note:@"Uses supported SDK controls. The game handles rewards."]];
         [rows addObject:[self toggle:@"Playable assistance" feature:@"AutoInteract" initial:YES]];
         [rows addObject:[self toggle:@"Close completed ads" feature:@"AutoDismiss" initial:YES]];
         [rows addObject:[self toggle:@"Block ad redirects" feature:@"BlockRedirects" initial:YES]];

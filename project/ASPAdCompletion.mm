@@ -2,7 +2,6 @@
 
 #import "ASPAdCompletion.h"
 #import "ASPManualSkip.h"
-#import "AVNDeviceDiagnostics.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <string.h>
@@ -80,35 +79,17 @@ static BOOL appLovinOwner(id owner) {
 
 static id maxCreative(id ad) {
     if (namedKind(ad, @"ALAd")) return ad;
-    if (!namedKind(ad, @"ALMediatedAd") || !namedKind(ad, @"MAAd")) {
-        AVN_DEVICE_LOG(@"max-creative", @{@"class": AVNDeviceClassName(ad), @"reason": @"unsupported-ad-class"});
-        return nil;
-    }
+    if (!namedKind(ad, @"ALMediatedAd") || !namedKind(ad, @"MAAd")) return nil;
     id wrapper = objectValue(ad, NSSelectorFromString(@"adapterWrapper"));
     if (!namedKind(wrapper, @"ALMediationAdapterWrapper") ||
-        objectValue(wrapper, NSSelectorFromString(@"ad")) != ad) {
-        AVN_DEVICE_LOG(@"max-creative", @{@"class": AVNDeviceClassName(ad),
-            @"wrapper": AVNDeviceClassName(wrapper), @"reason": @"wrapper-ownership"});
-        return nil;
-    }
+        objectValue(wrapper, NSSelectorFromString(@"ad")) != ad) return nil;
     id adapter = objectValue(wrapper, NSSelectorFromString(@"adapter"));
-    if (!namedKind(adapter, @"ALAppLovinMediationAdapter")) {
-        AVN_DEVICE_LOG(@"max-creative", @{@"class": AVNDeviceClassName(ad),
-            @"wrapper": AVNDeviceClassName(wrapper), @"adapter": AVNDeviceClassName(adapter),
-            @"reason": @"unsupported-mediation-adapter"});
-        return nil;
-    }
+    if (!namedKind(adapter, @"ALAppLovinMediationAdapter")) return nil;
     id creative = objectValue(adapter, NSSelectorFromString(@"loadedRewardedAd"));
-    AVN_DEVICE_LOG(@"max-creative", @{@"class": AVNDeviceClassName(ad),
-        @"wrapper": AVNDeviceClassName(wrapper), @"adapter": AVNDeviceClassName(adapter),
-        @"creative": AVNDeviceClassName(creative), @"reason": namedKind(creative, @"ALAd") ? @"owned" : @"unsupported-creative"});
     return namedKind(creative, @"ALAd") ? creative : nil;
 }
 
 static void retireSession(ASPRewardSession *session) {
-    AVN_DEVICE_LOG(@"session-retired", @{@"class": AVNDeviceClassName(session.ad),
-        @"owner": AVNDeviceClassName(session.owner), @"rewarded": @(session.rewarded),
-        @"closes": @(session.closeCount)});
     session.invalidated = YES;
     session.closeActions = nil;
     session.webClosePending = NO;
@@ -225,12 +206,7 @@ static BOOL sessionVisible(ASPRewardSession *session, WKWebView *page) {
 }
 
 static void closeWebEndCard(ASPRewardSession *session, ASPAdSurface *surface) {
-    if (session.webClosePending || surface.webViews.count != 1 || session.closeCount >= 8) {
-        AVN_DEVICE_LOG(@"web-close", @{@"class": AVNDeviceClassName(surface.owner),
-            @"web": @(surface.webViews.count), @"pending": @(session.webClosePending),
-            @"closes": @(session.closeCount), @"reason": @"request-ineligible"});
-        return;
-    }
+    if (session.webClosePending || surface.webViews.count != 1 || session.closeCount >= 8) return;
     WKWebView *page = surface.webViews.firstObject;
     if (!sessionVisible(session, page)) return;
     session.webClosePending = YES;
@@ -244,9 +220,6 @@ static void closeWebEndCard(ASPRewardSession *session, ASPAdSurface *surface) {
     [page callAsyncJavaScript:@"return window.__adspeed && window.__adspeed.inspectClose ? window.__adspeed.inspectClose(adapter) : null"
         arguments:@{@"adapter": session.google ? @"google" : (session.webAdapter ?: @"")} inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:^(id value, NSError *error) {
         if (session.webCloseGeneration != generation) return;
-        AVN_DEVICE_LOG(@"web-close-inspect", @{@"class": AVNDeviceClassName(session.owner),
-            @"error": @(error.code), @"valueClass": AVNDeviceClassName(value),
-            @"tokenReturned": @([value isKindOfClass:NSString.class] && [value length] > 0)});
         if (error || ![value isKindOfClass:NSString.class] || ![value length] ||
             [value length] > 192 || !sessionVisible(session, page)) {
             session.webClosePending = NO;
@@ -257,8 +230,6 @@ static void closeWebEndCard(ASPRewardSession *session, ASPAdSurface *surface) {
             completionHandler:^(id handled, NSError *failure) {
             if (session.webCloseGeneration != generation) return;
             session.webClosePending = NO;
-            AVN_DEVICE_LOG(@"web-close-result", @{@"class": AVNDeviceClassName(session.owner),
-                @"error": @(failure.code), @"handled": @([handled isEqual:@YES])});
             if (!failure && [handled isEqual:@YES]) {
                 session.closeCount += 1;
                 scheduleNextClose(session);
@@ -294,32 +265,10 @@ static BOOL closeLabel(UIView *view) {
         @"fermer", @"cerrar", @"schließen", @"fechar", @"chiudi", @"閉じる", @"닫기", @"关闭", @"關閉"] containsObject:label ?: @""];
 }
 
-
-#if defined(AVN_DEVICE_DIAGNOSTICS) && AVN_DEVICE_DIAGNOSTICS
-static NSString *diagnosticCloseRole(UIView *view) {
-    if (!view) return @"missing";
-    if (!closeLabel(view)) return @"unrecognized";
-    NSString *role = view.accessibilityLabel;
-    if (!role.length && [view isKindOfClass:UIButton.class]) role = [(UIButton *)view currentTitle];
-    return [[role stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString] ?: @"missing";
-}
-#endif
-
 static UIView *findCloseControl(ASPAdSurface *surface) {
     for (NSString *name in closeGetterNames()) {
         id value = objectValue(surface.owner, NSSelectorFromString(name));
-        if ([value isKindOfClass:UIView.class]) {
-            BOOL exposed = exposedClose(value, surface);
-            AVN_DEVICE_LOG(@"native-close-getter", @{@"class": AVNDeviceClassName(surface.owner),
-                @"selector": name, @"control": AVNDeviceClassName(value),
-                @"role": diagnosticCloseRole(value), @"exposed": @(exposed),
-                @"controlEnabled": @([value isKindOfClass:UIControl.class] && [(UIControl *)value isEnabled]),
-                @"touchUpInside": @([value isKindOfClass:UIControl.class] &&
-                    ([(UIControl *)value allControlEvents] & UIControlEventTouchUpInside) != 0),
-                @"targets": @([value isKindOfClass:UIControl.class] ? [(UIControl *)value allTargets].count : 0),
-                @"tapRegistered": @(eligibleCloseTap(value, surface.owner) != nil)});
-            if (exposed) return value;
-        }
+        if ([value isKindOfClass:UIView.class] && exposedClose(value, surface)) return value;
     }
     NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:surface.root];
     UIView *selected = nil;
@@ -444,21 +393,9 @@ static NSString *closeActionKey(UIView *close, ASPAdSurface *surface) {
 static void closeIfEligible(ASPRewardSession *session) {
     BOOL eligible = session.webAdapter || (session.requiresReward ? session.rewarded : session.videoCompleted);
     if (!gAutoDismiss || !eligible || session.closeRequested || session.invalidated || session.closeCount >= 8 ||
-        session.expires <= NSProcessInfo.processInfo.systemUptime) {
-        AVN_DEVICE_LOG(@"close-eligibility", @{@"class": AVNDeviceClassName(session.ad),
-            @"owner": AVNDeviceClassName(session.owner), @"automaticDismissal": @(gAutoDismiss),
-            @"requiresReward": @(session.requiresReward), @"rewarded": @(session.rewarded),
-            @"videoCompleted": @(session.videoCompleted), @"invalidated": @(session.invalidated),
-            @"requested": @(session.closeRequested), @"closes": @(session.closeCount),
-            @"expired": @(session.expires <= NSProcessInfo.processInfo.systemUptime)});
-        return;
-    }
+        session.expires <= NSProcessInfo.processInfo.systemUptime) return;
     for (ASPAdSurface *surface in ASPManualSkipAdSurfaces()) {
-        if (!sameOwner(session, surface)) {
-            AVN_DEVICE_LOG(@"close-owner-mismatch", @{@"class": AVNDeviceClassName(session.ad),
-                @"owner": AVNDeviceClassName(session.owner), @"surface": AVNDeviceClassName(surface.owner)});
-            continue;
-        }
+        if (!sameOwner(session, surface)) continue;
         if (session.webAdapter && ![session.webAdapter isEqualToString:@"mintegral"]) {
             closeWebEndCard(session, surface);
             return;
@@ -467,15 +404,17 @@ static void closeIfEligible(ASPRewardSession *session) {
             session.invalidated = YES;
             return;
         }
-        if (session.lastCloseView && !exposedClose(session.lastCloseView, surface)) {
+        BOOL previousExposed = exposedClose(session.lastCloseView, surface);
+        if (!previousExposed && [session.webAdapter isEqualToString:@"mintegral"]) {
+            previousExposed = mintegralBridgeButton(session.lastCloseView, surface) != nil;
+        }
+        if (session.lastCloseView && !previousExposed) {
             [session.closeActions removeObjectForKey:session.lastCloseView];
             session.lastCloseView = nil;
         }
         UIView *close = [session.webAdapter isEqualToString:@"mintegral"]
             ? findMintegralCloseControl(surface) : findCloseControl(surface);
         if (!close) {
-            AVN_DEVICE_LOG(@"native-close-missing", @{@"class": AVNDeviceClassName(surface.owner),
-                @"web": @(surface.webViews.count), @"players": @(surface.players.count)});
             closeWebEndCard(session, surface);
             return;
         }
@@ -483,8 +422,6 @@ static void closeIfEligible(ASPRewardSession *session) {
         NSString *key = closeActionKey(close, surface);
         NSMutableSet<NSString *> *actions = [session.closeActions objectForKey:close];
         if ([actions containsObject:key] || (actions.count && !closeLabel(close))) {
-            AVN_DEVICE_LOG(@"native-close-duplicate", @{@"class": AVNDeviceClassName(surface.owner),
-                @"control": AVNDeviceClassName(close), @"role": diagnosticCloseRole(close)});
             closeWebEndCard(session, surface);
             return;
         }
@@ -496,16 +433,11 @@ static void closeIfEligible(ASPRewardSession *session) {
         session.closeCount += 1;
         session.lastCloseView = close;
         session.closeRequested = YES;
-        AVN_DEVICE_LOG(@"native-close-action", @{@"class": AVNDeviceClassName(surface.owner),
-            @"control": AVNDeviceClassName(close), @"role": diagnosticCloseRole(close),
-            @"closes": @(session.closeCount)});
         @try {
             if ([close isKindOfClass:UIControl.class]) {
                 [(UIControl *)close sendActionsForControlEvents:UIControlEventTouchUpInside];
             } else if ([session.webAdapter isEqualToString:@"mintegral"]) {
                 UIControl *button = mintegralBridgeButton(close, surface);
-                AVN_DEVICE_LOG(@"mintegral-wrapper-close", @{@"class": AVNDeviceClassName(surface.owner),
-                    @"bound": @(button != nil)});
                 if (button) [button sendActionsForControlEvents:UIControlEventTouchUpInside];
             } else {
                 ASPCloseTapRegistration *registration = eligibleCloseTap(close, surface.owner);
@@ -520,9 +452,6 @@ static void closeIfEligible(ASPRewardSession *session) {
 }
 
 static void observeReward(ASPRewardSession *session) {
-    AVN_DEVICE_LOG(@"reward-observed", @{@"class": AVNDeviceClassName(session.ad),
-        @"owner": AVNDeviceClassName(session.owner), @"tracked": @(session && [sessions containsObject:session]),
-        @"expired": @(session.expires <= NSProcessInfo.processInfo.systemUptime)});
     if (!session || ![sessions containsObject:session] || session.expires <= NSProcessInfo.processInfo.systemUptime) return;
     session.rewarded = YES;
     closeIfEligible(session);
@@ -539,12 +468,7 @@ static ASPRewardSession *googleSession(id ad, UIViewController *presenter, BOOL 
             presenter = front;
         }
     }
-    if (!presenter) {
-        AVN_DEVICE_LOG(@"google-session", @{@"class": AVNDeviceClassName(ad), @"reason": @"no-presenter"});
-        return nil;
-    }
-    AVN_DEVICE_LOG(@"google-session", @{@"class": AVNDeviceClassName(ad),
-        @"presenter": AVNDeviceClassName(presenter), @"requiresReward": @(requiresReward), @"reason": @"created"});
+    if (!presenter) return nil;
     for (ASPRewardSession *previous in sessions.copy) {
         if (previous.google && previous.presenter == presenter) {
             retireSession(previous);
@@ -564,28 +488,16 @@ static ASPRewardSession *googleSession(id ad, UIViewController *presenter, BOOL 
 static void observeMAXDisplay(id ad) {
     pruneSessions();
     id creative = maxCreative(ad);
-    if (!creative) {
-        AVN_DEVICE_LOG(@"max-display", @{@"class": AVNDeviceClassName(ad), @"reason": @"no-owned-creative"});
-        return;
-    }
+    if (!creative) return;
     NSArray<ASPAdSurface *> *surfaces = ASPManualSkipAdSurfaces();
     // A mediated ad without a concrete owned AppLovin surface is unsupported here.
     ASPAdSurface *owned = nil;
     for (ASPAdSurface *surface in surfaces) {
         if (!appLovinOwner(surface.owner) || surface.creative != creative) continue;
-        if (owned) {
-            AVN_DEVICE_LOG(@"max-display", @{@"class": AVNDeviceClassName(ad), @"reason": @"ambiguous-owner"});
-            return;
-        }
+        if (owned) return;
         owned = surface;
     }
-    if (!owned) {
-        AVN_DEVICE_LOG(@"max-display", @{@"class": AVNDeviceClassName(ad),
-            @"creative": AVNDeviceClassName(creative), @"surfaces": @(surfaces.count), @"reason": @"no-matching-owner"});
-        return;
-    }
-    AVN_DEVICE_LOG(@"max-display", @{@"class": AVNDeviceClassName(ad),
-        @"creative": AVNDeviceClassName(creative), @"owner": AVNDeviceClassName(owned.owner), @"reason": @"created"});
+    if (!owned) return;
     for (ASPRewardSession *existing in sessions.copy) {
         if (existing.ad == ad && sameOwner(existing, owned)) return;
         if (!existing.google && existing.owner == owned.owner) {
@@ -605,7 +517,6 @@ static void observeMAXDisplay(id ad) {
 
 static void observeMAXReward(id ad) {
     pruneSessions();
-    AVN_DEVICE_LOG(@"max-reward", @{@"class": AVNDeviceClassName(ad), @"sessions": @(sessions.count)});
     for (ASPRewardSession *session in sessions.copy) {
         if (!session.google && session.ad == ad) observeReward(session);
     }
@@ -684,8 +595,6 @@ static BOOL replace(Class cls, SEL selector, IMP replacement, const char *encodi
         method_setImplementation(class_getInstanceMethod(cls, selector), replacement);
     }
     [installed addObject:key];
-    AVN_DEVICE_LOG(@"hook-installed", @{@"class": NSStringFromClass(cls),
-        @"selector": NSStringFromSelector(selector)});
     return YES;
 }
 
@@ -693,8 +602,6 @@ static void installCloseTapRegistration(void) {
     Class cls = UIView.class;
     SEL selector = NSSelectorFromString(@"al_addTapHandler:toTarget:");
     Method method = class_getInstanceMethod(cls, selector);
-    AVN_DEVICE_LOG(@"hook-signature", @{@"class": NSStringFromClass(cls),
-        @"selector": NSStringFromSelector(selector), @"encoding": method ? @(method_getTypeEncoding(method)) : @"missing"});
     if (!method || method_getNumberOfArguments(method) != 4) return;
     char type[16] = {};
     method_getReturnType(method, type, sizeof(type));
@@ -763,30 +670,20 @@ static void installTapMutationHooks(void) {
 static void hookMAXDelegate(Class cls) {
     SEL display = NSSelectorFromString(@"didDisplayAd:");
     Method method = class_getInstanceMethod(cls, display);
-    AVN_DEVICE_LOG(@"hook-signature", @{@"class": NSStringFromClass(cls),
-        @"selector": NSStringFromSelector(display), @"valid": @(voidObjects(method, 1)),
-        @"encoding": method ? @(method_getTypeEncoding(method)) : @"missing"});
     if (voidObjects(method, 1)) {
         IMP original = method_getImplementation(method);
         IMP wrapper = imp_implementationWithBlock(^(id delegate, id ad) {
             ((void (*)(id, SEL, id))original)(delegate, display, ad);
-            AVN_DEVICE_LOG(@"max-display-callback", @{@"class": AVNDeviceClassName(ad),
-                @"delegate": AVNDeviceClassName(delegate), @"mainThread": @(NSThread.isMainThread)});
             if ([NSThread isMainThread]) observeMAXDisplay(ad);
         });
         replace(cls, display, wrapper, method_getTypeEncoding(method));
     }
     SEL reward = NSSelectorFromString(@"didRewardUserForAd:withReward:");
     method = class_getInstanceMethod(cls, reward);
-    AVN_DEVICE_LOG(@"hook-signature", @{@"class": NSStringFromClass(cls),
-        @"selector": NSStringFromSelector(reward), @"valid": @(voidObjects(method, 2)),
-        @"encoding": method ? @(method_getTypeEncoding(method)) : @"missing"});
     if (voidObjects(method, 2)) {
         IMP original = method_getImplementation(method);
         IMP wrapper = imp_implementationWithBlock(^(id delegate, id ad, id value) {
             ((void (*)(id, SEL, id, id))original)(delegate, reward, ad, value);
-            AVN_DEVICE_LOG(@"max-reward-callback", @{@"class": AVNDeviceClassName(ad),
-                @"delegate": AVNDeviceClassName(delegate), @"mainThread": @(NSThread.isMainThread)});
             if ([NSThread isMainThread]) observeMAXReward(ad);
         });
         replace(cls, reward, wrapper, method_getTypeEncoding(method));
@@ -807,21 +704,12 @@ void ASPAdCompletionInstallHooks(void) {
         Class cls = NSClassFromString(name);
         SEL selector = NSSelectorFromString(@"presentFromRootViewController:userDidEarnRewardHandler:");
         Method method = cls ? class_getInstanceMethod(cls, selector) : NULL;
-        AVN_DEVICE_LOG(@"hook-signature", @{@"class": name,
-            @"selector": NSStringFromSelector(selector), @"valid": @(voidObjects(method, 2)),
-            @"encoding": method ? @(method_getTypeEncoding(method)) : @"missing"});
         if (!voidObjects(method, 2)) continue;
         char type[32] = {};
         method_getArgumentType(method, 3, type, sizeof(type));
-        if (strcmp(type, "@?") != 0) {
-            AVN_DEVICE_LOG(@"hook-rejected", @{@"class": name,
-                @"selector": NSStringFromSelector(selector), @"reason": @"reward-handler-not-block"});
-            continue;
-        }
+        if (strcmp(type, "@?") != 0) continue;
         IMP original = method_getImplementation(method);
         IMP wrapper = imp_implementationWithBlock(^(id ad, UIViewController *presenter, void (^handler)(void)) {
-            AVN_DEVICE_LOG(@"google-present", @{@"class": AVNDeviceClassName(ad),
-                @"mainThread": @(NSThread.isMainThread), @"handlerPresent": @(handler != nil)});
             ASPRewardSession *session = [NSThread isMainThread] ? googleSession(ad, presenter, YES) : nil;
             void (^forwarded)(void) = handler;
             if (handler) {
@@ -839,9 +727,6 @@ void ASPAdCompletionInstallHooks(void) {
         Class cls = NSClassFromString(name);
         SEL selector = NSSelectorFromString(@"presentFromRootViewController:");
         Method method = cls ? class_getInstanceMethod(cls, selector) : NULL;
-        AVN_DEVICE_LOG(@"hook-signature", @{@"class": name,
-            @"selector": NSStringFromSelector(selector), @"valid": @(voidObjects(method, 1)),
-            @"encoding": method ? @(method_getTypeEncoding(method)) : @"missing"});
         if (!voidObjects(method, 1)) continue;
         IMP original = method_getImplementation(method);
         IMP wrapper = imp_implementationWithBlock(^(id ad, UIViewController *presenter) {
@@ -853,14 +738,9 @@ void ASPAdCompletionInstallHooks(void) {
     Class cls = NSClassFromString(@"MARewardedAd");
     SEL selector = NSSelectorFromString(@"setDelegate:");
     Method method = cls ? class_getInstanceMethod(cls, selector) : NULL;
-    AVN_DEVICE_LOG(@"hook-signature", @{@"class": @"MARewardedAd",
-        @"selector": NSStringFromSelector(selector), @"valid": @(voidObjects(method, 1)),
-        @"encoding": method ? @(method_getTypeEncoding(method)) : @"missing"});
     if (voidObjects(method, 1)) {
         IMP original = method_getImplementation(method);
         IMP wrapper = imp_implementationWithBlock(^(id ad, id delegate) {
-            AVN_DEVICE_LOG(@"max-delegate", @{@"class": AVNDeviceClassName(ad),
-                @"delegate": AVNDeviceClassName(delegate), @"mainThread": @(NSThread.isMainThread)});
             if (delegate && [NSThread isMainThread]) hookMAXDelegate(object_getClass(delegate));
             ((void (*)(id, SEL, id))original)(ad, selector, delegate);
         });
@@ -897,8 +777,6 @@ void ASPAdCompletionTrackController(UIViewController *controller) {
         if (google && session.google && !session.owner && belongsToPresenter(controller, session.presenter)) {
             session.owner = controller;
             session.ownerBound = YES;
-            AVN_DEVICE_LOG(@"google-owner-bound", @{@"class": AVNDeviceClassName(session.ad),
-                @"owner": AVNDeviceClassName(controller)});
         }
         if (session.owner == controller) {
             captureVideoItems(session);

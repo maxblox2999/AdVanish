@@ -1,8 +1,8 @@
 # Build
 
-Fork the repository, enable Actions, then run Build on main. Checks run once before packaging: rootless, jailed, rootful, then RootHide. Each package is uploaded as it finishes.
+Fork the repository, enable Actions and run Build on main. Checks run first, then rootless, jailed, rootful and RootHide packages.
 
-Publishing requires all checks and packages to pass. An existing release is kept; bump the package version to publish another. Select the macOS runner under Run workflow. An idle push build can retry once on Intel before any macOS job has finished.
+Publishing requires every check and package to pass. Bump project/control to publish a new version; existing downloads stay unchanged. Run workflow lets you choose the macOS runner. Idle push builds can retry once on Intel before any macOS job finishes.
 
 ## macOS
 
@@ -37,8 +37,8 @@ python3 inject-ipa.py Game.ipa --framework AdVanish.framework --output Game-AdVa
 python3 sign-ipa.py Game-AdVanish-unsigned.ipa --output Game-AdVanish-signed.ipa --identity "Apple Development: Your Name (TEAMID)" --profile Game.mobileprovision
 ```
 
-The injector preserves the input IPA. It requires an authorized decrypted, thin arm64 executable with header padding. Encrypted, fat, arm64e and unsafe archives are rejected. The macOS signer handles one app with a matching profile; extensions need a separate signing tool.
+The injector keeps the input IPA unchanged. It needs an authorized decrypted, thin arm64 executable with header padding. Encrypted, fat, arm64e and unsafe archives are rejected. The macOS signer supports one app and its frameworks with a matching profile; sign extensions separately.
 
-Optional --config AdVanish.plist accepts booleans: Enabled, AutomaticAds, ManualSkip, SpeedUpVideo, CompressTimers, AccelerateClock, ForceInline, AutoInteract, AutoDismiss, BlockRedirects, HideAppStore and BlockBanners. The app's AdVanish NSUserDefaults dictionary overrides them. AutomaticAds=false enables button-only acceleration and disables automatic input and closing.
+--config AdVanish.plist accepts booleans: Enabled, AutomaticAds, ManualSkip, SpeedUpVideo, CompressTimers, AccelerateClock, ForceInline, AutoInteract, AutoDismiss, BlockRedirects, HideAppStore and BlockBanners. The app's AdVanish NSUserDefaults dictionary overrides the file. AutomaticAds=false enables button-only acceleration.
 
 Hooks use Logos. Jailbreak builds use the MobileSubstrate generator; injected frameworks use the internal generator and do not require Substrate.

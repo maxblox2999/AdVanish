@@ -11,6 +11,9 @@ advanish_INSTALL_PATH = /Library/MobileSubstrate/DynamicLibraries
 advanish_FILES = Hooks.xm Runtime.mm ASPTimers.mm ASPUniversalSkip.mm ASPManualSkip.mm ASPAdSurface.mm ASPAdCompletion.mm
 advanish_LOGOS_DEFAULT_GENERATOR = MobileSubstrate
 advanish_CFLAGS = -fobjc-arc -fblocks
+ifeq ($(AVN_DEVICE_DIAGNOSTICS),1)
+advanish_CFLAGS += -DAVN_DEVICE_DIAGNOSTICS=1
+endif
 advanish_CCFLAGS = -std=c++11 -fno-rtti -fno-exceptions
 advanish_FRAMEWORKS = Foundation UIKit QuartzCore CoreGraphics AVFoundation CoreMedia WebKit StoreKit
 ifeq ($(THEOS_PACKAGE_SCHEME),rootless)
@@ -19,9 +22,6 @@ endif
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
 advanish_CFLAGS += -DADSPEED_ROOTHIDE=1
 advanish_LDFLAGS += -lroothide
-endif
-ifeq ($(AVN_DEVICE_DIAGNOSTICS),1)
-advanish_CFLAGS += -DAVN_DEVICE_DIAGNOSTICS=1
 endif
 SUBPROJECTS = settings
 include $(THEOS_MAKE_PATH)/tweak.mk
