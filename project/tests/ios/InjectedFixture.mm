@@ -575,7 +575,7 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
         "const schedule=typeof fixtureNativeTimeout==='function'?fixtureNativeTimeout:setTimeout.bind(window);"
         "const started=now();"
         "function poll() {"
-        "try { if (window.fixture&&fixture.complete) { resolve({complete:fixture.complete,movements:fixture.movements,"
+        "try { if (window.fixture&&fixture.complete&&window.__adspeed&&__adspeed.stats.polls>0) { resolve({complete:fixture.complete,movements:fixture.movements,"
         "rewardCalls:fixture.rewardCalls,redirectCalls:fixture.redirectCalls,closes:fixture.closes,"
         "elapsed:fixture.finishedAt-fixture.startedAt,stats:window.__adspeed?{...window.__adspeed.stats}:null,diagnostics:snapshot()}); return; }"
         "if (now()-started>15000) {resolve({runtimeError:'WebKit playable timed out',diagnostics:snapshot()});return;}"
