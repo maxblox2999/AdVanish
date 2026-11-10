@@ -754,8 +754,8 @@ void ASPAdCompletionTrackController(UIViewController *controller) {
     Class unity = NSClassFromString(@"_TtC8UnityAds30WebViewContainerViewController");
     Class mintegral = NSClassFromString(@"MTGVideoBaseViewController");
     NSString *adapter = nil;
-    if (unity && object_getClass(controller) == unity) adapter = @"unity";
-    if (mintegral && object_getClass(controller) == mintegral) adapter = @"mintegral";
+    if (unity && [controller isKindOfClass:unity]) adapter = @"unity";
+    if (mintegral && [controller isKindOfClass:mintegral]) adapter = @"mintegral";
     if (gAutoDismiss && adapter && controller.viewIfLoaded.window) {
         BOOL tracked = NO;
         for (ASPRewardSession *session in sessions) {

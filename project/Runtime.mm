@@ -312,15 +312,21 @@ BOOL AVNBlockStorePresentation(UIViewController *presenter, UIViewController *co
     NSUInteger remaining = 16;
     SKStoreProductViewController *store = AVNStoreController(controller, &remaining);
     if (!store) return NO;
-    static char notifiedKey;
-    BOOL notify = ![objc_getAssociatedObject(store, &notifiedKey) boolValue];
-    objc_setAssociatedObject(store, &notifiedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    static char cancellationPendingKey;
+    BOOL notify = ![objc_getAssociatedObject(store, &cancellationPendingKey) boolValue];
+    if (notify) objc_setAssociatedObject(store, &cancellationPendingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     id<SKStoreProductViewControllerDelegate> delegate = store.delegate;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (completion) completion();
         // Cancel only the product sheet; ad completion and reward callbacks are untouched.
-        if (notify && [delegate respondsToSelector:@selector(productViewControllerDidFinish:)]) {
-            [delegate productViewControllerDidFinish:store];
+        if (notify) {
+            @try {
+                if ([delegate respondsToSelector:@selector(productViewControllerDidFinish:)]) {
+                    [delegate productViewControllerDidFinish:store];
+                }
+            } @finally {
+                objc_setAssociatedObject(store, &cancellationPendingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
         }
     });
     return YES;

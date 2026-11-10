@@ -566,7 +566,7 @@ static BOOL testMintegralNativeClose(FixtureUnityController *owner) {
     return YES;
 }
 
-static void testSdkWebClose(UIViewController *presenter, NSString *adapter, void (^next)(void)) {
+static void testSdkWebClose(UIViewController *presenter, NSString *adapter, BOOL subclass, void (^next)(void)) {
     BOOL unity = [adapter isEqualToString:@"unity"];
     NSString *label = unity ? @"Unity" : @"Mintegral";
     const char *name = unity ? "_TtC8UnityAds30WebViewContainerViewController" : "MTGVideoBaseViewController";
@@ -574,6 +574,16 @@ static void testSdkWebClose(UIViewController *presenter, NSString *adapter, void
     if (!cls) {
         cls = objc_allocateClassPair(FixtureUnityController.class, name, 0);
         objc_registerClassPair(cls);
+    }
+    if (subclass) {
+        NSString *subclassName = [NSString stringWithFormat:@"Fixture%@DerivedController", label];
+        Class derived = NSClassFromString(subclassName);
+        if (!derived) {
+            derived = objc_allocateClassPair(cls, subclassName.UTF8String, 0);
+            objc_registerClassPair(derived);
+        }
+        cls = derived;
+        label = [label stringByAppendingString:@" subclass"];
     }
     FixtureUnityController *owner = [cls new];
     [presenter addChildViewController:owner];
@@ -771,9 +781,13 @@ static void testGoogleRewarded(UIViewController *presenter) {
     [withoutHandler.controller removeFromParentViewController];
     if (!testRegisteredTapClose(presenter)) return;
     if (!testAppLovinPlayableOwner(presenter)) return;
-    testSdkWebClose(presenter, @"unity", ^{
-        testSdkWebClose(presenter, @"mintegral", ^{
-            testGoogleSimidClose(presenter, ^{ result(nil); });
+    testSdkWebClose(presenter, @"unity", NO, ^{
+        testSdkWebClose(presenter, @"mintegral", NO, ^{
+            testSdkWebClose(presenter, @"unity", YES, ^{
+                testSdkWebClose(presenter, @"mintegral", YES, ^{
+                    testGoogleSimidClose(presenter, ^{ result(nil); });
+                });
+            });
         });
     });
 }
