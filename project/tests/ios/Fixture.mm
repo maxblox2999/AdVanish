@@ -566,6 +566,44 @@ static BOOL testMintegralNativeClose(FixtureUnityController *owner) {
     return YES;
 }
 
+
+static void waitForNativeCloseRetry(FixtureUnityController *owner, NSUInteger attempt, void (^next)(void)) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC * 4 / 5), dispatch_get_main_queue(), ^{
+        ASPAdCompletionTrackController(owner);
+        NSUInteger expected = MIN(attempt, (NSUInteger)5);
+        if (!check(owner.nativeCloses == expected,
+                   [NSString stringWithFormat:@"Native Close retry %lu is bounded and spaced", (unsigned long)attempt])) return;
+        ASPAdCompletionTrackController(owner);
+        if (!check(owner.nativeCloses == expected, @"Immediate duplicate native Close polls remain inert")) return;
+        if (attempt < 6) {
+            waitForNativeCloseRetry(owner, attempt + 1, next);
+        } else {
+            [owner willMoveToParentViewController:nil];
+            [owner.view removeFromSuperview];
+            [owner removeFromParentViewController];
+            ASPAdCompletionTrackController(nil);
+            next();
+        }
+    });
+}
+
+static void testNativeCloseRetries(UIViewController *presenter, void (^next)(void)) {
+    FixtureUnityController *owner = [NSClassFromString(@"MTGVideoBaseViewController") new];
+    [presenter addChildViewController:owner];
+    owner.view.frame = presenter.view.bounds;
+    [presenter.view addSubview:owner.view];
+    [owner didMoveToParentViewController:presenter];
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+    button.frame = CGRectMake(owner.view.bounds.size.width - 56, 50, 36, 36);
+    [button addTarget:owner action:@selector(closeButtonTappedAction:) forControlEvents:UIControlEventTouchUpInside];
+    [owner.view addSubview:button];
+    ASPManualSkipTrackController(owner);
+    ASPAdCompletionConfigure(YES);
+    ASPAdCompletionTrackController(owner);
+    if (!check(owner.nativeCloses == 1, @"An eligible ignored native X receives its initial attempt")) return;
+    waitForNativeCloseRetry(owner, 2, next);
+}
+
 static void testSdkWebClose(UIViewController *presenter, NSString *adapter, BOOL subclass, void (^next)(void)) {
     BOOL unity = [adapter isEqualToString:@"unity"];
     NSString *label = unity ? @"Unity" : @"Mintegral";
@@ -785,7 +823,7 @@ static void testGoogleRewarded(UIViewController *presenter) {
         testSdkWebClose(presenter, @"mintegral", NO, ^{
             testSdkWebClose(presenter, @"unity", YES, ^{
                 testSdkWebClose(presenter, @"mintegral", YES, ^{
-                    testGoogleSimidClose(presenter, ^{ result(nil); });
+                    testGoogleSimidClose(presenter, ^{ testNativeCloseRetries(presenter, ^{ result(nil); }); });
                 });
             });
         });
