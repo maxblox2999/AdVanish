@@ -43,7 +43,7 @@ static void AVNInspectCloseControls(UIViewController *owner) {
             if (actions.count == 8) break;
         }
         [controls addObject:@{@"class": NSStringFromClass(object_getClass(control)) ?: @"",
-            @"label": [control.accessibilityLabel ?: @"" substringToIndex:MIN(control.accessibilityLabel.length, 80)],
+            @"label": [(control.accessibilityLabel ?: @"") substringToIndex:MIN(control.accessibilityLabel.length, 80)],
             @"frame": NSStringFromCGRect(frame), @"hidden": @(control.hidden),
             @"enabled": @(control.enabled), @"interactive": @(control.userInteractionEnabled), @"actions": actions}];
         if (controls.count == 32) break;
@@ -51,7 +51,7 @@ static void AVNInspectCloseControls(UIViewController *owner) {
     NSString *className = NSStringFromClass(object_getClass(owner)) ?: @"";
     AVNCloseRecord(@{@"time": @(now), @"owner": className, @"controls": controls, @"webViews": @(pages.count)});
     for (WKWebView *page in pages) {
-        [page evaluateJavaScript:@"JSON.stringify(Array.from(document.querySelectorAll('button,[role=button],[aria-label],div[id]')).slice(0,512).filter(n=>{let r=n.getBoundingClientRect();return r.width>0&&r.height>0&&r.top<innerHeight*.25}).slice(0,32).map(n=>({tag:n.tagName,id:n.id,classes:String(n.className).slice(0,160),label:String(n.getAttribute('aria-label')||n.textContent||'').trim().slice(0,80),disabled:!!n.disabled,frame:[n.getBoundingClientRect().x,n.getBoundingClientRect().y,n.getBoundingClientRect().width,n.getBoundingClientRect().height]}))))"
+        [page evaluateJavaScript:@"JSON.stringify(Array.from(document.querySelectorAll('button,[role=button],[aria-label],div[id]')).slice(0,512).filter(n=>{let r=n.getBoundingClientRect();return r.width>0&&r.height>0&&r.top<innerHeight*.25}).slice(0,32).map(n=>({tag:n.tagName,id:n.id,classes:String(n.className).slice(0,160),label:String(n.getAttribute('aria-label')||n.textContent||'').trim().slice(0,80),disabled:!!n.disabled,frame:[n.getBoundingClientRect().x,n.getBoundingClientRect().y,n.getBoundingClientRect().width,n.getBoundingClientRect().height]})))"
             completionHandler:^(id result, NSError *error) {
                 AVNCloseRecord(@{@"owner": className, @"web": [result isKindOfClass:NSString.class] ? result : @"",
                     @"error": error ? @(error.code) : @0});
