@@ -17,6 +17,7 @@
 #include "AdSpeedWebScript.h"
 #import "ASPTimers.h"
 #import "AVNRuntime.h"
+#import "AVNCloseDiagnostics.h"
 
 @interface AVNOptions : NSObject
 @property (nonatomic) BOOL enabled;
@@ -177,6 +178,7 @@
 - (void)observe:(UIViewController *)controller {
     if (!self.options.enabled) return;
     if ([controller.viewIfLoaded.window isKindOfClass:NSClassFromString(@"ASPSkipWindow")]) return;
+    AVNInspectCloseControls(controller);
     ASPManualSkipTrackController(controller);
     ASPAdCompletionTrackController(controller);
     [self refresh];
@@ -191,6 +193,7 @@
     for (WKWebView *page in self.pages.allObjects) [self authorize:page];
     if (active) {
         for (ASPAdSurface *surface in surfaces) {
+            AVNInspectCloseControls(surface.owner);
             ASPAdCompletionTrackController(surface.owner);
         }
     }
