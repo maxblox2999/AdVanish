@@ -36,15 +36,13 @@ Rewards and server validation stay with the app.
   
 > [!IMPORTANT]
 > **AdVanish is still a new project**, so expect bugs, compatibility issues, and features that don't always work as intended. Some ads may not speed up, skip, or close properly. If you run into any problems, please open an issue and explain what happened.
-
-> [!IMPORTANT]
-> **Known Issue:** Using this tweak for a long time can cause performance issues and slower ad completions. If you encounter any issues, simply reopen the app and report them by opening an issue.
->
-> Ad skipping is still unfinished and has a lot of issues. However, ad speeding should work with nearly every ad. If speeding doesn't work in an app, please open an issue and mention which app you were using. Max will manually review the app to investigate the problem.
+> > Ad skipping is still unfinished and has a lot of issues. However, ad speeding should work with nearly every ad. If speeding doesn't work in an app, please open an issue and mention which app you were using. Max will manually review the app to investigate the problem.
 >
 > The ad detection rate is very high. If an ad doesn't get skipped, it's most likely being detected but isn't supported yet. If you know how to improve support or compatibility, feel free to open an issue explaining how.
 >
-> **Note:** Auto-completion is still a work in progress and currently has limited coverage.
+> **Note:** Auto-completion is still a work in progress and currently has limited coverage over ad providers.
+> I am also aware that certain types of ads this still does not work with speeding the ad, likely due to the counter and ad being on a seperate thing i might make the entire app speed instead of only a ad when it detects a ad. 
+
 
 > [!NOTE]
 > **AdVanish is NOT an ad blocker.** It speeds up ads and automatically closes them when possible.
@@ -52,7 +50,7 @@ Rewards and server validation stay with the app.
 >
 > YouTube, Spotify, Roblox etc etc.. are NOT supported and never will be.
 > AdVanish is only meant for IPAs and apps you have permission to test.
-> It will not support bypassing ads, subscriptions, or restrictions in those apps.
+> It will not support bypassing ads in any non-allowed apps.
 
 
 See [Ad Types](project/docs/AD_TYPES.md) and [Tests](project/docs/VALIDATION.md).
