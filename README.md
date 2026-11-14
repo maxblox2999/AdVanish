@@ -31,7 +31,7 @@ Rewards and server validation stay with the app.
 ## Support
 
 - **Compatibility:** Rootless, rootful, RootHide, and jailed injection.
-- **iOS Versions:** iOS 15–18. *(iOS 26 is experimental)*
+- **iOS Versions:** iOS 15-18. *(iOS 26 is experimental)*
 - **Ad Types:** Supports reward-based ads, including server-sided ones. Designed to be universal, but it may not detect every ad type.
   
 > [!IMPORTANT]
@@ -63,5 +63,5 @@ Source code, tests, and build tools are located in [`project/`](project/).
 
 > [!CAUTION]
 > The owner is NOT responsible for how AdVanish is used and it is only meant to be used in apps you are authorized to use it in to fix their security.
-
+> This project contains the use for ai for testing the tweak and applying bug fixes. 
 [maxblox2999](https://github.com/maxblox2999)  [Changes](project/docs/CHANGES.md)  [License](LICENSE)
