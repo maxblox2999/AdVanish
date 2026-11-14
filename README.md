@@ -13,14 +13,14 @@ Built for modern iOS versions, with support for different jailbreak types, plus 
 [![Test release](https://img.shields.io/github/v/release/maxblox2999/AdVanish?include_prereleases&style=flat-square&color=8957e5)](https://github.com/maxblox2999/AdVanish/releases)
 ![iOS target](https://img.shields.io/badge/iOS-15--18_target-333333?style=flat-square&logo=apple)
 
-**[Download](https://github.com/maxblox2999/AdVanish/releases) · [Build your own](project/BUILD.md)**
+**[Download](https://github.com/maxblox2999/AdVanish/releases) . [Build your own](project/BUILD.md)**
 
 </div>
 
 ## Use
 
-**Jailbreak:** Install the matching rootless, rootful, or RootHide package. Apps are enabled by default. Open **Settings → Scroll all the way down → AdVanish** to disable one.
-If you are on iOS/iPadOS 18 or higher, **Settings → General → Scroll all the way down → AdVanish**.
+**Jailbreak:** Install the matching rootless, rootful, or RootHide package. Apps are enabled by default. Open **Settings Scroll all the way down AdVanish** to disable one.
+If you are on iOS/iPadOS 18 or higher, **Settings General Scroll all the way down AdVanish**.
 
 **Jailed:** Inject the framework into an authorized decrypted IPA, then re-sign it. See [Instructions](project/BUILD.md#ipa-injection).
 
@@ -47,7 +47,8 @@ Rewards and server validation stay with the app.
 > **Note:** Auto-completion is still a work in progress and currently has limited coverage.
 
 > [!NOTE]
-> **AdVanish is NOT an ad blocker.** It speeds up ads and automatically closes them when possible. It only works with iOS/iPadOS apps, not browsers like Safari.
+> **AdVanish is NOT an ad blocker.** It speeds up ads and automatically closes them when possible.
+>  It only works with iOS/iPadOS apps, not browsers like Safari.
 >
 > YouTube, Spotify, Roblox etc etc.. are NOT supported and never will be.
 > AdVanish is only meant for IPAs and apps you have permission to test.
