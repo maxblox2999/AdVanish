@@ -2557,3 +2557,40 @@ for (const adapter of ['unity', 'google', 'mintegral']) {
         assert.equal(close.events.length, 0);
     });
 }
+
+test('an ignored web Close retries five times with real-time spacing', () => {
+    const env = closingEnvironment({autoDismiss: true});
+    const close = control(env, 'Close');
+    const api = env.sandbox.__adspeed;
+    for (let attempt = 0; attempt < 5; attempt++) {
+        assert.equal(api.closeCompletedAd(api.inspectClose()), true);
+        assert.equal(api.inspectClose(), null);
+        env.advance(749);
+        assert.equal(api.inspectClose(), null);
+        env.advance(1);
+    }
+    assert.equal(close.events.filter(event => event.type === 'click').length, 5);
+    assert.equal(api.inspectClose(), null);
+});
+
+test('pending Close retries stop for hidden, disabled or replaced ad context', () => {
+    for (const change of ['hidden', 'disabled', 'context', 'manual']) {
+        const env = closingEnvironment({autoDismiss: true, automatic: change !== 'manual'});
+        const close = control(env, 'Close');
+        const api = env.sandbox.__adspeed;
+        if (change === 'manual') {
+            env.advance(10000);
+            assert.equal(api.inspectClose(), null);
+            assert.equal(close.events.length, 0);
+            continue;
+        }
+        assert.equal(api.closeCompletedAd(api.inspectClose()), true);
+        env.advance(750);
+        const token = api.inspectClose();
+        assert.equal(typeof token, 'string');
+        if (change === 'context') api.setAdContext(false);
+        else close[change] = true;
+        assert.equal(api.closeCompletedAd(token), false);
+        assert.equal(close.events.length, 1);
+    }
+});

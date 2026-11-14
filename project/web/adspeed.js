@@ -1237,7 +1237,9 @@
         for (var index = 0; index < Math.min(nodes.length, 128); index += 1) {
             var node = nodes[index];
             var completed = completedCloseNodes.get(node);
-            if ((completed && completed.has(closeRole(node, adapter))) || !closeControl(node, adapter)) continue;
+            var previous = completed && completed.get(closeRole(node, adapter));
+            if ((previous && (previous.attempts >= 5 || realNow() - previous.time < 750)) ||
+                !closeControl(node, adapter)) continue;
             if (selected) return null;
             selected = node;
         }
@@ -1257,10 +1259,12 @@
             snapshot.role !== closeRole(snapshot.node, snapshot.adapter)) return false;
         var completed = completedCloseNodes.get(snapshot.node);
         if (!completed) {
-            completed = new Set();
+            completed = new Map();
             completedCloseNodes.set(snapshot.node, completed);
         }
-        completed.add(snapshot.role);
+        var previous = completed.get(snapshot.role);
+        if (previous && (previous.attempts >= 5 || realNow() - previous.time < 750)) return false;
+        completed.set(snapshot.role, {attempts: previous ? previous.attempts + 1 : 1, time: realNow()});
         closeRequests += 1;
         try {
             if (typeof snapshot.node.click === 'function') snapshot.node.click();

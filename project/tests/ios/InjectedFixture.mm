@@ -402,16 +402,31 @@ static ALMediatedAd *rewardDescriptor(ALAd *creative) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!check(owner.presentedViewController != store && presentationCompletions == 2 && delegate.cancellations == 1,
                    @"The production presentation hook suppresses a Store sheet and cancels its delegate once")) return;
-        if (!check(owner.closes == expected && owner.rewardEvents == 2,
-                   @"Suppressing a Store sheet never synthesizes ad closing or rewards")) return;
-        [options setValue:@(redirects) forKey:@"redirects"];
-        self.window.hidden = YES;
-        ASPManualSkipRefresh();
-        if (!check(visibleSkipWindows() == 0 && !AVNBlocksURL([NSURL URLWithString:@"https://apps.apple.com/app/id1"]),
-                   @"Hidden app content releases floating controls and Store suppression")) return;
-        self.window.hidden = NO;
-        [self runEndCardCheck:owner];
+        [self runStoreRetries:store owner:owner remaining:5 next:^{
+            if (!check(delegate.cancellations == 6,
+                       @"Five later Store attempts each cancel once on the reused controller")) return;
+            if (!check(owner.closes == expected && owner.rewardEvents == 2,
+                       @"Suppressing a Store sheet never synthesizes ad closing or rewards")) return;
+            [options setValue:@(redirects) forKey:@"redirects"];
+            self.window.hidden = YES;
+            ASPManualSkipRefresh();
+            if (!check(visibleSkipWindows() == 0 && !AVNBlocksURL([NSURL URLWithString:@"https://apps.apple.com/app/id1"]),
+                       @"Hidden app content releases floating controls and Store suppression")) return;
+            self.window.hidden = NO;
+            [self runEndCardCheck:owner];
+        }];
     });
+}
+- (void)runStoreRetries:(SKStoreProductViewController *)store owner:(UIViewController *)owner
+             remaining:(NSUInteger)remaining next:(void (^)(void))next {
+    if (!remaining) { next(); return; }
+    [owner presentViewController:store animated:NO completion:^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!check(owner.presentedViewController != store,
+                       @"A repeated Store prompt stays suppressed")) return;
+            [self runStoreRetries:store owner:owner remaining:remaining - 1 next:next];
+        });
+    }];
 }
 - (void)runEndCardCheck:(ALBaseVideoViewController *)owner {
     [owner.closeButton removeFromSuperview];

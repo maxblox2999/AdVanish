@@ -24,7 +24,7 @@
 @property (nonatomic) BOOL invalidated;
 @property (nonatomic) BOOL closeRequested;
 @property (nonatomic) NSUInteger closeCount;
-@property (nonatomic, strong) NSMapTable<UIView *, NSMutableSet<NSString *> *> *closeActions;
+@property (nonatomic, strong) NSMapTable<UIView *, NSMutableDictionary<NSString *, NSDictionary *> *> *closeActions;
 @property (nonatomic) BOOL webClosePending;
 @property (nonatomic) NSUInteger webCloseGeneration;
 @property (nonatomic, weak) UIView *lastCloseView;
@@ -420,16 +420,20 @@ static void closeIfEligible(ASPRewardSession *session) {
         }
         if (!session.closeActions) session.closeActions = [NSMapTable weakToStrongObjectsMapTable];
         NSString *key = closeActionKey(close, surface);
-        NSMutableSet<NSString *> *actions = [session.closeActions objectForKey:close];
-        if ([actions containsObject:key] || (actions.count && !closeLabel(close))) {
+        NSMutableDictionary<NSString *, NSDictionary *> *actions = [session.closeActions objectForKey:close];
+        NSDictionary *previous = actions[key];
+        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        if ((previous && ([previous[@"attempts"] unsignedIntegerValue] >= 5 ||
+                          now - [previous[@"time"] doubleValue] < 0.75)) ||
+            (!previous && actions.count && !closeLabel(close))) {
             closeWebEndCard(session, surface);
             return;
         }
         if (!actions) {
-            actions = NSMutableSet.set;
+            actions = NSMutableDictionary.dictionary;
             [session.closeActions setObject:actions forKey:close];
         }
-        [actions addObject:key];
+        actions[key] = @{@"attempts": @([previous[@"attempts"] unsignedIntegerValue] + 1), @"time": @(now)};
         session.closeCount += 1;
         session.lastCloseView = close;
         session.closeRequested = YES;
@@ -754,8 +758,8 @@ void ASPAdCompletionTrackController(UIViewController *controller) {
     Class unity = NSClassFromString(@"_TtC8UnityAds30WebViewContainerViewController");
     Class mintegral = NSClassFromString(@"MTGVideoBaseViewController");
     NSString *adapter = nil;
-    if (unity && object_getClass(controller) == unity) adapter = @"unity";
-    if (mintegral && object_getClass(controller) == mintegral) adapter = @"mintegral";
+    if (unity && [controller isKindOfClass:unity]) adapter = @"unity";
+    if (mintegral && [controller isKindOfClass:mintegral]) adapter = @"mintegral";
     if (gAutoDismiss && adapter && controller.viewIfLoaded.window) {
         BOOL tracked = NO;
         for (ASPRewardSession *session in sessions) {

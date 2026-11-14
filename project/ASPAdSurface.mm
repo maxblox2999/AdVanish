@@ -24,7 +24,7 @@ static BOOL adController(UIViewController *controller) {
                             @"VungleInterstitialViewController", @"CBInterstitialViewController",
                             @"CBRewardedViewController", @"CHBInterstitialViewController",
                             @"AdColonyInterstitialViewController", @"TJAdUnitViewController",
-                            @"MTGInterstitialViewController", @"MTGRewardAdViewController",
+                            @"MTGVideoBaseViewController", @"MTGInterstitialViewController", @"MTGRewardAdViewController",
                             @"IMInterstitialViewController", @"AmazonAdInterstitialViewController",
                             @"SMAInterstitialViewController", @"MPInterstitialViewController",
                             @"MPRewardedVideoViewController",
