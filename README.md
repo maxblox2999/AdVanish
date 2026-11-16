@@ -63,3 +63,10 @@ Source code, tests, and build tools are located in [`project/`](project/).
 > The owner is NOT responsible for how AdVanish is used and it is only meant to be used in apps you are authorized to use it in to fix their security.
 > This project contains the use for ai for testing the tweak and applying bug fixes. 
 [maxblox2999](https://github.com/maxblox2999)  [Changes](project/docs/CHANGES.md)  [License](LICENSE)
+
+
+
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/chart?repos=advanish/advanish&type=timeline&legend=bottom-right)](https://www.star-history.com/?repos=advanish%2Fadvanish&type=timeline&legend=bottom-right)
