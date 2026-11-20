@@ -1,12 +1,11 @@
-# AdVanish 0.8.13
+# AdVanish 0.8.14
 
-- Add SDK-owned Unity and Mintegral Close handling and Google SIMID end-card controls.
-- Reject web Close controls covered by an ancestor element.
-- Prevent repeated actions on an unchanged Mintegral Close wrapper.
-- Recognize Moloco fullscreen ads for the existing App Store prompt filter.
-- Preserve 80x acceleration, manual mode and SDK reward requirements.
-- Shorten Settings and project copy.
+- Retry an ignored eligible Close control up to five times, with at least 750 ms between attempts.
+- Recheck the ad, reward requirements and control before each attempt.
+- Fix cancellation callbacks when an SDK reuses its App Store product sheet.
+- Recognize Unity and Mintegral controller subclasses for completion handling.
+- Keep 80x acceleration and manual mode.
 
-Get rootless.deb for a rootless jailbreak, rootful.deb for rootful, or roothide.deb for RootHide. DEBs include arm64 and arm64e. Jailed.zip is an arm64 framework for IPA injection and re-signing; it is not a standalone app. Source archives include build scripts.
+Downloads: rootless.deb for rootless jailbreaks, rootful.deb for rootful, roothide.deb for RootHide, or jailed.zip for IPA injection and re-signing. DEBs contain arm64 and arm64e; the jailed framework is arm64.
 
-Test build. Unity auto-close and rewards passed in two Subway Surfers placements on a rootless iPhone. New Google and Mintegral completion paths still need live verification. Moloco auto-close remains unsupported. iOS 15–18 targets; iOS 26 is experimental with a low chance of working. Other devices and jailbreak variants have not been physically tested.
+Prerelease. Simulator and package checks do not establish coverage of every real ad. Automatic Open Store transitions and whole-app acceleration are not implemented. iOS 15–18 targets; iOS 26 is experimental with a low chance of working.
