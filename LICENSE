@@ -1,17 +1,83 @@
+AdVanish Personal Use and Contributions License 1.0
+
 Copyright (C) 2026 maxblox2999. All rights reserved.
+Licensor and maintainer: maxblox2999
 
-These terms apply only to original code owned by maxblox2999.
-Third-party licenses, required notices and earlier license grants remain applicable and take precedence for the material they cover.
+1. Scope and existing rights
 
-You may use AdVanish personally and privately give an unmodified copy to a friend, with its license and notices included. You may rebuild unmodified source for personal use.
+These terms apply only to copyright-protected material owned by maxblox2999
+and offered under this version of this license ("Covered Material").
+Third-party licenses, required notices, earlier license grants, rights
+provided by applicable law, and rights independently granted under the
+hosting platform's terms remain applicable and take precedence for the
+material or activities they cover. This license does not establish
+ownership of third-party work or revoke any earlier license grant.
 
-Without written permission from maxblox2999, you may not:
-- Publish, upload, sell or otherwise redistribute AdVanish, except the private sharing allowed above.
-- Copy, extract, modify or reuse its original source code or parts of it in another project.
-- Claim ownership or authorship of someone else's work.
-- Impersonate maxblox2999, publish under their name, or describe an unofficial copy as official.
-- Remove or falsify copyright, license or attribution notices.
+2. Personal use and private sharing
 
-Rights not expressly granted are reserved. These terms do not revoke rights already granted under other applicable licenses.
+You may view, download, run and rebuild unmodified Covered Material for
+personal, noncommercial use. You may privately give an unmodified copy to
+a friend without payment, provided you include this license and all
+required notices. The recipient receives these same permissions and
+restrictions. Public hosting, mirrors, package repositories, public
+download uploads, sales and paid access are not permitted by this grant.
 
-AdVanish is provided "as is", without warranty. To the extent permitted by law, its copyright holders and contributors are not liable for losses or damages arising from its use.
+3. Contribution exception
+
+You may fork the official repository, modify your working copy, build and
+test your changes, and publish the contribution branch and its source diff
+solely to propose changes to the official project through a pull request.
+Keep the license and notices, identify the fork as unofficial, and do not
+publish modified binaries or promote the fork as a separate product
+without the licensor's written permission. This exception does not limit
+independent viewing or forking rights granted by GitHub's terms.
+
+The maintainer alone decides whether to review, accept or merge a
+contribution. A submission does not make its author an owner or
+maintainer of the project.
+
+By intentionally submitting an original contribution for inclusion, you
+confirm that you have authority to grant, and grant maxblox2999 a
+nonexclusive, worldwide, perpetual, irrevocable, royalty-free license to
+use, reproduce, modify, distribute, sublicense and relicense that
+contribution, including under different or proprietary terms. You retain
+copyright in your contribution; this is not a copyright assignment.
+Identify any third-party material and its license when submitting it.
+No submission can grant rights you do not hold.
+
+4. Restrictions
+
+Except for the express permissions above or separate written permission
+from the licensor, you may not:
+- Modify Covered Material or distribute modified copies.
+- Copy, extract or reuse copyright-protected portions, including code
+  snippets, in another project.
+- Rehost, mirror, upload, sell, sublicense or otherwise redistribute it.
+- Remove, conceal or falsify copyright, license or attribution notices.
+- Claim another person's work as your own, impersonate maxblox2999, or
+  present an unofficial fork, copy or build as an official release.
+
+These restrictions do not claim ownership over unprotectable ideas,
+facts, interfaces or material you independently created.
+
+5. Termination
+
+Permissions granted under this license terminate if you breach its
+conditions. The licensor may also terminate these permissions for a
+recipient at any time by written notice to that recipient.
+
+Upon termination, stop using, modifying and distributing Covered
+Material under this license and delete copies held under these
+permissions, except copies required by law. Termination does not affect
+independent rights under applicable law, third-party licenses, earlier
+grants or platform terms, or the contribution license already granted
+to the maintainer in section 3.
+
+6. No warranty
+
+The material is provided "as is", without warranty of any kind. To the
+extent permitted by law, copyright holders and contributors are not
+liable for claims, losses or damages arising from its use.
+
+Rights not expressly granted are reserved. Contact maxblox2999 through
+the official repository for separate written permission.
